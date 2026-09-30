@@ -72,7 +72,7 @@ python3 $S/membrane-fabric/scripts/membrane_check.py --material PVC-II --nw 8.5 
 python3 $S/cable-tension-members/scripts/cable_schedule.py --from-model sail.json --product Ronstan-ACS2-GS-20.1 --deduct 250 --out sail_cables
 python3 $S/tensile-connections/scripts/corner_plate.py --m EC1:15:83:180:48 --m EC2:105:83:48:180 --m strap:60:6:100:173
 python3 $S/tensile-connections/scripts/pin_connection.py --F 150 --d 30 --d0 31 --t 20 --a-lug 45 --c-lug 35
-python3 $S/steel-supports/scripts/mast_check.py --D 168.3 --t 8 --L 6 --N 250 --M 5
+python3 $S/steel-supports/scripts/member_check.py --section CHS:168.3x8 --L 6 --N 250 --My 5
 python3 $S/fabrication-drawings/scripts/cutting_pattern.py sail.json --panels-along v --strip 3 --comp-warp 0.8 --comp-weft 1.6 --out sail_patterns
 python3 $S/fabrication-drawings/scripts/export_dxf.py sail.json --forces --out sail_GA
 ```

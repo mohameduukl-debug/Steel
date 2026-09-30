@@ -35,8 +35,11 @@ python3 "$S/tensile-connections/scripts/corner_plate.py" --m EC1:15:83:180:48 --
 python3 "$S/tensile-connections/scripts/pin_connection.py" --F 210 --Fser 150 --d 36 --d0 37 --t 25 \
         --a-lug 50 --c-lug 35 --fork-t 16 --pin-fy 640 --pin-fu 800 --replaceable --aisc
 
-echo; echo "== 6. Mast (6 m pinned CHS 168.3x8) =="
-python3 "$S/steel-supports/scripts/mast_check.py" --D 168.3 --t 8 --L 6 --N 260 --M 6
+echo; echo "== 6. Mast (6 m pinned CHS 168.3x8), lug weld, base plate =="
+python3 "$S/steel-supports/scripts/member_check.py" --section CHS:168.3x8 --L 6 --N 260 --My 6
+python3 "$S/tensile-connections/scripts/steel_joint_checks.py" weld --F 210 --angle 70 --L 180 --a 8 --e 110
+python3 "$S/tensile-connections/scripts/steel_joint_checks.py" baseplate --col CHS --D 168.3 --tc 8 --B 350 --H 350 \
+        --tp 25 --Nc 300 --Nt 60 --V 25 --anchors 4 --anchor-d 20 --edge 55
 
 echo; echo "== 7. Patterns, GA DXF and steel part drawings =="
 python3 "$S/fabrication-drawings/scripts/cutting_pattern.py" sail.json --panels-along v --strip 2 \

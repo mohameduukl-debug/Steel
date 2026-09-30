@@ -5,7 +5,20 @@ description: Structural steel supports of tensile fabric structures — masts (p
 
 # Steel supports for tensile structures
 
-## Tool: `scripts/mast_check.py` (CHS to EN 1993-1-1)
+## Tool: `scripts/member_check.py` (CHS, RHS/SHS, I/H to EN 1993-1-1)
+```bash
+python3 member_check.py --list                                                     # built-in IPE/HEA/HEB
+python3 member_check.py --section CHS:219.1x8 --L 7.5 --N 420 --My 12              # pinned mast
+python3 member_check.py --section SHS:150x8:cold --L 6 --N 300 --My 25 --Mz 10     # strut / boom
+python3 member_check.py --section IPE300 --L 6 --N 50 --My 80 --Vz 60 --psi-LT 0   # edge beam with LTB
+python3 member_check.py --section I:500:250:10:20:12:welded --L 8 --N 200 --My 300 # welded girder
+```
+- Section properties from the true outline (root and corner radii, EN 10210 hot / EN 10219 cold). They match the section tables within ~1–2 % (tested).
+- Class (Table 5.2, web α from N), shear, N + My + Mz section check, flexural buckling y/z (curves per Table 6.2),
+  **LTB** for I sections (M_cr with C1 from ψ, 6.3.2.2), interaction 6.61/6.62 (Annex B), tension members.
+- Class 4 is flagged and not designed (effective sections not implemented).
+
+## Tool: `scripts/mast_check.py` (quick CHS mast, same results as member_check for CHS)
 ```bash
 python3 mast_check.py --D 219.1 --t 8 --L 7.5 --N 420 --M 12            # pinned mast, hot-finished (curve a)
 python3 mast_check.py --D 168.3 --t 6.3 --L 5 --N 150 --M 20 --cold    # cold-formed (curve c)

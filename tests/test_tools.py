@@ -38,6 +38,8 @@ pin = load("tensile-connections", "pin_connection")
 corner = load("tensile-connections", "corner_plate")
 mast = load("steel-supports", "mast_check")
 mem = load("membrane-fabric", "membrane_check")
+memb = load("steel-supports", "member_check")
+joint = load("tensile-connections", "steel_joint_checks")
 cut = load("fabrication-drawings", "cutting_pattern")
 dxfw = load("fabrication-drawings", "dxf_writer")
 
@@ -168,6 +170,44 @@ class TestSteel(unittest.TestCase):
         self.assertAlmostEqual(r["I_mm4"], 2.96e7, delta=0.01e7)
         self.assertEqual(r["class"], 1)
         self.assertTrue(0.4 < r["chi"] < 0.5)
+
+
+class TestMemberCheck(unittest.TestCase):
+    # EN 10365 / EN 10210 / EN 10219 table values (A cm2, Iy cm4, Iz cm4, Wpl,y cm3, It cm4)
+    TABLE = {"IPE200": (28.5, 1943, 142.4, 220.6, 6.98), "HEB200": (78.1, 5696, 2003, 642.5, 59.3),
+             "IPE300": (53.8, 8356, 603.8, 628.4, 20.1), "RHS:200x100x8": (44.8, 2234, 739, 282, 1804),
+             "SHS:100x5": (18.7, 279, 279, 66.4, 441), "SHS:100x5:cold": (18.4, 271, 271, 64.9, 441)}
+
+    def test_section_properties_vs_tables(self):
+        for spec, (A, Iy, Iz, Wpl, It) in self.TABLE.items():
+            s = memb.Section(spec)
+            for got, ref in ((s.A / 100, A), (s.Iy / 1e4, Iy), (s.Iz / 1e4, Iz), (s.Wpl_y / 1e3, Wpl),
+                             (s.It / 1e4, It)):
+                self.assertAlmostEqual(got / ref, 1.0, delta=0.02, msg=f"{spec}: {got} vs {ref}")
+
+    def test_chs_matches_mast_check(self):
+        rows, res = memb.check(memb.Section("CHS:219.1x8"), 355, 7.5, 420, 12)
+        u = max(d / c for _, d, c, _ in rows)
+        r = mast.check(219.1, 8, 7.5, 420, 12, 355)
+        self.assertAlmostEqual(u, r["u_member_NM"], delta=0.01)
+
+    def test_ltb_mcr_ipe300(self):
+        rows, _ = memb.check(memb.Section("IPE300"), 355, 6.0, 0.0, 80, psi_LT=0.0)
+        ltb = [r for r in rows if r[0].startswith("LTB")][0]
+        self.assertIn("Mcr=169", ltb[0])
+
+
+class TestJoints(unittest.TestCase):
+    def test_weld_pure_tension(self):
+        rows, _ = joint.weld(250, 90, 200, 8, 0, 0, "S355")
+        self.assertAlmostEqual(rows[0][1], 2 * 625 / (8 * math.sqrt(2)), places=3)   # σ⊥=τ⊥ -> 2σ⊥
+        self.assertAlmostEqual(rows[0][2], 490 / (0.9 * 1.25), places=3)
+        self.assertAlmostEqual(rows[2][2], 8 * 490 / (math.sqrt(3) * 0.9 * 1.25), places=2)
+
+    def test_bolt_group_torsion(self):
+        rows, R = joint.bolts(joint.grid(2, 2, 80, 80), 0, 120, 4, 0, 1, 20, "8.8", 15, 490, 45, 40, 80, 80, True)
+        self.assertAlmostEqual(R["FvRd"], 94.08, places=2)
+        self.assertAlmostEqual(rows[0][1], math.hypot(12.5, 42.5), places=3)
 
 
 class TestMembrane(unittest.TestCase):

@@ -24,6 +24,20 @@ python3 corner_plate.py --v EC1:9.8:1.2:-2.1:48 --v EC2:1.0:10.1:-1.9:52 --v str
 It gives the required anchor force and direction, the edge-cable bisector, the moment/eccentricity from the hole layout
 (it must be ≈ 0), and in 3D the plate plane plus any out-of-plane component.
 
+### `scripts/steel_joint_checks.py`: welds, bolts, clamp bars, base plates (EN 1993-1-8)
+```bash
+python3 steel_joint_checks.py weld --F 250 --angle 60 --L 200 --a 8 --e 120 --grade S355     # lug-to-member fillets
+python3 steel_joint_checks.py bolts --n-rows 2 --n-cols 2 --p1 80 --p2 80 --Vy 120 --M 4 --d 20 --grade 8.8 \
+        --t 15 --e1 45 --e2 40                                                                  # eccentric bolt group
+python3 steel_joint_checks.py clampbar --n 12 --spacing 150 --d 12 --grade A4-70 --t 10       # membrane clamp line
+python3 steel_joint_checks.py baseplate --col CHS --D 219.1 --tc 8 --B 400 --H 400 --tp 25 \
+        --Nc 450 --Nt 120 --V 40 --anchors 4 --anchor-d 24 --edge 60 --layout corners          # mast base
+```
+- weld: double fillet with N⊥, V∥ and in-plane moment (lever arm e to the hole). Directional method 4.5.3.2 and simplified 4.5.3.3; β_w from the register.
+- bolts: elastic bolt-group method; shear (α_v by grade and thread), bearing (k1, α_b from e1, e2, p1, p2), tension with prying, punching, combined; carbon 4.6–10.9 and stainless A2/A4.
+- clampbar: bolt force = n × peak factor × spacing; warns above ~200 mm spacing. The aluminium plate goes to EN 1999 separately.
+- baseplate: compression with the equivalent T-stub (c = t√(f_y/3f_jd)), uplift with T-stub modes 1, 2, 1-2 (no prying) and 3 per anchor, shear by friction plus anchors (α_bc). Anchor embedment and concrete breakout (EN 1992-4) are not included.
+
 ## The connection families (details in `reference/`)
 
 | Interface | Standard solutions | Governing checks |
