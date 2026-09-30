@@ -1,0 +1,32 @@
+{
+  "_readme": "Representative cable/rod data for cable_schedule.py. Fmin = minimum (characteristic) breaking force of the rope in kN; ke = termination factor already included? see 'ke_included'. A = metallic area mm2, E = modulus kN/mm2 (on metallic area, prestretched). status: 'datasheet' = seen in manufacturer data via search extract; 'computed' = derived by us; 'estimate' = typical value. ALWAYS replace with the supplier's current datasheet / ETA for design.",
+  "products": {
+    "Ronstan-ACS2-GS-8.1":  {"type": "OSS 1x19 Galfan", "d": 8.1,  "Fmin": 59,   "ke_included": true, "E": 160, "A": 39,  "status": "datasheet (F); A estimate 0.6d2"},
+    "Ronstan-ACS2-GS-10.1": {"type": "OSS 1x19 Galfan", "d": 10.1, "Fmin": 93,   "ke_included": true, "E": 160, "A": 61,  "status": "datasheet (F); A estimate"},
+    "Ronstan-ACS2-GS-12.2": {"type": "OSS 1x19 Galfan", "d": 12.2, "Fmin": 134,  "ke_included": true, "E": 160, "A": 89,  "status": "datasheet (F); A estimate"},
+    "Ronstan-ACS2-GS-14.1": {"type": "OSS 1x37 Galfan", "d": 14.1, "Fmin": 181,  "ke_included": true, "E": 160, "A": 119, "status": "datasheet (F); A estimate"},
+    "Ronstan-ACS2-GS-17.0": {"type": "OSS 1x37 Galfan", "d": 17.0, "Fmin": 260,  "ke_included": true, "E": 160, "A": 173, "status": "datasheet (F); A estimate"},
+    "Ronstan-ACS2-GS-20.1": {"type": "OSS 1x37 Galfan", "d": 20.1, "Fmin": 367,  "ke_included": true, "E": 160, "A": 242, "status": "datasheet (F); A estimate"},
+    "Ronstan-ACS2-GS-24.4": {"type": "OSS 1x37 Galfan", "d": 24.4, "Fmin": 537,  "ke_included": true, "E": 160, "A": 357, "status": "datasheet (F); A estimate"},
+    "Ronstan-ACS2-GS-28.3": {"type": "OSS 1x37 Galfan", "d": 28.3, "Fmin": 722,  "ke_included": true, "E": 160, "A": 481, "status": "datasheet (F); A estimate"},
+    "Ronstan-ACS2-GS-31.3": {"type": "OSS 1x61 Galfan", "d": 31.3, "Fmin": 884,  "ke_included": true, "E": 160, "A": 588, "status": "datasheet (F); A estimate"},
+    "Ronstan-ACS2-GS-36.3": {"type": "OSS 1x61 Galfan", "d": 36.3, "Fmin": 1189, "ke_included": true, "E": 160, "A": 791, "status": "datasheet (F); A estimate"},
+    "SS316-1x19-6":  {"type": "stainless 1x19 AISI 316", "d": 6,  "Fmin": 29.7, "ke_included": false, "E": 127, "A": 21.5, "alpha": 16e-6, "status": "datasheet (Ronstan F, E); A estimate"},
+    "SS316-1x19-8":  {"type": "stainless 1x19 AISI 316", "d": 8,  "Fmin": 52.8, "ke_included": false, "E": 127, "A": 38.2, "alpha": 16e-6, "status": "datasheet (Ronstan F, E); A estimate"},
+    "SS316-1x19-10": {"type": "stainless 1x19 AISI 316", "d": 10, "Fmin": 82.6, "ke_included": false, "E": 127, "A": 59.7, "alpha": 16e-6, "status": "datasheet (Ronstan F, E); A estimate"},
+    "SS316-1x19-12": {"type": "stainless 1x19 AISI 316", "d": 12, "Fmin": 119,  "ke_included": false, "E": 127, "A": 86.0, "alpha": 16e-6, "status": "datasheet (Ronstan F, E); A estimate"},
+    "SS316-1x19-16": {"type": "stainless 1x19 AISI 316", "d": 16, "Fmin": 211,  "ke_included": false, "E": 127, "A": 153,  "alpha": 16e-6, "status": "datasheet (Ronstan F, E); A estimate"},
+    "OSS-Galfan-30": {"type": "OSS Galfan (EN 10264-2 wire)", "d": 30, "Fmin": 753,  "ke_included": false, "E": 160, "A": 545,  "status": "datasheet (steelwirerope.com)"},
+    "OSS-Galfan-40": {"type": "OSS Galfan (EN 10264-2 wire)", "d": 40, "Fmin": 1198, "ke_included": false, "E": 160, "A": 929,  "status": "datasheet (steelwirerope.com)"},
+    "FLC-40":        {"type": "Full locked coil, galvanised", "d": 40, "Fmin": 1580, "ke_included": false, "E": 160, "A": 1104, "mass_kg_m": 9.2, "status": "datasheet (steelwirerope.com)"},
+    "Macalloy460-M36": {"type": "bar, Macalloy 460 (fy 460 / fu 610)", "d": 36, "Fmin": 498,  "Fk": 376,  "ke_included": true, "E": 205, "A": 817,  "status": "computed from ISO stress area — use Macalloy tables"},
+    "Macalloy460-M48": {"type": "bar, Macalloy 460 (fy 460 / fu 610)", "d": 48, "Fmin": 897,  "Fk": 676,  "ke_included": true, "E": 205, "A": 1470, "status": "computed from ISO stress area — use Macalloy tables"},
+    "Macalloy460-M64": {"type": "bar, Macalloy 460 (fy 460 / fu 610)", "d": 64, "Fmin": 1635, "Fk": 1233, "ke_included": true, "E": 205, "A": 2680, "status": "computed from ISO stress area — use Macalloy tables"}
+  },
+  "termination_ke": {
+    "metal or resin socket": 1.0,
+    "swaged socket / swaged fitting": 0.9,
+    "ferrule (EN 13411-3)": "0.9 (unverified)",
+    "U-bolt grip (EN 13411-5)": "0.8 (unverified) - not for primary members"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "project": "Demo canopy — cable schedule example",
+  "T_ref": 20,
+  "gammaR": 1.0,
+  "f_sls": 0.5,
+  "cables": [
+    {"id": "EC-1", "product": "Ronstan-ACS2-GS-20.1", "qty": 2, "L_stressed": 10.62, "T_install": 28,
+     "F_prestress": 18, "F_ULS": 95, "F_SLS": 60, "F_min_comb": 9, "F_meas": 18,
+     "deduct_A_mm": 250, "deduct_B_mm": 250, "clamp_marks": [2.5, 5.0, 7.5],
+     "end_A": "swaged fork M20", "end_B": "swaged adjustable fork M20 +/-75", "coating": "Galfan"},
+    {"id": "TB-1", "product": "Macalloy460-M36", "qty": 4, "L_stressed": 4.20, "T_install": 28,
+     "F_prestress": 40, "F_ULS": 210, "F_SLS": 150, "F_min_comb": 25,
+     "end_A": "fork to corner plate", "end_B": "fork to anchor + turnbuckle", "coating": "HDG"},
+    {"id": "RC-1", "type": "stainless 1x19 AISI 316 (explicit data)", "d": 12, "A": 86.0, "E": 127, "Fmin": 119,
+     "ke": 0.9, "alpha": 16e-6, "qty": 1, "L_stressed": 6.35, "F_prestress": 8, "F_ULS": 55, "F_SLS": 35,
+     "end_A": "swaged eye", "end_B": "swaged stud + turnbuckle", "coating": "stainless 1.4401"}
+  ]
+}

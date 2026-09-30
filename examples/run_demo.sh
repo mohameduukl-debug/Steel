@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# End-to-end demo: 10 m four-point PVC sail with Galfan edge cables and pinned corners.
+# Form finding -> load analysis -> membrane/cable/steel/connection checks -> patterns, GA, schedule, part drawings.
+# Everything is pure Python 3 (no pip installs). Output goes to examples/output/.
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
+S="$HERE/../.claude/skills"
+OUT="$HERE/output"
+mkdir -p "$OUT" && cd "$OUT"
+
+echo "== 1. Form finding (FDM) =="
+python3 "$S/tensile-analysis/scripts/form_find_fdm.py" sail4 --size 10 --high 3 --n 16 --qc 12 \
+        --prestress 2.0 --out sail --obj
+
+echo; echo "== 2. Load analysis (dynamic relaxation): wind uplift and snow (factored values) =="
+python3 "$S/tensile-analysis/scripts/dynamic_relaxation.py" sail.json --Et-u 800 --Et-v 600 \
+        --EA-cable 14000 --pressure 0.9 --out sail_wind_up
+python3 "$S/tensile-analysis/scripts/dynamic_relaxation.py" sail.json --Et-u 800 --Et-v 600 \
+        --EA-cable 14000 --snow 0.75 --out sail_snow
+
+echo; echo "== 3. Membrane check (PVC Type III, stress-factor method) =="
+python3 "$S/membrane-fabric/scripts/membrane_check.py" --material PVC-III --nw 8.6 --nf 8.6 --case wind
+python3 "$S/membrane-fabric/scripts/membrane_check.py" --material PVC-III --nw 7.4 --nf 7.4 --case snow
+
+echo; echo "== 4. Cables: edge-cable check + schedule =="
+python3 "$S/cable-tension-members/scripts/cable_calc.py" edge --chord 10.44 --sag 1.17 --n 8.0
+python3 "$S/cable-tension-members/scripts/cable_calc.py" resist --Fmin 367 --ke 1.0 --FEd 125 --Fser 85 --Fmin-force 10
+python3 "$S/cable-tension-members/scripts/cable_schedule.py" --from-model sail.json \
+        --product Ronstan-ACS2-GS-20.1 --deduct 250 --uls-factor 7 --sls-factor 4.7 --out sail_cables
+python3 "$S/cable-tension-members/scripts/cable_schedule.py" "$HERE/schedule_example.json" --out schedule_example
+
+echo; echo "== 5. Corner plate resolution + pin/lug check (corner forces from the uplift run) =="
+python3 "$S/tensile-connections/scripts/corner_plate.py" --m EC1:15:83:180:48 --m EC2:105:83:-48:180 \
+        --m strap:60:6:100:173
+python3 "$S/tensile-connections/scripts/pin_connection.py" --F 210 --Fser 150 --d 36 --d0 37 --t 25 \
+        --a-lug 50 --c-lug 35 --fork-t 16 --pin-fy 640 --pin-fu 800 --replaceable --aisc
+
+echo; echo "== 6. Mast (6 m pinned CHS 168.3x8) =="
+python3 "$S/steel-supports/scripts/mast_check.py" --D 168.3 --t 8 --L 6 --N 260 --M 6
+
+echo; echo "== 7. Patterns, GA DXF and steel part drawings =="
+python3 "$S/fabrication-drawings/scripts/cutting_pattern.py" sail.json --panels-along v --strip 2 \
+        --comp-warp 0.8 --comp-weft 1.6 --seam 50 --edge 80 --roll-width 2500 --out sail_patterns
+python3 "$S/fabrication-drawings/scripts/export_dxf.py" sail.json --forces --out sail_GA
+python3 "$S/fabrication-drawings/scripts/steel_part_dxf.py" lug --d0 37 --d 36 --t 25 --a 50 --c 35 \
+        --base 150 --height 110 --mark LP-01 --qty 4 --project "Demo sail"
+python3 "$S/fabrication-drawings/scripts/steel_part_dxf.py" corner --t 25 --edge 45 --hole A:0:0:52 \
+        --hole EC1:180:48:37 --hole EC2:48:180:37 --hole M1:100:100:18 --mark CP-01 --qty 4 --project "Demo sail"
+
+echo; echo "Done. Files in $OUT:"; ls -1 "$OUT"
