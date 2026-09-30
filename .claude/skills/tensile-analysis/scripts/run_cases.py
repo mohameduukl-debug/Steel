@@ -102,6 +102,10 @@ def run(model_path, cases_path, out=None, verbose=False):
                          tol=case.get("tol", 1e-4), verbose=verbose)
         an = res["analysis"]
         mem = [e["stress_kN_m"] for e in res["edges"] if e["kind"] == "membrane" and "stress_kN_m" in e]
+        warp = [e["stress_kN_m"] for e in res["edges"] if e["kind"] == "membrane" and "stress_kN_m" in e
+                and DR.edge_direction(res, e) == "u"]
+        weft = [e["stress_kN_m"] for e in res["edges"] if e["kind"] == "membrane" and "stress_kN_m" in e
+                and DR.edge_direction(res, e) == "v"]
         cab = [e for e in res["edges"] if e["kind"] != "membrane"]
         for e in res["edges"]:
             r = env_e.setdefault(e["id"], {"max": -math.inf, "min": math.inf, "case_max": None, "case_min": None,
@@ -122,6 +126,9 @@ def run(model_path, cases_path, out=None, verbose=False):
         rows.append({"case": case["name"], "factor": f, "converged": an["converged"],
                      "max_disp_mm": round(an["max_displacement_m"] * 1000),
                      "stress_max": round(max(mem), 2) if mem else None,
+                     "warp_max": round(max(warp), 2) if warp else None,
+                     "weft_max": round(max(weft), 2) if weft else None,
+                     "duration": case.get("duration") or ("short" if case["name"].upper().startswith("W") else "long"),
                      "stress_min": round(min(mem), 2) if mem else None,
                      "cable_max": round(max(e["force"] for e in cab), 1) if cab else None,
                      "cable_min": round(min(e["force"] for e in cab), 2) if cab else None,

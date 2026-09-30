@@ -78,6 +78,16 @@
       "value": 8.0,
       "status": "V",
       "source": "ASCE 55-10 industry-practice FS for prestress + dead (consistent with FM DS 1-59)"
+    },
+    "tear_factor": {
+      "value": 2.0,
+      "status": "U",
+      "source": "no code value found; practice: design stress ≤ critical-slit (tear propagation) resistance / ≥ 2 — agree with the checking engineer"
+    },
+    "etfe_gamma": {
+      "value": 1.1,
+      "status": "U",
+      "source": "CEN/TS 19102 ETFE γM0 = 1.10 (single search snippet, TexComp 2021); use with first-yield stress incl. temperature/duration effects"
     }
   },
   "cable": {

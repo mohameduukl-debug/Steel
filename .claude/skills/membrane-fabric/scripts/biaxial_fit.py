@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""Biaxial test evaluation: orthotropic membrane stiffness + compensation (EN 17117-1/-2 style).
+
+Fits the plane-stress orthotropic law (per unit width, stresses in kN/m, strains in %)
+
+    ε_w = n_w/(E_w t) − ν_fw · n_f/(E_f t)
+    ε_f = n_f/(E_f t) − ν_wf · n_w/(E_w t)       with reciprocity  ν_wf/(E_w t) = ν_fw/(E_f t)
+
+to measured points by least squares (unknowns a = 1/E_w t, b = 1/E_f t, c = ν_wf/E_w t),
+either for all load ratios together or per ratio (--per-ratio, stiffness that matches the
+governing stress state, e.g. 1:1 prestress, 2:1 / 1:2 snow/wind). Use points from the
+STABILISED cycles (after the shake-down cycles of the test protocol), as stress/strain
+increments relative to the start of the evaluated cycle.
+
+Compensation (EN 17117-2 concept): strain the panel must be shrunk by so that it reaches the
+design prestress on site = residual strain after the test's prestress cycles + elastic strain
+at the prestress:   comp_w = ε_res,w + (a·n_w0 − c·n_f0),  comp_f = ε_res,f + (b·n_f0 − c·n_w0)
+
+Input CSV (header required):  ratio,n_w,n_f,eps_w,eps_f     (kN/m, kN/m, %, %)
+
+Examples
+  python3 biaxial_fit.py test.csv
+  python3 biaxial_fit.py test.csv --per-ratio
+  python3 biaxial_fit.py test.csv --prestress 2.0 2.0 --residual 0.45 1.10     # compensation
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import math
+import sys
+from collections import defaultdict
+
+
+def solve3(M, v):
+    """Gaussian elimination with partial pivoting for a 3x3 system."""
+    A = [row[:] + [v[i]] for i, row in enumerate(M)]
+    for k in range(3):
+        p = max(range(k, 3), key=lambda r: abs(A[r][k]))
+        A[k], A[p] = A[p], A[k]
+        if abs(A[k][k]) < 1e-18:
+            raise ValueError("singular normal equations (need points with both n_w and n_f varying)")
+        for r in range(k + 1, 3):
+            f = A[r][k] / A[k][k]
+            for c in range(k, 4):
+                A[r][c] -= f * A[k][c]
+    x = [0.0] * 3
+    for k in range(2, -1, -1):
+        x[k] = (A[k][3] - sum(A[k][c] * x[c] for c in range(k + 1, 3))) / A[k][k]
+    return x
+
+
+def fit(points):
+    """points: list of (n_w, n_f, eps_w, eps_f) with eps as strain (not %). Returns dict."""
+    # residuals: r1 = a nw − c nf − ew ; r2 = b nf − c nw − ef ; unknowns x = (a, b, c)
+    rows = []
+    for nw, nf, ew, ef in points:
+        rows.append(((nw, 0.0, -nf), ew))
+        rows.append(((0.0, nf, -nw), ef))
+    M = [[sum(r[0][i] * r[0][j] for r in rows) for j in range(3)] for i in range(3)]
+    v = [sum(r[0][i] * r[1] for r in rows) for i in range(3)]
+    a, b, c = solve3(M, v)
+    res = [sum(r[0][i] * x for i, x in enumerate((a, b, c))) - r[1] for r in rows]
+    rms = math.sqrt(sum(e * e for e in res) / len(res))
+    return {"Ew_t": 1 / a, "Ef_t": 1 / b, "nu_wf": c / a, "nu_fw": c / b, "a": a, "b": b, "c": c,
+            "rms_strain": rms, "n_points": len(points)}
+
+
+def fit_fixed_nu(points, nu_wf):
+    """per-ratio stiffness with ν_wf fixed (one load ratio cannot identify three constants)."""
+    # r1 = a (nw − ν nf) − ew ;  r2 = b nf − a ν nw − ef   (c = ν a)
+    rows = []
+    for nw, nf, ew, ef in points:
+        rows.append(((nw - nu_wf * nf, 0.0), ew))
+        rows.append(((-nu_wf * nw, nf), ef))
+    m11 = sum(r[0][0] ** 2 for r in rows)
+    m12 = sum(r[0][0] * r[0][1] for r in rows)
+    m22 = sum(r[0][1] ** 2 for r in rows)
+    v1 = sum(r[0][0] * r[1] for r in rows)
+    v2 = sum(r[0][1] * r[1] for r in rows)
+    det = m11 * m22 - m12 * m12
+    if abs(det) < 1e-18 or m11 < 1e-12 or m22 < 1e-12:
+        raise ValueError("ratio does not load both directions enough")
+    a = (v1 * m22 - v2 * m12) / det
+    b = (m11 * v2 - m12 * v1) / det
+    c = nu_wf * a
+    res = [r[0][0] * a + r[0][1] * b - r[1] for r in rows]
+    return {"Ew_t": 1 / a, "Ef_t": 1 / b, "nu_wf": nu_wf, "nu_fw": c / b, "a": a, "b": b, "c": c,
+            "rms_strain": math.sqrt(sum(e * e for e in res) / len(res)), "n_points": len(points)}
+
+
+def read(path):
+    data = defaultdict(list)
+    with open(path) as fh:
+        for r in csv.DictReader(fh):
+            data[r["ratio"].strip()].append((float(r["n_w"]), float(r["n_f"]),
+                                             float(r["eps_w"]) / 100, float(r["eps_f"]) / 100))
+    return data
+
+
+def show(tag, f):
+    flag = []
+    if f["nu_wf"] > 1 or f["nu_fw"] > 1:
+        flag.append("ν > 1 (crimp interchange; valid for fabrics but check the evaluation range)")
+    if f["Ew_t"] <= 0 or f["Ef_t"] <= 0:
+        flag.append("NEGATIVE stiffness — data inconsistent")
+    print(f"{tag:<10}{f['Ew_t']:9.0f}{f['Ef_t']:9.0f}{f['nu_wf']:8.3f}{f['nu_fw']:8.3f}"
+          f"{f['rms_strain'] * 100:10.4f}{f['n_points']:6d}  " + "; ".join(flag))
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("csv")
+    ap.add_argument("--per-ratio", action="store_true", help="separate constants per load ratio")
+    ap.add_argument("--prestress", type=float, nargs=2, metavar=("NW0", "NF0"), help="design prestress [kN/m]")
+    ap.add_argument("--residual", type=float, nargs=2, metavar=("EW", "EF"), default=(0.0, 0.0),
+                    help="residual strain after the prestress cycles of the test [%%]")
+    a = ap.parse_args(argv)
+    data = read(a.csv)
+    allp = [p for v in data.values() for p in v]
+    print(f"{'set':<10}{'Ew·t':>9}{'Ef·t':>9}{'ν_wf':>8}{'ν_fw':>8}{'rms ε %':>10}{'pts':>6}   [kN/m]")
+    f_all = fit(allp)
+    show("all", f_all)
+    out = {"all": f_all}
+    if a.per_ratio:
+        for ratio, pts in sorted(data.items()):
+            try:
+                f = fit_fixed_nu(pts, f_all["nu_wf"])
+                out[ratio] = f
+                show(ratio + "*", f)
+            except ValueError as e:
+                print(f"{ratio:<10} skipped ({e})")
+    if a.per_ratio:
+        print("  * per-ratio stiffness with ν_wf fixed from the full fit (a single ratio cannot identify 3 constants);"
+              "\n    uniaxial ratios (1:0, 0:1) only determine the loaded direction reliably")
+    if a.prestress:
+        nw0, nf0 = a.prestress
+        f = out.get("1:1", f_all)
+        cw = a.residual[0] / 100 + f["a"] * nw0 - f["c"] * nf0
+        cf = a.residual[1] / 100 + f["b"] * nf0 - f["c"] * nw0
+        print(f"\nCompensation at prestress {nw0}/{nf0} kN/m (constants '{'1:1' if '1:1' in out else 'all'}'):")
+        print(f"  warp {cw * 100:.2f} %   weft {cf * 100:.2f} %   (residual {a.residual[0]}/{a.residual[1]} % + elastic)")
+        print("  -> use as --comp-warp / --comp-weft in cutting_pattern.py; decompensate fixed-length edges")
+        out["compensation_%"] = (cw * 100, cf * 100)
+    print("\nUse E·t in dynamic_relaxation.py / run_cases.py (--Et-u warp, --Et-v weft). A net model cannot use ν;"
+          " use the CST membrane solver (membrane_dr.py) to include ν and shear.")
+    return out
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

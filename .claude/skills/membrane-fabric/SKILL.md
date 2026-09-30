@@ -26,6 +26,30 @@ python3 membrane_check.py --material PVC-II --prestress 2.0 2.0                 
 - `--method partial`: n_Rd = f_k/(γM·A0·A1·A2·A3). The defaults are **indicative German A-factor values**. Replace them with CEN/TS 19102 Annex C, National Annex or project values, and feed in design stresses from factored non-linear runs.
 - Seams are checked with `--seam-eff` (default 0.8; PVC HF 0.8–0.9, PTFE heat-seal 0.7–0.8).
 
+More checks in the same tool:
+```bash
+python3 membrane_check.py --material PVC-III --envelope sail_cases_envelope.json      # every load case (warp/weft)
+python3 membrane_check.py --material PVC-III --nw 12 --tear 50 45 --defect 80         # tear propagation
+python3 membrane_check.py --material PVC-III --curvature 12 18 --p 0.8 --prestress 2 2   # Laplace hand sizing
+python3 membrane_check.py --material ETFE-250um --nw 2.5                              # ETFE: σ = n/t vs f_y1/γ
+```
+- `--envelope`: reads `run_cases.py` output (max warp/weft stress and duration per case). It warns if factored cases
+  are combined with a global-factor method, because safety would then be counted twice.
+- `--tear A N`: the slit-tear test (slit A mm fails at N kN/m) is scaled to the design defect by n_c ∝ 1/√a.
+  Allowable = n_c/tear_factor, where tear_factor is [U] and must be agreed with the checker.
+- `--curvature R_res R_oth --p`: bounds from n₁/R₁ + n₂/R₂ = p. The resisting direction is ≤ n0 + pR; the other
+  direction is ≥ n0 − pR, so it flags slack risk. Hand sizing only.
+
+### `scripts/biaxial_fit.py`: biaxial test → stiffness + compensation (EN 17117-1/-2 style)
+```bash
+python3 biaxial_fit.py test.csv --per-ratio --prestress 2 2 --residual 0.45 1.10
+```
+- Least-squares fit of E_w·t, E_f·t, ν_wf, ν_fw with reciprocity over all load ratios (CSV: ratio,n_w,n_f,eps_w,eps_f).
+- `--per-ratio`: stiffness per stress state with ν fixed from the full fit (one ratio cannot identify three constants).
+- Compensation = residual strain after the prestress cycles + elastic strain at the prestress, in warp and weft,
+  ready to use in `cutting_pattern.py`.
+- Validation: exact recovery of known constants and reciprocity on synthetic data (tests).
+
 The library is in `reference/materials.json`. Every entry is tagged datasheet, class-table or typical. Replace it with the project datasheet.
 
 ## Core knowledge (details in `reference/`)
@@ -41,6 +65,9 @@ The library is in `reference/materials.json`. Every entry is tagged datasheet, c
 | Joint | HF / hot-air weld | heat-seal with FEP film ~350–385 °C | vulcanise / bond | thermal weld | thermal weld |
 | Foldable | yes | **no** (glass cracks) | moderate | – | yes |
 | Roll width | 2.50–2.67 m [V] | 3.8–4.7 m [V] | – | ~1.55 m [V] | – |
+
+Design stress factors in the register: 4.0 short-term (wind) and 5.0 long-term (snow/prestress) are now **[V]**
+(ASCE 55-10 "industry practice" FS 4/5/8 and Birdair). CEN/TS 19102 γ_M and k values remain [U].
 
 Units: 1 kN/m = 1 N/mm = 50 N/5 cm; N/3 cm ÷ 30 = kN/m.
 

@@ -39,6 +39,7 @@ pin = load("tensile-connections", "pin_connection")
 corner = load("tensile-connections", "corner_plate")
 mast = load("steel-supports", "mast_check")
 mem = load("membrane-fabric", "membrane_check")
+biax = load("membrane-fabric", "biaxial_fit")
 memb = load("steel-supports", "member_check")
 joint = load("tensile-connections", "steel_joint_checks")
 frame = load("steel-supports", "frame2d")
@@ -338,6 +339,42 @@ class TestJoints(unittest.TestCase):
         rows, R = joint.bolts(joint.grid(2, 2, 80, 80), 0, 120, 4, 0, 1, 20, "8.8", 15, 490, 45, 40, 80, 80, True)
         self.assertAlmostEqual(R["FvRd"], 94.08, places=2)
         self.assertAlmostEqual(rows[0][1], math.hypot(12.5, 42.5), places=3)
+
+
+class TestBiaxialAndMembraneExtras(unittest.TestCase):
+    def synthetic(self, Ew=900.0, Ef=600.0, nu=0.35):
+        a, b = 1 / Ew, 1 / Ef
+        c = nu * a
+        pts = []
+        for rw, rf in ((1, 1), (2, 1), (1, 2), (1, 0), (0, 1)):
+            for k in range(1, 6):
+                nw, nf = 2.0 * k * rw, 2.0 * k * rf
+                pts.append((nw, nf, a * nw - c * nf, b * nf - c * nw))
+        return pts
+
+    def test_fit_recovers_constants(self):
+        f = biax.fit(self.synthetic())
+        self.assertAlmostEqual(f["Ew_t"], 900.0, places=6)
+        self.assertAlmostEqual(f["Ef_t"], 600.0, places=6)
+        self.assertAlmostEqual(f["nu_wf"], 0.35, places=9)
+        self.assertAlmostEqual(f["nu_fw"], 0.35 * 600 / 900, places=9)   # reciprocity
+
+    def test_fixed_nu_single_ratio(self):
+        pts = [p for p in self.synthetic() if p[0] == p[1]]           # 1:1 only
+        f = biax.fit_fixed_nu(pts, 0.35)
+        self.assertAlmostEqual(f["Ew_t"], 900.0, places=6)
+        self.assertAlmostEqual(f["Ef_t"], 600.0, places=6)
+
+    def test_tear_and_curvature_cli(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            mem.main(["--material", "PVC-III", "--nw", "12", "--tear", "50", "45", "--defect", "200"])
+        self.assertIn(f"{45 * math.sqrt(50 / 200):.2f}", out.getvalue())
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            mem.main(["--material", "PVC-III", "--curvature", "12", "18", "--p", "0.8", "--prestress", "2", "2"])
+        self.assertIn("11.60", out.getvalue())
+        self.assertIn("SLACK", out.getvalue())
 
 
 class TestMembrane(unittest.TestCase):

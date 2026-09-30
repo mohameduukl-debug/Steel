@@ -1,24 +1,182 @@
 {
   "_readme": "Membrane material library for membrane_check.py. Strengths are strip tensile strengths warp/weft in kN/m (1 kN/m = 50 N/5cm). 'source' says where the value came from; 'status' = 'datasheet' (manufacturer figure seen via search extract), 'class-table' (generic classification table), or 'typical' (industry typical, NOT verified - replace with the project datasheet). Stiffness Et values are indicative only: always use biaxial test data (EN 17117-1) for the actual batch.",
   "materials": {
-    "PVC-I":  {"family": "PES/PVC", "fw": 66,  "ff": 60,  "weight_gm2": "750-900",   "status": "class-table", "source": "teloniabiti.com PVC type table (3300/3000 N/5cm)"},
-    "PVC-II": {"family": "PES/PVC", "fw": 84,  "ff": 80,  "weight_gm2": "900-1050",  "status": "class-table", "source": "teloniabiti.com (4200/4000 N/5cm)"},
-    "PVC-III":{"family": "PES/PVC", "fw": 112, "ff": 108, "weight_gm2": "1050-1300", "status": "class-table", "source": "teloniabiti.com (5600/5400 N/5cm)"},
-    "PVC-IV": {"family": "PES/PVC", "fw": 168, "ff": 146, "weight_gm2": "1300-1450", "status": "class-table", "source": "teloniabiti.com (8400/7300 N/5cm)"},
-    "PVC-V":  {"family": "PES/PVC", "fw": 200, "ff": 190, "weight_gm2": "1450-1600", "status": "class-table", "source": "teloniabiti.com (10000/9500 N/5cm)"},
-    "Ferrari-Tenseo-1002S2": {"family": "PES/PVC", "fw": 84, "ff": 80, "weight_gm2": 1050, "roll_width_mm": 2670, "status": "datasheet", "source": "Serge Ferrari Tenseo Advanced 1002 S2 datasheet (420/400 daN/5cm)"},
-    "Mehler-Valmex-FR1000-III": {"family": "PES/PVC", "fw": 120, "ff": 110, "weight_gm2": 1050, "roll_width_mm": 2500, "status": "datasheet", "source": "Mehler Valmex FR 1000 Mehatop (6000/5500 N/5cm)"},
-    "Chukoh-FGT-800":  {"family": "glass/PTFE", "fw": 147, "ff": 118, "weight_gm2": 1300, "roll_width_mm": 3800, "status": "datasheet", "source": "Chukoh Skytop FGT-800 (4410/3528 N/3cm min)"},
-    "Chukoh-FGT-1000": {"family": "glass/PTFE", "fw": 183, "ff": 167, "weight_gm2": 1700, "roll_width_mm": 3800, "status": "datasheet", "source": "Chukoh Skytop FGT-1000 (5500/5000 N/3cm min)"},
-    "Verseidag-B18089": {"family": "glass/PTFE", "fw": 140, "ff": 120, "weight_gm2": 1150, "roll_width_mm": 4700, "status": "datasheet", "source": "Tenseo Xtrem GF 7000 / Duraskin B18089 sample card (700/600 daN/5cm); weight conflicts with another source (1550) - check"},
-    "PTFE-glass-generic-1000": {"family": "glass/PTFE", "fw": 116, "ff": 110, "weight_gm2": 1000, "status": "typical", "source": "generic example 5800/5500 N/5cm"},
-    "Silicone-glass-generic": {"family": "glass/silicone", "fw": 100, "ff": 90, "status": "typical", "source": "range 4000-7000 N/5cm (80-140 kN/m)"},
-    "Sefar-Tenara-4T40HF": {"family": "ePTFE", "fw": 80, "ff": 80, "weight_gm2": 1080, "status": "datasheet", "source": "Sefar Tenara 4T40HF (4000/4000 N/5cm), light transmission 38%"}
+    "PVC-I": {
+      "family": "PES/PVC",
+      "fw": 66,
+      "ff": 60,
+      "weight_gm2": "750-900",
+      "status": "class-table",
+      "source": "teloniabiti.com PVC type table (3300/3000 N/5cm)"
+    },
+    "PVC-II": {
+      "family": "PES/PVC",
+      "fw": 84,
+      "ff": 80,
+      "weight_gm2": "900-1050",
+      "status": "class-table",
+      "source": "teloniabiti.com (4200/4000 N/5cm)"
+    },
+    "PVC-III": {
+      "family": "PES/PVC",
+      "fw": 112,
+      "ff": 108,
+      "weight_gm2": "1050-1300",
+      "status": "class-table",
+      "source": "teloniabiti.com (5600/5400 N/5cm)"
+    },
+    "PVC-IV": {
+      "family": "PES/PVC",
+      "fw": 168,
+      "ff": 146,
+      "weight_gm2": "1300-1450",
+      "status": "class-table",
+      "source": "teloniabiti.com (8400/7300 N/5cm)"
+    },
+    "PVC-V": {
+      "family": "PES/PVC",
+      "fw": 200,
+      "ff": 190,
+      "weight_gm2": "1450-1600",
+      "status": "class-table",
+      "source": "teloniabiti.com (10000/9500 N/5cm)"
+    },
+    "Ferrari-Tenseo-1002S2": {
+      "family": "PES/PVC",
+      "fw": 84,
+      "ff": 80,
+      "weight_gm2": 1050,
+      "roll_width_mm": 2670,
+      "status": "datasheet",
+      "source": "Serge Ferrari Tenseo Advanced 1002 S2 datasheet (420/400 daN/5cm)"
+    },
+    "Mehler-Valmex-FR1000-III": {
+      "family": "PES/PVC",
+      "fw": 120,
+      "ff": 110,
+      "weight_gm2": 1050,
+      "roll_width_mm": 2500,
+      "status": "datasheet",
+      "source": "Mehler Valmex FR 1000 Mehatop (6000/5500 N/5cm)"
+    },
+    "Chukoh-FGT-800": {
+      "family": "glass/PTFE",
+      "fw": 147,
+      "ff": 118,
+      "weight_gm2": 1300,
+      "roll_width_mm": 3800,
+      "status": "datasheet",
+      "source": "Chukoh Skytop FGT-800 (4410/3528 N/3cm min)"
+    },
+    "Chukoh-FGT-1000": {
+      "family": "glass/PTFE",
+      "fw": 183,
+      "ff": 167,
+      "weight_gm2": 1700,
+      "roll_width_mm": 3800,
+      "status": "datasheet",
+      "source": "Chukoh Skytop FGT-1000 (5500/5000 N/3cm min)"
+    },
+    "Verseidag-B18089": {
+      "family": "glass/PTFE",
+      "fw": 140,
+      "ff": 120,
+      "weight_gm2": 1150,
+      "roll_width_mm": 4700,
+      "status": "datasheet",
+      "source": "Tenseo Xtrem GF 7000 / Duraskin B18089 sample card (700/600 daN/5cm); weight conflicts with another source (1550) - check"
+    },
+    "PTFE-glass-generic-1000": {
+      "family": "glass/PTFE",
+      "fw": 116,
+      "ff": 110,
+      "weight_gm2": 1000,
+      "status": "typical",
+      "source": "generic example 5800/5500 N/5cm"
+    },
+    "Silicone-glass-generic": {
+      "family": "glass/silicone",
+      "fw": 100,
+      "ff": 90,
+      "status": "typical",
+      "source": "range 4000-7000 N/5cm (80-140 kN/m)"
+    },
+    "Sefar-Tenara-4T40HF": {
+      "family": "ePTFE",
+      "fw": 80,
+      "ff": 80,
+      "weight_gm2": 1080,
+      "status": "datasheet",
+      "source": "Sefar Tenara 4T40HF (4000/4000 N/5cm), light transmission 38%"
+    },
+    "SaintGobain-Sheerfill-II": {
+      "family": "glass/PTFE",
+      "fw": 144,
+      "ff": 105,
+      "weight_gm2": 1305,
+      "status": "datasheet",
+      "source": "Birdair Sheerfill II ASTM spec 825/600 lb/in (x0.1751 kN/m per lb/in)"
+    },
+    "ETFE-200um": {
+      "family": "ETFE",
+      "fw": 4.0,
+      "ff": 4.0,
+      "t_mm": 0.2,
+      "fy1_MPa": 20.0,
+      "E_MPa": 660,
+      "status": "typical",
+      "source": "ETFE yield 20-30 MPa, E≈660 MPa, ν≈0.42 (IASS 2024 P237 / tensiletechnic); fw = f_y × t (yield-based, NOT UTS)"
+    },
+    "ETFE-250um": {
+      "family": "ETFE",
+      "fw": 5.0,
+      "ff": 5.0,
+      "t_mm": 0.25,
+      "fy1_MPa": 20.0,
+      "E_MPa": 660,
+      "status": "typical",
+      "source": "as ETFE-200um"
+    }
   },
   "family_defaults": {
-    "PES/PVC":        {"Et_w": 800,  "Et_f": 600,  "nu": 0.4, "comp_warp_pct": "0.5-1.5", "comp_weft_pct": "1.0-3.5", "prestress_kN_m": "1.0-4.0", "seam_eff": "0.80-0.90", "status": "typical"},
-    "glass/PTFE":     {"Et_w": 1400, "Et_f": 1000, "nu": 0.5, "comp_warp_pct": "0-0.5",   "comp_weft_pct": "1.0-4.0", "prestress_kN_m": "2.0-8.0 (heavy grades 6-8)", "seam_eff": "0.70-0.80", "status": "typical"},
-    "glass/silicone": {"Et_w": 1000, "Et_f": 800,  "nu": 0.5, "status": "typical"},
-    "ePTFE":          {"Et_w": 300,  "Et_f": 300,  "nu": 0.4, "status": "typical (low stiffness, foldable)"}
+    "PES/PVC": {
+      "Et_w": 800,
+      "Et_f": 600,
+      "nu": 0.4,
+      "comp_warp_pct": "0.5-1.5",
+      "comp_weft_pct": "1.0-3.5",
+      "prestress_kN_m": "1.0-4.0",
+      "seam_eff": "0.80-0.90",
+      "status": "typical"
+    },
+    "glass/PTFE": {
+      "Et_w": 1400,
+      "Et_f": 1000,
+      "nu": 0.5,
+      "comp_warp_pct": "0-0.5",
+      "comp_weft_pct": "1.0-4.0",
+      "prestress_kN_m": "2.0-8.0 (heavy grades 6-8)",
+      "seam_eff": "0.70-0.80",
+      "status": "typical"
+    },
+    "glass/silicone": {
+      "Et_w": 1000,
+      "Et_f": 800,
+      "nu": 0.5,
+      "status": "typical"
+    },
+    "ePTFE": {
+      "Et_w": 300,
+      "Et_f": 300,
+      "nu": 0.4,
+      "status": "typical (low stiffness, foldable)"
+    },
+    "ETFE": {
+      "Et_w": 132,
+      "Et_f": 132,
+      "nu": 0.42,
+      "prestress_kN_m": "cushions: pressure-governed",
+      "status": "typical (E·t at 200 µm)"
+    }
   }
 }
