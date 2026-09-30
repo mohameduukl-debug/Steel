@@ -25,7 +25,22 @@ python3 form_find_fdm.py --input mymodel.json --prestress 2.0 --out result      
   `support_group` are summed into arch, rail, mast and anchor loads.
 - Output: JSON (coordinates, edge forces, membrane stress estimate, cable-group sag/force, support pulls, area) and an OBJ mesh.
 
-### `scripts/dynamic_relaxation.py`: non-linear load analysis
+### `scripts/membrane_dr.py`: orthotropic MEMBRANE analysis (recommended for load cases)
+```bash
+python3 membrane_dr.py sail.json --Ew 800 --Ef 600 --nu 0.3 --G 30 --EA-cable 14000 --pressure 0.9 --out up
+python3 membrane_dr.py sail.json --snow 0.75 --ponding --out snow
+```
+- Constant-strain triangles with Total-Lagrangian kinematics (F, Green strain, PK2 stress, exact large rotations).
+- Orthotropic plane stress in warp/weft axes: E_w·t, E_f·t, ν_wf (ν_fw by reciprocity), G·t. Use `biaxial_fit.py` for the values.
+- Tension-field **wrinkling**: minor principal stress < 0 gives a uniaxial element; both negative gives slack. Counts are reported.
+- Initial stress from the form-finding (warp/weft per quad) or uniform `--prestress`. The prestress state is first relaxed to
+  equilibrium, and the drift and stress ranges are reported.
+- Cables are tension-only links; follower pressure, snow on plan and ponding use the same approach as the net solver.
+- Validation (tests): patch test (uniform stretch gives S = D:E exactly), simple shear (S12 = G·γ plus the second-order S22 term),
+  wrinkling (no compression), global equilibrium under pressure, and consistency with the net model.
+- `run_cases.py` uses it with `"solver": "cst"` in the cases file (material gains `nu`, `G`).
+
+### `scripts/dynamic_relaxation.py`: non-linear load analysis (cable-net analogy; fast screening)
 ```bash
 python3 dynamic_relaxation.py sail.json --Et-u 800 --Et-v 600 --EA-cable 14000 --pressure 0.9 --out up     # uplift
 python3 dynamic_relaxation.py sail.json --Et-u 800 --Et-v 600 --EA-cable 14000 --pressure -0.5 --out down
@@ -54,9 +69,11 @@ polygons), a directional `gradient` (windward → leeward, to screen wind direct
 Outputs: `_envelope.json` (edge and cable-group max/min with governing case, reactions per support per case, reaction
 envelope) and `_summary.md`. Cp zones and gradients must come from tunnel data, TensiNet A1 or conservative code values.
 
-**Limits (state them in any report):** a net model ignores fabric shear stiffness and Poisson coupling, with warp along
-grid u. Use it for concept, sizing and checking. Final design needs orthotropic membrane FE with wrinkling in
-dedicated software.
+**Limits (state them in any report):** the net model (dynamic_relaxation.py) ignores fabric shear and Poisson coupling,
+so use it for screening. membrane_dr.py includes them with linear-orthotropic CST elements and a stress-based
+tension-field wrinkling model. Not modelled: non-linear/hysteretic fabric behaviour, creep, dynamic (aeroelastic) wind
+response, and follower-load stiffness in the prestress relaxation. For very large or unusual roofs, confirm with an
+established membrane FE package.
 
 ## Method summary (details: `reference/form-finding-methods.md`)
 - **FDM** (Schek 1974): q = F/L makes equilibrium linear: `D x = p − D_f x_f`, with `D = CᵀQC` (SPD if all q > 0 and every free node is connected to a support). Solve x, y, z separately. Non-linear FDM iterates q ← F_target/L.

@@ -24,7 +24,8 @@ Example
   python3 run_cases.py sail.json examples/load_cases_example.json --out sail_cases
 
 Cases file
-  {"material": {"Et_u": 800, "Et_v": 600, "EA_cable": 14000},
+  {"solver": "net" | "cst",   // cst = orthotropic membrane elements (membrane_dr.py), uses nu and G below
+   "material": {"Et_u": 800, "Et_v": 600, "nu": 0.3, "G": 30, "EA_cable": 14000},
    "cases": [
      {"name": "PS", "pressure": 0},
      {"name": "W000_up", "factor": 1.5, "gradient": {"dir_deg": 0, "p_windward": 0.9, "p_leeward": 0.3}},
@@ -43,6 +44,7 @@ from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dynamic_relaxation as DR  # noqa: E402
+import membrane_dr as MDR  # noqa: E402
 
 
 def point_in_poly(x, y, poly):
@@ -97,15 +99,33 @@ def run(model_path, cases_path, out=None, verbose=False):
     for case in spec["cases"]:
         f = case.get("factor", 1.0)
         pfun = make_pfun(case, base)
-        res = DR.analyse(base, Et_u, Et_v, EAc, pressure=(0.0 if pfun else f * case.get("pressure", 0.0)),
-                         snow=f * case.get("snow", 0.0), pfun=pfun, do_ponding=case.get("ponding", False),
-                         tol=case.get("tol", 1e-4), verbose=verbose)
+        if spec.get("solver", "net") == "cst":
+            res = MDR.analyse(base, Et_u, Et_v, mat.get("nu", 0.3), mat.get("G", 30.0), EAc,
+                              pressure=(0.0 if pfun else f * case.get("pressure", 0.0)),
+                              snow=f * case.get("snow", 0.0), pfun=pfun, tol=case.get("tol", 1e-4),
+                              do_ponding=case.get("ponding", False))
+            els = res["elements"]
+            for e in res["edges"]:  # membrane edges carry no own result in the CST model
+                if e["kind"] == "membrane":
+                    e["force"] = 0.0
+                    e.pop("stress_kN_m", None)
+            res["analysis"]["slack_links"] = res["analysis"]["wrinkled_elements"] + res["analysis"]["slack_elements"]
+        else:
+            res = DR.analyse(base, Et_u, Et_v, EAc, pressure=(0.0 if pfun else f * case.get("pressure", 0.0)),
+                             snow=f * case.get("snow", 0.0), pfun=pfun, do_ponding=case.get("ponding", False),
+                             tol=case.get("tol", 1e-4), verbose=verbose)
+            els = None
         an = res["analysis"]
-        mem = [e["stress_kN_m"] for e in res["edges"] if e["kind"] == "membrane" and "stress_kN_m" in e]
-        warp = [e["stress_kN_m"] for e in res["edges"] if e["kind"] == "membrane" and "stress_kN_m" in e
-                and DR.edge_direction(res, e) == "u"]
-        weft = [e["stress_kN_m"] for e in res["edges"] if e["kind"] == "membrane" and "stress_kN_m" in e
-                and DR.edge_direction(res, e) == "v"]
+        if els is not None:
+            warp = [e["n_warp"] for e in els]
+            weft = [e["n_weft"] for e in els]
+            mem = [e["n1"] for e in els] + [e["n2"] for e in els]
+        else:
+            mem = [e["stress_kN_m"] for e in res["edges"] if e["kind"] == "membrane" and "stress_kN_m" in e]
+            warp = [e["stress_kN_m"] for e in res["edges"] if e["kind"] == "membrane" and "stress_kN_m" in e
+                    and DR.edge_direction(res, e) == "u"]
+            weft = [e["stress_kN_m"] for e in res["edges"] if e["kind"] == "membrane" and "stress_kN_m" in e
+                    and DR.edge_direction(res, e) == "v"]
         cab = [e for e in res["edges"] if e["kind"] != "membrane"]
         for e in res["edges"]:
             r = env_e.setdefault(e["id"], {"max": -math.inf, "min": math.inf, "case_max": None, "case_min": None,

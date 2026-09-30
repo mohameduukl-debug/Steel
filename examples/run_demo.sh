@@ -18,6 +18,9 @@ python3 "$S/tensile-analysis/scripts/dynamic_relaxation.py" sail.json --Et-u 800
 python3 "$S/tensile-analysis/scripts/dynamic_relaxation.py" sail.json --Et-u 800 --Et-v 600 \
         --EA-cable 14000 --snow 0.75 --out sail_snow
 
+python3 "$S/tensile-analysis/scripts/membrane_dr.py" sail.json --Ew 800 --Ef 600 --nu 0.3 --G 30 \
+        --EA-cable 14000 --pressure 0.9 --out sail_cst_up
+
 echo; echo "== 2b. Load-case set (wind directions, zones, snow + ponding) and envelope =="
 python3 "$S/tensile-analysis/scripts/run_cases.py" sail.json "$HERE/load_cases_example.json" --out sail_cases
 

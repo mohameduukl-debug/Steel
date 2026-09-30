@@ -34,6 +34,7 @@ fdm = load("tensile-analysis", "form_find_fdm")
 dr = load("tensile-analysis", "dynamic_relaxation")
 cab = load("cable-tension-members", "cable_calc")
 cases = load("tensile-analysis", "run_cases")
+mdr = load("tensile-analysis", "membrane_dr")
 sched = load("cable-tension-members", "cable_schedule")
 pin = load("tensile-connections", "pin_connection")
 corner = load("tensile-connections", "corner_plate")
@@ -151,6 +152,69 @@ class TestPondingAndCases(unittest.TestCase):
             self.assertEqual(v["case_min"], "PS")
         self.assertTrue(cases.point_in_poly(1, 1, [[0, 0], [2, 0], [2, 2], [0, 2]]))
         self.assertFalse(cases.point_in_poly(3, 1, [[0, 0], [2, 0], [2, 2], [0, 2]]))
+
+
+class TestCSTMembrane(unittest.TestCase):
+    Ew, Ef, nu, G = 800.0, 600.0, 0.3, 30.0
+
+    def flat(self, wrinkling=False):
+        m = fdm.gen_sail4(2.0, 0.0, 6, 1, 1, True)
+        return mdr.Membrane(m, self.Ew, self.Ef, self.nu, self.G, 1e4, prestress=(0.0, 0.0), wrinkling=wrinkling)
+
+    def solve(self, mem, fmap):
+        X = [fmap(p) if mem.fixed[i] else list(p) for i, p in enumerate(mem.X0)]
+        X, _, _ = mem.relax(X, tol=1e-9, maxit=50000)
+        return mem.results(X)[0]
+
+    def test_patch_uniform_stretch(self):
+        els = self.solve(self.flat(), lambda p: [p[0] * 1.01, p[1], p[2]])
+        E11 = 0.01 + 0.01 ** 2 / 2
+        nufw = self.nu * self.Ef / self.Ew
+        den = 1 - self.nu * nufw
+        for e in els:
+            self.assertAlmostEqual(e["n_warp"], self.Ew / den * E11, places=6)
+            self.assertAlmostEqual(e["n_weft"], nufw * self.Ew / den * E11, places=6)
+            self.assertAlmostEqual(e["n_shear"], 0.0, places=6)
+
+    def test_simple_shear(self):
+        g = 0.02
+        els = self.solve(self.flat(), lambda p: [p[0] + g * p[1], p[1], p[2]])
+        nufw = self.nu * self.Ef / self.Ew
+        den = 1 - self.nu * nufw
+        self.assertAlmostEqual(els[0]["n_shear"], self.G * g, places=6)
+        self.assertAlmostEqual(els[0]["n_weft"], self.Ef / den * g * g / 2, places=6)
+
+    def test_wrinkling_no_compression(self):
+        els = self.solve(self.flat(True), lambda p: [p[0] * 1.01, p[1] * 0.99, p[2]])
+        self.assertTrue(all(e["wrinkled"] == 1 for e in els))
+        self.assertGreaterEqual(min(e["n2"] for e in els), -1e-9)
+
+    def test_sail_equilibrium_and_vs_net(self):
+        tmp = tempfile.mkdtemp()
+        p = os.path.join(tmp, "s")
+        quiet(fdm.main, ["sail4", "--n", "10", "--prestress", "2", "--out", p])
+        with open(p + ".json") as fh:
+            base = json.load(fh)
+        r = mdr.analyse(base, pressure=0.8, tol=1e-5)
+        X = [n["xyz"] for n in r["nodes"]]
+        loads = dr.external_loads(r, X, 0.8, 0.0)
+        for c in range(3):
+            self.assertAlmostEqual(sum(rc["pull"][c] for rc in r["reactions"]), sum(v[c] for v in loads.values()),
+                                   delta=0.02 * max(1.0, abs(sum(v[c] for v in loads.values()))))
+        net = dr.analyse(base, pressure=0.8)
+        ratio = r["analysis"]["max_displacement_m"] / net["analysis"]["max_displacement_m"]
+        self.assertTrue(0.6 < ratio < 1.2, ratio)   # shear stiffness makes the membrane somewhat stiffer
+
+    def test_cases_with_cst_solver(self):
+        tmp = tempfile.mkdtemp()
+        p = os.path.join(tmp, "s")
+        quiet(fdm.main, ["sail4", "--n", "8", "--prestress", "2", "--out", p])
+        cf = os.path.join(tmp, "c.json")
+        with open(cf, "w") as fh:
+            json.dump({"solver": "cst", "material": {"Et_u": 800, "Et_v": 600, "nu": 0.3, "G": 30},
+                       "cases": [{"name": "PS"}, {"name": "W_up", "pressure": 0.6}]}, fh)
+        env = quiet(cases.run, p + ".json", cf, None)
+        self.assertGreater(env["summary"][1]["warp_max"], env["summary"][0]["warp_max"])
 
 
 class TestCables(unittest.TestCase):
