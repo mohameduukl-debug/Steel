@@ -103,7 +103,14 @@ class DXF:
              layer: str = "0", rotation: float = 0.0, align_center: bool = False) -> None:
         self._ensure_layer(layer)
         x, y, z = self._xyz(at)
-        self._grow((x, y, z))
+        # extents: estimate the text box (≈0.6·h per character) so frames enclose the whole string
+        w_est = 0.6 * height * len(str(s))
+        ca, sa = math.cos(math.radians(rotation)), math.sin(math.radians(rotation))
+        x0 = x - (w_est / 2 * ca if align_center else 0.0)
+        y0 = y - (w_est / 2 * sa if align_center else 0.0)
+        for px, py in ((x0, y0), (x0 + w_est * ca, y0 + w_est * sa),
+                       (x0 - height * sa, y0 + height * ca), (x0 + w_est * ca - height * sa, y0 + w_est * sa + height * ca)):
+            self._grow((px, py, z))
         pairs = [(0, "TEXT"), (8, layer), (10, x), (20, y), (30, z), (40, float(height)),
                  (1, str(s)), (50, float(rotation))]
         if align_center:
@@ -137,6 +144,35 @@ class DXF:
             rot += 180
         mid = ((a[0] + b[0]) / 2 + nx * height * 0.6, (a[1] + b[1]) / 2 + ny * height * 0.6)
         self.text(fmt.format(L), mid, height, layer, rotation=rot, align_center=True)
+
+    def weld_symbol(self, at: Sequence[float], size_text: str = "a8", both_sides: bool = True,
+                    all_round: bool = False, h: float = 5.0, layer: str = "WELD", system: str = "A",
+                    note: str = "") -> None:
+        """ISO 2553 fillet-weld symbol: arrow to the joint, reference line (System A adds the dashed
+        identification line), fillet triangle(s), throat size (e.g. 'a8') left of the symbol."""
+        x, y = at[0], at[1]
+        kx, ky = x + 6 * h, y + 6 * h                 # knee of the arrow line
+        self.line((x, y), (kx, ky), layer)
+        ang = math.atan2(ky - y, kx - x)
+        for s_ in (+1, -1):                            # arrow head at the joint
+            a = ang + s_ * math.radians(15)
+            self.line((x, y), (x + 1.6 * h * math.cos(a), y + 1.6 * h * math.sin(a)), layer)
+        L = 14 * h
+        self.line((kx, ky), (kx + L, ky), layer)                              # continuous reference line
+        if system == "A":                                                     # dashed identification line
+            for k in range(7):
+                self.line((kx + k * 2 * h, ky - 0.8 * h), (kx + k * 2 * h + h, ky - 0.8 * h), layer)
+        sx = kx + 5 * h
+        self.polyline([(sx, ky), (sx, ky + 2 * h), (sx + 2 * h, ky)], layer, closed=True)   # fillet, arrow side
+        if both_sides:
+            self.polyline([(sx, ky), (sx, ky - 2 * h), (sx + 2 * h, ky)], layer, closed=True)
+        self.text(size_text, (sx - 3.2 * h, ky + 0.3 * h), h, layer)
+        if both_sides:
+            self.text(size_text, (sx - 3.2 * h, ky - 1.5 * h), h, layer)
+        if all_round:
+            self.circle((kx, ky), 0.8 * h, layer)
+        if note:
+            self.text(note, (kx + L + h, ky - 0.4 * h), 0.8 * h, layer)
 
     def title_block(self, origin: Sequence[float], width: float, height: float,
                     fields: dict[str, str], text_h: float, layer: str = "TITLE") -> None:

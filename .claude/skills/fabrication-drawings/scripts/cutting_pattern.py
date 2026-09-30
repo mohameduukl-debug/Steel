@@ -438,6 +438,41 @@ def build_panels(model, X, along, strip, seams_mode, surf):
     return panels, seam_curves, notes
 
 
+# ---------------------------------------------------------------- drawing
+def draw_panel(dxf, pid, cut, net, marks, note, off, L, W, table=False):
+    sh = lambda p: (p[0] + off[0], p[1] + off[1])
+    dxf.polyline([sh(p) for p in cut], "CUT", closed=True)
+    dxf.polyline([sh(p) for p in net], "NET", closed=True)
+    # label inside the fabric: vertical section of the net outline at mid-length
+    xm = L / 2
+    ys = []
+    for i in range(len(net)):
+        (x1, y1), (x2, y2) = net[i], net[(i + 1) % len(net)]
+        if (x1 - xm) * (x2 - xm) <= 0 and x1 != x2:
+            ys.append(y1 + (y2 - y1) * (xm - x1) / (x2 - x1))
+    lo, hi = (min(ys), max(ys)) if len(ys) >= 2 else (0.0, W)
+    local = hi - lo
+    h = max(min(local / 6, 120), 10)
+    mid = sh((xm, (lo + hi) / 2))
+    dxf.text(pid, (mid[0], mid[1] + 0.6 * h), h, "TEXT", align_center=True)
+    dxf.text(note, (mid[0], mid[1] - 0.3 * h), 0.35 * h, "TEXT", align_center=True)
+    dxf.arrow((mid[0] - L / 6, mid[1] - 1.1 * h), (mid[0] + L / 6, mid[1] - 1.1 * h), h / 2, "WARP")
+    dxf.text("WARP", (mid[0], mid[1] - 1.7 * h), 0.35 * h, "WARP", align_center=True)
+    for m in marks:
+        dxf.line(sh(m["p"]), sh(m["q"]), "NOTCH")
+        dxf.text(f"{m['seam']}.{m['k']}", sh(m["q"]), 0.25 * h, "NOTCH")
+    if table:
+        dxf.dimension_text(sh((0, 0)), sh((L, 0)), -2 * h, 0.4 * h, "DIM")
+        dxf.dimension_text(sh((L, 0)), sh((L, W)), -2 * h, 0.4 * h, "DIM")
+        th = 0.3 * h
+        y = -4 * h
+        dxf.text("NET LINE COORDINATES (mm, panel origin at lower-left of cut outline)", sh((0, y)), th, "TEXT")
+        step = max(1, len(net) // 60)
+        for i, p in enumerate(net[::step]):
+            col, row = divmod(i, 20)
+            dxf.text(f"{i * step:3d}: {p[0]:8.1f} {p[1]:8.1f}", sh((col * 14 * th * 2, y - (row + 1) * 1.6 * th)), th, "TEXT")
+
+
 # ---------------------------------------------------------------- main
 def process_panel(pan, cw, cf, dec_end, dec_side, dec_len):
     grid = pan["grid"]
@@ -491,7 +526,7 @@ def process_panel(pan, cw, cf, dec_end, dec_side, dec_len):
     # boundary: end row 0 (k up), right side (s up), end row ns-1 (k down), left side (s down)
     ring = [idx(0, k) for k in range(nx)] + [idx(s, nx - 1) for s in range(1, ns)] + \
            [idx(ns - 1, k) for k in range(nx - 2, -1, -1)] + [idx(s, 0) for s in range(ns - 2, 0, -1)]
-    kinds = ["end"] * (nx - 1) + ["right"] * (ns - 1) + ["end"] * (nx - 1) + ["left"] * (ns - 1)
+    kinds = ["end0"] * (nx - 1) + ["right"] * (ns - 1) + ["end1"] * (nx - 1) + ["left"] * (ns - 1)
     net = [tuple(N[v]) for v in ring]
     if area(net) < 0:
         net.reverse()
@@ -500,7 +535,86 @@ def process_panel(pan, cw, cf, dec_end, dec_side, dec_len):
     seam_len = {"left": 0.0, "right": 0.0}
     for side, k in (("left", 0), ("right", nx - 1)):
         seam_len[side] = polylen([grid[s][k] for s in range(ns)])
-    return net, kinds, emax, erms, seam_len
+    seam2d = {"left": [tuple(N[idx(s, 0)]) for s in range(ns)],
+              "right": [tuple(N[idx(s, nx - 1)]) for s in range(ns)]}
+    strip_w = max(math.hypot(N[idx(s, 0)][0] - N[idx(s, nx - 1)][0], N[idx(s, 0)][1] - N[idx(s, nx - 1)][1])
+                  for s in range(ns))
+    seam2d["strip_width"] = strip_w
+    return net, kinds, emax, erms, seam_len, seam2d
+
+
+_SPLIT_COUNTER = [0]
+
+
+def split_panel(pan, surf_fn, across=False):
+    """split an over-wide panel: along its length (extra long seam) or across it (cross seam, for curved
+    'banana' panels whose bounding width comes from curvature rather than strip width)."""
+    grid = pan["grid"]
+    ns, nx = len(grid), len(grid[0])
+    _SPLIT_COUNTER[0] += 1
+    new_id = f"N{_SPLIT_COUNTER[0]}"
+    lid, rid = pan["ids"]
+    base = {k: v for k, v in pan.items() if k not in ("grid",)}
+    info = pan["seam_info"]
+    if across and ns >= 3:
+        m = ns // 2
+        dl = polylen([row[0] for row in grid[:m + 1]])
+        dr = polylen([row[-1] for row in grid[:m + 1]])
+        p1 = dict(base, grid=grid[:m + 1], end1_seam=True, end_ids=(pan.get("end_ids", ("", ""))[0], new_id))
+        p2 = dict(base, grid=grid[m:], end0_seam=True, end_ids=(new_id, pan.get("end_ids", ("", ""))[1]),
+                  seam_info={"left": (info["left"][0] + dl, info["left"][1]),
+                             "right": (info["right"][0] + dr, info["right"][1])})
+        return [p1, p2]
+    if nx >= 3:
+        m = nx // 2
+        g1 = [row[:m + 1] for row in grid]
+        g2 = [row[m:] for row in grid]
+    else:
+        surf = surf_fn()
+        mids = [surf.project(lerp(row[0], row[1], 0.5)) for row in grid]
+        g1 = [[row[0], mp] for row, mp in zip(grid, mids)]
+        g2 = [[mp, row[1]] for row, mp in zip(grid, mids)]
+    Lnew = polylen([row[-1] for row in g1])
+    p1 = dict(base, grid=g1, right_seam=True, ids=(lid, new_id), seam_info={"left": info["left"], "right": (0.0, Lnew)})
+    p2 = dict(base, grid=g2, left_seam=True, ids=(new_id, rid), seam_info={"left": (0.0, Lnew), "right": info["right"]})
+    return [p1, p2]
+
+
+def inside(pt, poly):
+    x, y = pt
+    ins = False
+    n = len(poly)
+    for i in range(n):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % n]
+        if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
+            ins = not ins
+    return ins
+
+
+def notch_marks(poly2d, net, fractions, length):
+    """match marks at given arc-length fractions (with their labels) along a seam polyline,
+    pointing out of the net outline. fractions = [(f, label), ...] with 0 < f < 1."""
+    s = [0.0]
+    for i in range(1, len(poly2d)):
+        s.append(s[-1] + d2(poly2d[i - 1], poly2d[i]))
+    L = s[-1]
+    marks = []
+    j = 0
+    for fr, k in fractions:
+        t = L * fr
+        while j < len(poly2d) - 2 and s[j + 1] < t:
+            j += 1
+        seg = (s[j + 1] - s[j]) or 1e-12
+        f = (t - s[j]) / seg
+        p = (poly2d[j][0] + f * (poly2d[j + 1][0] - poly2d[j][0]), poly2d[j][1] + f * (poly2d[j + 1][1] - poly2d[j][1]))
+        tx, ty = poly2d[j + 1][0] - poly2d[j][0], poly2d[j + 1][1] - poly2d[j][1]
+        tl = math.hypot(tx, ty) or 1e-12
+        nx_, ny_ = -ty / tl, tx / tl
+        if inside((p[0] + nx_ * 1.0, p[1] + ny_ * 1.0), net):
+            nx_, ny_ = -nx_, -ny_
+        marks.append((p, (p[0] + nx_ * length, p[1] + ny_ * length), k))
+    return marks
 
 
 def main(argv=None):
@@ -522,6 +636,11 @@ def main(argv=None):
     ap.add_argument("--roll-width", type=float, default=2500.0, help="usable fabric roll width [mm]")
     ap.add_argument("--scale", type=float, default=1000.0, help="model length unit -> mm (m->mm = 1000)")
     ap.add_argument("--prefix", default="P")
+    ap.add_argument("--auto-split", action="store_true", help="split panels wider than the roll (extra seam)")
+    ap.add_argument("--notch", type=float, default=1000.0, help="match-mark spacing along seams [mm]")
+    ap.add_argument("--sheets", action="store_true", help="also write one shop sheet (DXF with title block) per panel")
+    ap.add_argument("--project", default="Tensile structure")
+    ap.add_argument("--material", default="(membrane material)")
     ap.add_argument("--out", default="patterns")
     a = ap.parse_args(argv)
 
@@ -535,45 +654,92 @@ def main(argv=None):
     cw, cf = a.comp_warp / 100, a.comp_weft / 100
 
     dxf = DXF()
-    for ly, col in (("CUT", "red"), ("NET", "cyan"), ("TEXT", "green"), ("WARP", "yellow"), ("DIM", "grey")):
+    layers = (("CUT", "red"), ("NET", "cyan"), ("TEXT", "green"), ("WARP", "yellow"), ("DIM", "grey"),
+              ("NOTCH", "magenta"))
+    for ly, col in layers:
         dxf.layer(ly, col)
-    rows = []
+    rows, pjson = [], []
     xoff = 0.0
-    for k, pan in enumerate(panels, 1):
-        pid = f"{a.prefix}{k:02d}"
-        net, kinds, emax, erms, seam_len = process_panel(pan, cw, cf, a.decomp_ends, a.decomp_sides, a.decomp_length)
-        dists = [a.seam if (kd == "left" and pan["left_seam"]) or (kd == "right" and pan["right_seam"]) else a.edge
-                 for kd in kinds]
+    surf_cache = {}
+
+    def surf_fn():
+        if "s" not in surf_cache:
+            surf_cache["s"] = surf or Surface(X, model["faces"])
+        return surf_cache["s"]
+
+    _SPLIT_COUNTER[0] = 0
+    queue = [dict(p, ids=(f"L{p['lines'][0]}", f"L{p['lines'][1]}"), depth=0,
+                  seam_info={"left": (0.0, polylen([r[0] for r in p["grid"]])),
+                             "right": (0.0, polylen([r[-1] for r in p["grid"]]))}) for p in panels]
+    k = 0
+    while queue:
+        pan = queue.pop(0)
+        net, kinds, emax, erms, seam_len, seam2d = process_panel(pan, cw, cf, a.decomp_ends, a.decomp_sides,
+                                                                 a.decomp_length)
+        def is_seam(kd):
+            return ((kd == "left" and pan["left_seam"]) or (kd == "right" and pan["right_seam"])
+                    or (kd == "end0" and pan.get("end0_seam")) or (kd == "end1" and pan.get("end1_seam")))
+        dists = [a.seam if is_seam(kd) else a.edge for kd in kinds]
         cut = offset_polygon(net, dists)
+        W = max(p[1] for p in cut) - min(p[1] for p in cut)
+        if a.auto_split and W > a.roll_width and pan["depth"] < 6:
+            across = seam2d["strip_width"] + 2 * a.seam < 0.9 * a.roll_width   # width comes from curvature
+            parts = split_panel(pan, surf_fn, across)
+            for q in parts[::-1]:
+                queue.insert(0, dict(q, depth=pan["depth"] + 1))
+            notes.append(f"panel between {pan['ids'][0]} and {pan['ids'][1]}: {W:.0f} mm > roll {a.roll_width:.0f} mm "
+                         f"-> split {'ACROSS (cross seam, curved panel)' if across else 'along its length (extra seam)'}")
+            continue
+        k += 1
+        pid = f"{a.prefix}{k:02d}"
         minx = min(p[0] for p in cut)
         miny = min(p[1] for p in cut)
         maxx = max(p[0] for p in cut)
         maxy = max(p[1] for p in cut)
-        sh = lambda p: (p[0] - minx + xoff, p[1] - miny)
-        dxf.polyline([sh(p) for p in cut], "CUT", closed=True)
-        dxf.polyline([sh(p) for p in net], "NET", closed=True)
         L, W = maxx - minx, maxy - miny
-        mid = sh(((minx + maxx) / 2, (miny + maxy) / 2))
-        h = max(min(W / 12, 120), 20)
-        dxf.text(pid, (mid[0], mid[1] + h), h, "TEXT", align_center=True)
+        loc = lambda p: (p[0] - minx, p[1] - miny)
+        cut_l, net_l = [loc(p) for p in cut], [loc(p) for p in net]
+        marks = []
+        for side, sid in (("left", pan["ids"][0]), ("right", pan["ids"][1])):
+            if (side == "left" and pan["left_seam"]) or (side == "right" and pan["right_seam"]):
+                s0, Lfull = pan["seam_info"][side]
+                n_full = max(2, round(Lfull / a.notch))
+                sp = Lfull / n_full
+                fr = [((kk * sp - s0) / seam_len[side], kk) for kk in range(1, n_full)
+                      if s0 + 1e-6 < kk * sp < s0 + seam_len[side] - 1e-6]
+                for (p0, p1, kk) in notch_marks([loc(p) for p in seam2d[side]], net_l, fr, a.seam):
+                    marks.append({"seam": sid, "k": kk, "p": p0, "q": p1})
         note = f"cw {a.comp_warp}% cf {a.comp_weft}%"
         if a.decomp_ends is not None:
             note += f" | ends {a.decomp_ends}%/{a.decomp_length:g}mm"
         if a.decomp_sides is not None:
             note += f" | sides {a.decomp_sides}%"
-        dxf.text(note, (mid[0], mid[1] - 0.8 * h), 0.4 * h, "TEXT", align_center=True)
-        dxf.arrow((mid[0] - L / 4, mid[1] - 2 * h), (mid[0] + L / 4, mid[1] - 2 * h), h / 2, "WARP")
-        dxf.text("WARP", (mid[0], mid[1] - 2.6 * h), 0.4 * h, "WARP", align_center=True)
+        draw_panel(dxf, pid, cut_l, net_l, marks, note, (xoff, 0.0), L, W)
         net_area = abs(area(net)) / 1e6
         rows.append({"panel": pid, "length_mm": round(L), "width_mm": round(W),
                      "fits_roll": W <= a.roll_width, "net_area_m2": round(net_area, 3),
                      "cut_area_m2": round(abs(area(cut)) / 1e6, 3), "bbox_area_m2": round(L * W / 1e6, 3),
                      "flatten_strain_max_%": round(emax * 100, 3), "flatten_strain_rms_%": round(erms * 100, 3),
                      "seam_left_3d_mm": round(seam_len["left"], 1), "seam_right_3d_mm": round(seam_len["right"], 1),
-                     "left": "seam" if pan["left_seam"] else "boundary",
-                     "right": "seam" if pan["right_seam"] else "boundary"})
+                     "left": pan["ids"][0] if pan["left_seam"] else "boundary",
+                     "right": pan["ids"][1] if pan["right_seam"] else "boundary",
+                     "cross_seams": ",".join(x for x in pan.get("end_ids", ("", "")) if x)})
+        pjson.append({"panel": pid, "cut": cut_l, "net": net_l, "notches": marks, "L": L, "W": W,
+                      "net_area_m2": net_area, "note": note})
+        if a.sheets:
+            sheet = DXF()
+            for ly, col in layers + (("TITLE", "grey"),):
+                sheet.layer(ly, col)
+            draw_panel(sheet, pid, cut_l, net_l, marks, note, (0.0, 0.0), L, W, table=True)
+            sheet.frame({"PROJECT": a.project, "PANEL": pid, "MATERIAL": a.material, "DWG No": f"{a.out}-{pid}",
+                         "REV": "A", "SCALE": "1:1 (mm)", "COMP": f"w {a.comp_warp}% / f {a.comp_weft}%",
+                         "SEAMS": f"{rows[-1]['left']} / {rows[-1]['right']}", "NET AREA": f"{net_area:.2f} m2"},
+                        max(min(W / 25, 60), 12))
+            sheet.save(f"{a.out}_{pid}.dxf")
         xoff += L + 300
     dxf.save(a.out + ".dxf")
+    with open(a.out + ".json", "w") as fh:
+        json.dump({"roll_width": a.roll_width, "panels": pjson}, fh, indent=1)
     with open(a.out + ".csv", "w", newline="") as fh:
         wr = csv.DictWriter(fh, fieldnames=list(rows[0]))
         wr.writeheader()
@@ -590,15 +756,15 @@ def main(argv=None):
     print(f"Total net {tot_net:.2f} m2, fabric consumed (bounding boxes) {tot_bb:.2f} m2, "
           f"un-nested waste ~{(1 - tot_net / tot_bb) * 100:.0f}% (nesting on the roll reduces this)")
     if a.seams == "geodesic":
-        gl = [polylen(c) for k, c in seam_curves.items()]
+        gl = [polylen(c) for kk, c in seam_curves.items()]
         print(f"Geodesic seams: {len(seam_curves)} lines, lengths {min(gl):.0f}–{max(gl):.0f} mm")
-        for n_ in notes:
-            print("  NOTE:", n_)
+    for n_ in notes:
+        print("  NOTE:", n_)
     if any(not r["fits_roll"] for r in rows):
-        print("WARNING: some panels exceed the roll width -> reduce --strip")
+        print("WARNING: some panels exceed the roll width -> reduce --strip or use --auto-split")
     if any(r["flatten_strain_max_%"] > 0.5 for r in rows):
         print("WARNING: flattening strain > 0.5% -> panels too wide for this curvature; reduce --strip")
-    print(f"Wrote {a.out}.dxf and {a.out}.csv")
+    print(f"Wrote {a.out}.dxf, {a.out}.csv, {a.out}.json" + (f" and {len(rows)} panel sheets" if a.sheets else ""))
     return rows
 
 

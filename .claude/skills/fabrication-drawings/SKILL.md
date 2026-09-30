@@ -11,6 +11,7 @@ description: Patterning (cutting patterns) and fabrication/shop drawings for ten
 | `scripts/cutting_pattern.py` | flattened, compensated panels with seam/edge allowances → `patterns.dxf` (CUT / NET / TEXT / WARP / DIM layers) + `patterns.csv` (size, roll fit, area, flattening strain) |
 | `scripts/export_dxf.py` | 3D GA / coordination DXF: membrane mesh, edge-cable polylines, supports with a set-out table, force labels |
 | `scripts/steel_part_dxf.py` | steel part drawings: `lug` (fork gusset, Tab 3.9 geometry) and `corner` (hull from hole list, hole table), with frame and title block |
+| `scripts/nest_panels.py` | nests the panels on the roll (warp along the roll, 0°/180° only, raster skyline so curved panels interlock) → nested DXF, positions CSV, roll length, utilisation |
 | `scripts/dxf_writer.py` | minimal DXF library (lines, polylines 2D/3D, arcs, circles, text, arrows, dimensions, title block, auto frame) |
 | `../cable-tension-members/scripts/cable_schedule.py` | cable schedule (unstressed pin-to-pin lengths at T_ref, fittings, checks) |
 
@@ -22,6 +23,21 @@ python3 steel_part_dxf.py lug --d0 41 --d 40 --t 20 --a 50 --c 35 --base 160 --h
 python3 steel_part_dxf.py corner --t 25 --edge 45 --hole A:0:0:52 --hole EC1:180:48:33 --hole EC2:48:180:33 \
         --hole M1:95:95:18 --mark CP-01
 ```
+**Shop-ready output:**
+```bash
+python3 cutting_pattern.py mb.json --seams geodesic --strip 1 --roll-width 2670 --auto-split --notch 1000 \
+        --sheets --project "Market roof" --material "PVC Type III" --out mb_patterns
+python3 nest_panels.py mb_patterns.json --gap 20 --out mb_nest
+```
+- `--auto-split`: a panel wider than the roll is split automatically, **across** (cross seam) when the width comes from
+  curvature (banana panels), or **along** (extra seam) when the strip itself is too wide. New seams are named N1, N2 …
+- `--notch`: match marks at equal spacing measured along the **full** seam, so both mating panels, and the halves of a
+  split seam, carry identical labels (tested).
+- `--sheets`: one DXF shop sheet per panel with outlines, notches, warp arrow, dimensions, a NET-line coordinate table
+  and a title block (project, material, compensation, seams, net area).
+- A JSON file with all panel polygons feeds `nest_panels.py`.
+- `steel_part_dxf.py lug` now carries an **ISO 2553** (System A) double-fillet weld symbol with the throat size.
+
 **Geodesic seams + decompensation:**
 ```bash
 python3 cutting_pattern.py sail.json --seams geodesic --strip 2 --comp-warp 0.8 --comp-weft 1.6 \

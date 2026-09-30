@@ -47,6 +47,7 @@ frame = load("steel-supports", "frame2d")
 found = load("steel-supports", "foundation_check")
 cut = load("fabrication-drawings", "cutting_pattern")
 dxfw = load("fabrication-drawings", "dxf_writer")
+nestm = load("fabrication-drawings", "nest_panels")
 
 
 class TestFormFinding(unittest.TestCase):
@@ -538,7 +539,7 @@ class TestGeodesicAndDecomp(unittest.TestCase):
         mid3d = cut.polylen(pan["grid"][len(pan["grid"]) // 2])
         net, kinds, *_ = cut.process_panel(pan, 0.01, 0.02, 0.0, None, 1000.0)
         # net ring starts with end row 0 (or reversed); measure end-row and mid-rung widths in 2D
-        ends = [i for i, k in enumerate(kinds) if k == "end"]
+        ends = [i for i, k in enumerate(kinds) if k.startswith("end")]
         L_end = sum(math.dist(net[i], net[(i + 1) % len(net)]) for i in ends) / 2
         self.assertAlmostEqual(L_end / end3d, 1.0, delta=0.002)       # decompensated to 0 %
         net2, *_ = cut.process_panel(pan, 0.01, 0.02, None, None, 1000.0)
@@ -583,6 +584,64 @@ class TestNewShapes(unittest.TestCase):
         for a, b in zip(s, reversed(s)):
             self.assertAlmostEqual(a, b, delta=0.02)        # mirror-symmetric roof -> mirror-symmetric strains
         self.assertLess(max(s), 2.0)
+
+
+class TestFabricationExtras(unittest.TestCase):
+    def patterns(self, *extra):
+        tmp = tempfile.mkdtemp()
+        p = os.path.join(tmp, "mb")
+        quiet(fdm.main, ["multibay", "--bays", "2", "--qc", "3", "--prestress", "2", "--out", p])
+        out = os.path.join(tmp, "pat")
+        rows = quiet(cut.main, [p + ".json", "--strip", "1", "--roll-width", "2670", "--out", out] + list(extra))
+        with open(out + ".json") as fh:
+            return rows, json.load(fh), tmp
+
+    def test_auto_split_fits_roll_and_notches_match(self):
+        rows, data, _ = self.patterns("--auto-split", "--notch", "800")
+        self.assertTrue(all(r["fits_roll"] for r in rows))
+        # each seam's match-mark labels (positions along the full seam) are the same set on both sides
+        sides = {}
+        for pnl in data["panels"]:
+            for m in pnl["notches"]:
+                sides.setdefault((m["seam"], pnl["panel"]), set()).add(m["k"])
+        by_seam = {}
+        for (sid, pid), ks in sides.items():
+            by_seam.setdefault(sid, []).append(ks)
+        for sid, sets in by_seam.items():
+            full = max(sets, key=len)                     # the unsplit side carries every mark
+            rest = [x for x in sets if x is not full]
+            self.assertEqual(set().union(*rest), full, sid)  # split halves together = the other side
+            for i in range(len(rest)):
+                for j in range(i + 1, len(rest)):
+                    self.assertFalse(rest[i] & rest[j], sid)   # halves do not duplicate marks
+
+    def test_nesting_no_overlap_within_roll(self):
+        rows, data, tmp = self.patterns("--auto-split")
+        placed, length = nestm.nest(data["panels"], 2670, 25, 20)
+        self.assertEqual(len(placed), len(data["panels"]))
+        for q in placed:
+            ys = [y for _, y in q["poly"]]
+            self.assertGreaterEqual(min(ys), -1e-6)
+            self.assertLessEqual(max(ys), 2670 + 1e-6)
+        # no two panels overlap: sample panel interiors on a grid
+        for i, a in enumerate(placed):
+            for b in placed[i + 1:]:
+                ax = [x for x, _ in a["poly"]]
+                bx = [x for x, _ in b["poly"]]
+                if max(ax) < min(bx) or max(bx) < min(ax):
+                    continue
+                x0, x1 = max(min(ax), min(bx)), min(max(ax), max(bx))
+                for k in range(1, 20):
+                    xq = x0 + (x1 - x0) * k / 20
+                    for yq in range(0, 2670, 60):
+                        self.assertFalse(cut.inside((xq, yq), a["poly"]) and cut.inside((xq, yq), b["poly"]))
+
+    def test_weld_symbol_entities(self):
+        d = dxfw.DXF()
+        d.weld_symbol((0, 0), "a8", both_sides=True, h=5)
+        txt = d.tostring()
+        self.assertEqual(txt.count("\na8\n"), 2)
+        self.assertIn("WELD", txt)
 
 
 class TestDXF(unittest.TestCase):

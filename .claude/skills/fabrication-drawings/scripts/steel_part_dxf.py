@@ -35,7 +35,7 @@ from dxf_writer import DXF  # noqa: E402
 
 def setup(d: DXF):
     for ly, col in (("OUTLINE", "white"), ("HOLES", "red"), ("CENTER", "yellow"), ("DIM", "cyan"),
-                    ("TEXT", "green"), ("TITLE", "grey")):
+                    ("TEXT", "green"), ("TITLE", "grey"), ("WELD", "magenta")):
         d.layer(ly, col)
 
 
@@ -73,6 +73,10 @@ def lug(a):
     d.dimension_text((a.d0 / 2, H), (R, H), 2 * th, th, "DIM")
     d.text(f"%%c{a.d0:g} H11 (pin %%c{a.d:g})" if a.d else f"%%c{a.d0:g} H11", (a.d0 / 2 + th, H + a.d0 / 2 + th),
            th, "TEXT")
+    # ISO 2553 weld symbol at the weld line (lug to member), both-sides fillet
+    wsize = a.weld.split("a=")[1].split()[0] if "a=" in a.weld else "?"
+    d.weld_symbol((W / 2, 0.0), f"a{wsize}", both_sides=True, all_round=False, h=th * 0.9, layer="WELD",
+                  note=f"ISO 2553 syst. A, {len(a.weld) and 'double fillet'}; WPS per EN ISO 15614")
     notes = [f"{a.mark}  LUG PLATE  t = {a.t:g} mm  {a.grade}  QTY {a.qty}",
              f"a (end) = {a.a:g} mm   c (side) = {a.c:g} mm   R head = {R:g} mm",
              "Hole bored after welding/galvanising to H11 (EN 1090-2); deburr, radius arrises 2 mm.",

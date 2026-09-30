@@ -67,6 +67,7 @@ python3 "$S/tensile-analysis/scripts/form_find_fdm.py" multibay --bays 3 --bay 8
         --nv 12 --qc 3 --prestress 2 --out multibay | grep -E "RIDGE|VALLEY"
 python3 "$S/tensile-analysis/scripts/dynamic_relaxation.py" multibay.json --snow 0.8 --ponding | grep -E "Ponding|RIDGE|VALLEY"
 python3 "$S/fabrication-drawings/scripts/cutting_pattern.py" multibay.json --seams geodesic --strip 1 --roll-width 2670 \
-        --out multibay_patterns | tail -3
+        --auto-split --notch 1000 --sheets --project "Demo market roof" --out multibay_patterns | tail -4
+python3 "$S/fabrication-drawings/scripts/nest_panels.py" multibay_patterns.json --gap 20 --out multibay_nest
 
 echo; echo "Done. Files in $OUT:"; ls -1 "$OUT"
