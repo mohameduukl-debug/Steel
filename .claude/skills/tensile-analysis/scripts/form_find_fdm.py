@@ -151,6 +151,103 @@ def gen_cone(R: float, r: float, H: float, anchors: int, nr: int, nc: int, qm: f
             "nodes": nodes, "edges": edges, "faces": faces}
 
 
+def gen_arch(L: float, B: float, H: float, n_arches: int, nu: int, nv: int, qm: float, qc: float):
+    """Arch-supported tunnel. x = tunnel axis (0..L), y = span (0..B).
+    Rigid parabolic arches z = 4H·y(B−y)/B² at x_k = k·L/(n_arches+1); side rails y=0, y=B fixed at z=0;
+    free end edges at x=0 and x=L (edge cables anchored at the ground corners)."""
+    step = n_arches + 1
+    if nu % step:
+        nu += step - nu % step
+    idx = _grid_idx(nu)
+    arch_i = {k * nu // step: f"ARCH-{k}" for k in range(1, step)}
+    nodes = []
+    for j in range(nv + 1):
+        for i in range(nu + 1):
+            x, y = L * i / nu, B * j / nv
+            z_arch = 4 * H * y * (B - y) / (B * B)
+            tag = None
+            fixed = False
+            if j in (0, nv):
+                fixed, tag = True, "RAIL-S" if j == 0 else "RAIL-N"
+            elif i in arch_i:
+                fixed, tag = True, arch_i[i]
+            nd = {"id": idx(i, j), "xyz": [x, y, 0.8 * z_arch], "fixed": fixed, "grid": [i, j]}
+            if i in arch_i:
+                nd["xyz"][2] = z_arch
+            if tag:
+                nd["support_group"] = tag
+            nodes.append(nd)
+    edges = []
+
+    def add(a, b, kind, q, group=None):
+        if nodes[a]["fixed"] and nodes[b]["fixed"]:
+            return
+        e = {"id": len(edges), "n": [a, b], "q": q, "kind": kind}
+        if group:
+            e["group"] = group
+        edges.append(e)
+
+    for j in range(nv + 1):
+        for i in range(nu):
+            add(idx(i, j), idx(i + 1, j), "membrane", qm)
+    for i in range(nu + 1):
+        for j in range(nv):
+            end = i in (0, nu)
+            add(idx(i, j), idx(i, j + 1), "edge_cable" if end else "membrane", qc if end else qm,
+                ("EC-W" if i == 0 else "EC-E") if end else None)
+    faces = [[idx(i, j), idx(i + 1, j), idx(i + 1, j + 1), idx(i, j + 1)] for j in range(nv) for i in range(nu)]
+    return {"units": {"length": "m", "force": "kN"}, "type": "arch",
+            "grid": {"nu": nu, "nv": nv, "periodic_u": False}, "nodes": nodes, "edges": edges, "faces": faces}
+
+
+def gen_multibay(n_bays: int, bay: float, B: float, h_hi: float, h_lo: float, m: int, nv: int,
+                 qm: float, qr: float, qc: float):
+    """Multi-bay ridge-and-valley roof. Lines x_k = k·bay/2 (k = 0..2·n_bays) span y = 0..B:
+    even k = HIGH lines (k = 0, 2n are free edge cables, interior = ridge cables),
+    odd k = VALLEY cables. Line ends are fixed (masts at high ends, anchors at low ends);
+    the y = 0 / y = B boundaries between line ends are scalloped edge cables."""
+    nu = 2 * n_bays * m
+    idx = _grid_idx(nu)
+    nodes = []
+    for j in range(nv + 1):
+        for i in range(nu + 1):
+            k, r = divmod(i, m)
+            z0 = h_hi if k % 2 == 0 else h_lo
+            z1 = h_lo if k % 2 == 0 else h_hi
+            z = z0 + (z1 - z0) * r / m
+            fixed = j in (0, nv) and r == 0
+            nd = {"id": idx(i, j), "xyz": [bay / 2 * i / m, B * j / nv, z], "fixed": fixed, "grid": [i, j]}
+            if fixed:
+                nd["support_group"] = ("MAST" if k % 2 == 0 else "ANCHOR") + f"-{k}-{'S' if j == 0 else 'N'}"
+            nodes.append(nd)
+    edges = []
+
+    def add(a, b, kind, q, group=None):
+        e = {"id": len(edges), "n": [a, b], "q": q, "kind": kind}
+        if group:
+            e["group"] = group
+        edges.append(e)
+
+    for j in range(nv + 1):
+        for i in range(nu):
+            if j in (0, nv):
+                add(idx(i, j), idx(i + 1, j), "edge_cable", qc, f"EC-{'S' if j == 0 else 'N'}{i // m + 1}")
+            else:
+                add(idx(i, j), idx(i + 1, j), "membrane", qm)
+    for i in range(nu + 1):
+        k, r = divmod(i, m)
+        for j in range(nv):
+            if r == 0 and k in (0, 2 * n_bays):
+                add(idx(i, j), idx(i, j + 1), "edge_cable", qc, "EC-W" if k == 0 else "EC-E")
+            elif r == 0:
+                add(idx(i, j), idx(i, j + 1), "cable", qr, (f"RIDGE-{k}" if k % 2 == 0 else f"VALLEY-{k}"))
+            else:
+                add(idx(i, j), idx(i, j + 1), "membrane", qm)
+    faces = [[idx(i, j), idx(i + 1, j), idx(i + 1, j + 1), idx(i, j + 1)] for j in range(nv) for i in range(nu)]
+    return {"units": {"length": "m", "force": "kN"}, "type": "multibay",
+            "grid": {"nu": nu, "nv": nv, "periodic_u": False}, "nodes": nodes, "edges": edges, "faces": faces}
+
+
 # ---------------------------------------------------------------- solver
 def solve_fdm(model: dict, loads: dict[int, Vec] | None = None, tol: float = 1e-10, maxit: int = 20000):
     nodes, edges = model["nodes"], model["edges"]
@@ -303,10 +400,30 @@ def compute_results(model: dict, prestress: float | None):
             ch = sub(B, A)
             L = norm(ch)
             sag = max(norm(cross(sub(X[v], A), ch)) / L for v in cnt)
-            info.update({"chord": L, "sag": sag, "sag_ratio": sag / L,
+            vmid = max(cnt, key=lambda v: norm(cross(sub(X[v], A), ch)))
+            t = sum(sub(X[vmid], A)[c] * ch[c] for c in range(3)) / (L * L)
+            dz = X[vmid][2] - (A[2] + t * ch[2])
+            info.update({"chord": L, "sag": sag, "sag_ratio": sag / L, "mid_dz": dz,
                          "radius_approx": (L * L / (8 * sag) + sag / 2) if sag > 0 else math.inf})
         summary.append(info)
     model["cable_groups"] = summary
+    # support groups (arches, rails, masts, anchors): total pull and line load
+    sg = defaultdict(lambda: {"pull": [0.0, 0.0, 0.0], "nodes": []})
+    by_node = {r["node"]: r["pull"] for r in model["reactions"]}
+    for i, nd in enumerate(model["nodes"]):
+        tag = nd.get("support_group")
+        if tag and i in by_node:
+            for c in range(3):
+                sg[tag]["pull"][c] += by_node[i][c]
+            sg[tag]["nodes"].append(i)
+    out = {}
+    for tag, v in sorted(sg.items()):
+        pts = sorted((X[i] for i in v["nodes"]), key=lambda p: (p[0], p[1], p[2]))
+        length = sum(norm(sub(pts[k], pts[k - 1])) for k in range(1, len(pts))) if len(pts) > 1 else 0.0
+        out[tag] = {"pull": v["pull"], "magnitude": norm(v["pull"]), "n_nodes": len(v["nodes"]),
+                    "length": length, "line_load_kN_m": norm(v["pull"]) / length if length else None}
+    if out:
+        model["support_groups"] = out
     mem = [e for e in model["edges"] if e["kind"] == "membrane" and "stress_kN_m" in e]
     if mem:
         s = [e["stress_kN_m"] for e in mem]
@@ -338,7 +455,7 @@ def write_obj(model: dict, path: str) -> None:
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("shape", nargs="?", choices=["sail4", "hypar", "cone"], help="built-in generator")
+    ap.add_argument("shape", nargs="?", choices=["sail4", "hypar", "cone", "arch", "multibay"], help="built-in generator")
     ap.add_argument("--input", help="custom model JSON")
     ap.add_argument("--size", type=float, default=10.0, help="sail/hypar plan side [m]")
     ap.add_argument("--high", type=float, default=3.0, help="height of high corners [m]")
@@ -349,6 +466,17 @@ def main(argv=None):
     ap.add_argument("--anchors", type=int, default=6)
     ap.add_argument("--nr", type=int, default=12)
     ap.add_argument("--nc", type=int, default=36)
+    ap.add_argument("--L", type=float, default=20.0, help="arch: tunnel length [m]")
+    ap.add_argument("--B", type=float, default=10.0, help="arch: span / multibay: depth in y [m]")
+    ap.add_argument("--arches", type=int, default=3, help="arch: number of arches")
+    ap.add_argument("--nu", type=int, default=24, help="arch: divisions along the tunnel")
+    ap.add_argument("--nv", type=int, default=12, help="arch/multibay: divisions across y")
+    ap.add_argument("--bays", type=int, default=3, help="multibay: number of bays")
+    ap.add_argument("--bay", type=float, default=8.0, help="multibay: bay width (ridge to ridge) [m]")
+    ap.add_argument("--h-hi", type=float, default=6.0, help="multibay: ridge / high point height [m]")
+    ap.add_argument("--h-lo", type=float, default=3.0, help="multibay: valley / low point height [m]")
+    ap.add_argument("--m", type=int, default=4, help="multibay: divisions per half bay")
+    ap.add_argument("--qr", type=float, default=15.0, help="multibay: ridge/valley cable force density")
     ap.add_argument("--qm", type=float, default=1.0, help="membrane force density (relative)")
     ap.add_argument("--qc", type=float, default=10.0, help="edge-cable force density (relative)")
     ap.add_argument("--prestress", type=float, default=None,
@@ -366,6 +494,10 @@ def main(argv=None):
         model = gen_sail4(a.size, a.high, a.n, a.qm, a.qc, rigid=True)
     elif a.shape == "cone":
         model = gen_cone(a.R, a.r, a.H, a.anchors, a.nr, a.nc, a.qm, a.qc)
+    elif a.shape == "arch":
+        model = gen_arch(a.L, a.B, a.H, a.arches, a.nu, a.nv, a.qm, a.qc)
+    elif a.shape == "multibay":
+        model = gen_multibay(a.bays, a.bay, a.B, a.h_hi, a.h_lo, a.m, a.nv, a.qm, a.qr, a.qc)
     else:
         ap.error("give a shape or --input")
 
@@ -387,11 +519,19 @@ def main(argv=None):
         print(f"Membrane prestress (grid estimate) kN/m: mean {ms['mean']:.2f}  "
               f"min {ms['min']:.2f}  max {ms['max']:.2f}")
     if model["cable_groups"]:
-        print("\nCable group        Fmax[kN]  Fmin[kN]  chord[m]  sag[m]  sag/chord  R~[m]")
+        print("\nCable group        Fmax[kN]  Fmin[kN]  chord[m]  sag[m]  sag/chord  R~[m]   mid dz[m]")
         for g in model["cable_groups"]:
             print(f"  {g['group']:<16}{g['force_max']:9.2f}{g['force_min']:10.2f}"
                   f"{g.get('chord', float('nan')):10.2f}{g.get('sag', float('nan')):8.3f}"
-                  f"{g.get('sag_ratio', float('nan')):10.3f}{g.get('radius_approx', float('nan')):8.2f}")
+                  f"{g.get('sag_ratio', float('nan')):10.3f}{g.get('radius_approx', float('nan')):8.2f}"
+                  f"{g.get('mid_dz', float('nan')):+11.3f}")
+        print("  (mid dz < 0: cable sags below its chord, e.g. ridge; > 0: hogs above, e.g. valley)")
+    if model.get("support_groups"):
+        print("\nSupport groups (total pull of the structure; line load along the group) :")
+        for tag, v in model["support_groups"].items():
+            x, y, z = v["pull"]
+            ll = f"{v['line_load_kN_m']:.2f} kN/m over {v['length']:.2f} m" if v["line_load_kN_m"] else "point"
+            print(f"  {tag:<14} Fx={x:9.2f} Fy={y:9.2f} Fz={z:9.2f} |F|={v['magnitude']:9.2f} kN  ({ll})")
     print("\nSupport pulls (force from structure on support) [kN]:")
     for rc in model["reactions"][:24]:
         x, y, z = rc["pull"]

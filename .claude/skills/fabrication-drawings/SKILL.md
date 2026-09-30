@@ -36,7 +36,8 @@ python3 cutting_pattern.py sail.json --seams geodesic --strip 2 --comp-warp 0.8 
   boundary sides (not seams). Exactness is tested: a 0 % end keeps its 3D width.
 
 Read the warnings: panel wider than the roll, or flattening strain > 0.5 %, means reduce `--strip` (narrower panels).
-High strain near anchor points of cones is physical (strong double curvature), so use narrow panels there.
+Flattening starts at the panel centre and relaxes to convergence, so results are symmetric for symmetric shapes;
+remaining strain reflects real double curvature (e.g. arch-supported bays), so use narrower panels there.
 
 ## Patterning workflow (details: `reference/patterning.md`)
 1. **Seam layout** on the form-found (prestressed) surface: along geodesics, warp along the main stress / span,

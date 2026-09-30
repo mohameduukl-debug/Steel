@@ -11,10 +11,18 @@ description: Form finding, structural analysis and modelling of tensile membrane
 python3 form_find_fdm.py sail4 --size 10 --high 3 --n 16 --qc 12 --prestress 2.0 --out sail --obj
 python3 form_find_fdm.py hypar --size 8 --high 2 --n 16 --prestress 1.5 --out hypar     # rigid frame edges
 python3 form_find_fdm.py cone  --R 8 --r 0.6 --H 5 --anchors 6 --nr 12 --nc 36 --prestress 2.5 --out cone
+python3 form_find_fdm.py arch  --L 20 --B 10 --H 4 --arches 3 --nu 24 --nv 12 --prestress 2 --out arch
+python3 form_find_fdm.py multibay --bays 3 --bay 8 --B 10 --h-hi 6 --h-lo 3 --m 4 --nv 12 --qc 3 --prestress 2 --out mb
 python3 form_find_fdm.py --input mymodel.json --prestress 2.0 --out result              # any topology
 ```
 - `--qc`: edge-cable to membrane force-density ratio. It controls the edge sag; aim for 8–12 % of chord.
 - `--prestress`: scales every q so the mean membrane stress equals the target (FDM geometry depends only on q ratios).
+- `arch`: arch-supported tunnel. Rigid parabolic arches (support groups ARCH-k), ground rails (RAIL-S/N), free ends with
+  edge cables. It reports the total pull and line load the membrane puts on each arch and rail.
+- `multibay`: ridge-and-valley roof. Ridge cables between masts (sag below the chord), valley cables between anchors
+  (hog above the chord), scalloped side edges; support groups MAST-k and ANCHOR-k. Use `--qc 3` for ~8–10 % scallop sag.
+- Every cable group reports `mid_dz` (negative = sags below its chord, positive = hogs above it); nodes tagged
+  `support_group` are summed into arch, rail, mast and anchor loads.
 - Output: JSON (coordinates, edge forces, membrane stress estimate, cable-group sag/force, support pulls, area) and an OBJ mesh.
 
 ### `scripts/dynamic_relaxation.py`: non-linear load analysis

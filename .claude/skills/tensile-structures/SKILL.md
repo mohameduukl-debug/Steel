@@ -1,6 +1,6 @@
 ---
 name: tensile-structures
-description: Hub skill for tensile fabric (membrane) structures built from membrane fabric, steel cables and structural steel. Use it first for any question about how fabric, cables and steel work together — load path, design workflow, which specialist skill or tool to use. It covers concept, form finding, analysis, connection design, patterning and fabrication/shop drawings for canopies, sails, hypars, cones, arches, cable nets, masts and stadium roofs. Routes to membrane-fabric, cable-tension-members, steel-supports, tensile-connections, tensile-analysis and fabrication-drawings.
+description: Hub skill for tensile fabric (membrane) structures built from membrane fabric, steel cables and structural steel. Use it first for any question about how fabric, cables and steel work together — load path, design workflow, which specialist skill or tool to use. It covers concept, form finding, analysis, connection design, patterning and fabrication/shop drawings for canopies, sails, hypars, cones, arch-supported tunnels, multi-bay ridge/valley roofs, cable nets, masts and stadium roofs. Routes to membrane-fabric, cable-tension-members, steel-supports, tensile-connections, tensile-analysis and fabrication-drawings.
 ---
 
 # Tensile Structures — system hub

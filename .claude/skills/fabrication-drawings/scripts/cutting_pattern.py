@@ -71,7 +71,7 @@ def place_third(pa, pb, la, lb, side=1.0):
 
 
 # ------------------------------------------------------------- flattening
-def flatten(quads, X, iters=400):
+def flatten(quads, X, iters=6000, tol=1e-4):
     """Flatten a set of quads (4-node index tuples into X). Returns 2D dict, max and RMS strain."""
     verts = sorted({v for q in quads for v in q})
     P: dict[int, list[float]] = {}
@@ -86,12 +86,14 @@ def flatten(quads, X, iters=400):
     for k, t in enumerate(tris):
         for u, v in ((t[0], t[1]), (t[1], t[2]), (t[2], t[0])):
             edge_tris.setdefault((min(u, v), max(u, v)), []).append(k)
-    a, b, c = tris[0]
+    # start the unfolding in the middle of the panel so the unfolding error is split both ways
+    t0 = 2 * (len(quads) // 2)
+    a, b, c = tris[t0]
     P[a] = [0.0, 0.0]
     P[b] = [d3(X[a], X[b]), 0.0]
     P[c] = place_third(P[a], P[b], d3(X[a], X[c]), d3(X[b], X[c]), 1.0)
-    seen = {0}
-    queue = [0]
+    seen = {t0}
+    queue = [t0]
     while queue:
         k = queue.pop(0)
         t = tris[k]
@@ -116,7 +118,8 @@ def flatten(quads, X, iters=400):
     for (u, v), L in L3.items():
         nbr[u].append((v, L))
         nbr[v].append((u, L))
-    for _ in range(iters):
+    for _ in range(iters):  # Gauss–Seidel least-squares relaxation, until converged
+        move = 0.0
         for v in verts:
             sx = sy = 0.0
             for w, L in nbr[v]:
@@ -125,7 +128,11 @@ def flatten(quads, X, iters=400):
                 sx += P[w][0] + dx * L / cur
                 sy += P[w][1] + dy * L / cur
             k = len(nbr[v])
-            P[v] = [0.5 * P[v][0] + 0.5 * sx / k, 0.5 * P[v][1] + 0.5 * sy / k]
+            new_ = [0.5 * P[v][0] + 0.5 * sx / k, 0.5 * P[v][1] + 0.5 * sy / k]
+            move = max(move, abs(new_[0] - P[v][0]) + abs(new_[1] - P[v][1]))
+            P[v] = new_
+        if move < tol:
+            break
     strains = [(d2(P[u], P[v]) - L) / L for (u, v), L in L3.items() if L > 1e-9]
     rms = math.sqrt(sum(s * s for s in strains) / len(strains))
     return P, max(abs(s) for s in strains), rms
@@ -323,24 +330,54 @@ def build_panels(model, X, along, strip, seams_mode, surf):
     boundary_line = lambda k: (not per) and k in (0, n_across_lines)
     n_st = nlong + 1  # mesh density: finer sampling of a faceted mesh concentrates curvature at facet folds
     seam_curves = {}
+    relaxed = set()   # seam lines actually replaced by a geodesic
     notes = []
     bnd = [] if per else [resample(line(0), 4 * n_st), resample(line(n_across_lines), 4 * n_st)]
 
     def min_dist_to_boundary(c):
         return min((d3(p, q) for p in c[1:-1] for b_ in bnd for q in b_), default=math.inf)
 
+    # lines that carry a support (arch, rail) or a cable (ridge/valley) must keep their position
+    node_of = {}
+    for vid, nd in enumerate(model["nodes"]):
+        gi, gj = nd["grid"]
+        node_of[(gi, gj)] = vid
+    cable_nodes = set()
+    for e in model["edges"]:
+        if e["kind"] != "membrane":
+            cable_nodes.update(e["n"])
+
+    def constrained(k):
+        ids = ([node_of.get((k % nu if per else k, j)) for j in range(1, nv)] if along == "v"
+               else [node_of.get((i, k)) for i in range(1, nu)])
+        return any(v is not None and (model["nodes"][v].get("fixed") or v in cable_nodes) for v in ids)
+
     for k in sorted(set(cuts)):
         pts = line(k)
-        if seams_mode == "geodesic" and not boundary_line(k):
+        if seams_mode == "geodesic" and not boundary_line(k) and constrained(k):
+            seam_curves[k] = resample(pts, n_st)
+            notes.append(f"seam line {k}: on a support/cable line (arch, ridge, valley) -> kept on that line")
+        elif seams_mode == "geodesic" and not boundary_line(k):
             geo = geodesic(surf, pts, n_st)
             grid_line = resample(pts, n_st)
             # a geodesic between end points near a concave (scalloped) edge runs into the edge:
             # reject it when it closes in on the boundary much more than the grid line does
+            # the seam may not wander more than half a panel width from its grid position,
+            # otherwise it crowds the neighbouring seam (saddles, scalloped edges)
+            nb = [resample(line(kk), n_st) for kk in (k - strip, k + strip)
+                  if per or 0 <= kk <= n_across_lines]
+            spacing = min(d3(grid_line[st], c[st]) for c in nb for st in range(n_st)) if nb else math.inf
+            dev = max(d3(geo[st], grid_line[st]) for st in range(n_st))
             if bnd and min_dist_to_boundary(geo) < 0.5 * min_dist_to_boundary(grid_line):
                 seam_curves[k] = grid_line
                 notes.append(f"seam line {k}: geodesic rejected (runs into the curved boundary) -> grid line used")
+            elif dev > 0.5 * spacing:
+                seam_curves[k] = grid_line
+                notes.append(f"seam line {k}: geodesic rejected (wanders {dev:.0f} mm, > half the panel spacing "
+                             f"{spacing:.0f} mm) -> grid line used")
             else:
                 seam_curves[k] = geo
+                relaxed.add(k)
         elif seams_mode == "geodesic":
             seam_curves[k] = resample(pts, n_st)
         else:
@@ -350,9 +387,28 @@ def build_panels(model, X, along, strip, seams_mode, surf):
     panels = []
     for a, b in zip(cuts[:-1], cuts[1:]):
         A, B = seam_curves[a], seam_curves[b]
-        if seams_mode == "grid":
-            grid = [[(line(i)[st]) for i in range(a, b + 1)] for st in range(n_st)]
+        if seams_mode == "grid" or (a % n_across_lines not in relaxed and b % n_across_lines not in relaxed
+                                    and a not in relaxed and b not in relaxed):
+            # both seams on mesh lines -> exact mesh nodes, no projection
+            lines_ = [line(i) for i in range(a, b + 1)]
+            if seams_mode == "grid":
+                grid = [[ln[st] for ln in lines_] for st in range(n_st)]
+            else:
+                grid = [[resample(ln, n_st)[st] for ln in lines_] for st in range(n_st)]
         else:
+            # project only onto the fabric of this panel (+ margin on sides whose seam is a geodesic),
+            # so points near a crease (arch, ridge) cannot jump to the neighbouring bay
+            lo = a - (strip if a in relaxed else 0)
+            hi = b + (strip if b in relaxed else 0)
+            pfaces = []
+            for f in model["faces"]:
+                gi, gj = model["nodes"][f[0]]["grid"]
+                c_ = gi if along == "v" else gj
+                if per:
+                    c_ = lo + (c_ - lo) % nu
+                if lo <= c_ < hi:
+                    pfaces.append(f)
+            surf = Surface(X, pfaces)
             n_x = (b - a) + 1
             ends = [resample(endrow(a, b, 0), n_x), resample(endrow(a, b, 1), n_x)]
             # deviation of each curved end row from its straight chord, blended into the rungs near that end

@@ -54,4 +54,13 @@ python3 "$S/fabrication-drawings/scripts/steel_part_dxf.py" lug --d0 37 --d 36 -
 python3 "$S/fabrication-drawings/scripts/steel_part_dxf.py" corner --t 25 --edge 45 --hole A:0:0:52 \
         --hole EC1:180:48:37 --hole EC2:48:180:37 --hole M1:100:100:18 --mark CP-01 --qty 4 --project "Demo sail"
 
+echo; echo "== 8. Other shapes: arch-supported tunnel and multi-bay ridge/valley roof =="
+python3 "$S/tensile-analysis/scripts/form_find_fdm.py" arch --L 20 --B 10 --H 4 --arches 3 --nu 24 --nv 12 \
+        --prestress 2 --out arch | sed -n '/Support groups/,/RAIL-S/p'
+python3 "$S/tensile-analysis/scripts/form_find_fdm.py" multibay --bays 3 --bay 8 --B 10 --h-hi 6 --h-lo 3 --m 4 \
+        --nv 12 --qc 3 --prestress 2 --out multibay | grep -E "RIDGE|VALLEY"
+python3 "$S/tensile-analysis/scripts/dynamic_relaxation.py" multibay.json --snow 0.8 --ponding | grep -E "Ponding|RIDGE|VALLEY"
+python3 "$S/fabrication-drawings/scripts/cutting_pattern.py" multibay.json --seams geodesic --strip 1 --roll-width 2670 \
+        --out multibay_patterns | tail -3
+
 echo; echo "Done. Files in $OUT:"; ls -1 "$OUT"

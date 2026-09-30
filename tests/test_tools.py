@@ -363,6 +363,45 @@ class TestGeodesicAndDecomp(unittest.TestCase):
         self.assertAlmostEqual((max(ys) - min(ys)) / mid3d, 0.98, delta=0.002)  # full weft compensation
 
 
+class TestNewShapes(unittest.TestCase):
+    def test_multibay_ridge_valley_physics(self):
+        m = fdm.gen_multibay(2, 8, 10, 6, 3, 4, 10, 1.0, 15.0, 3.0)
+        fdm.solve_fdm(m)
+        fdm.compute_results(m, 2.0)
+        g = {c["group"]: c for c in m["cable_groups"]}
+        self.assertLess(g["RIDGE-2"]["mid_dz"], -0.1)      # ridge cable sags below its chord
+        self.assertGreater(g["VALLEY-1"]["mid_dz"], 0.1)   # valley cable hogs above its chord
+        sg = m["support_groups"]
+        self.assertLess(sg["MAST-2-S"]["pull"][2], 0)      # masts pulled down (compression)
+        self.assertGreater(sg["ANCHOR-1-S"]["pull"][2], 0)  # anchors pulled up (uplift)
+        for c in range(3):
+            self.assertAlmostEqual(sum(v["pull"][c] for v in sg.values()), 0.0, places=3)
+
+    def test_arch_loads_and_symmetry(self):
+        m = fdm.gen_arch(20, 10, 4, 3, 24, 12, 1.0, 10.0)
+        fdm.solve_fdm(m)
+        fdm.compute_results(m, 2.0)
+        sg = m["support_groups"]
+        for k in (1, 2, 3):
+            self.assertLess(sg[f"ARCH-{k}"]["pull"][2], 0)  # membrane pulls the arches down
+        self.assertAlmostEqual(sg["ARCH-1"]["magnitude"], sg["ARCH-3"]["magnitude"], places=3)
+        self.assertGreater(sg["RAIL-S"]["pull"][2], 0)      # rails pulled up
+
+    def test_flatten_symmetric_panels(self):
+        m = fdm.gen_arch(20, 10, 4, 3, 24, 12, 1.0, 10.0)
+        fdm.solve_fdm(m)
+        tmp = tempfile.mkdtemp()
+        p = os.path.join(tmp, "arch.json")
+        fdm.compute_results(m, 2.0)
+        with open(p, "w") as fh:
+            json.dump(m, fh)
+        rows = quiet(cut.main, [p, "--strip", "2", "--out", os.path.join(tmp, "pat")])
+        s = [r["flatten_strain_max_%"] for r in rows]
+        for a, b in zip(s, reversed(s)):
+            self.assertAlmostEqual(a, b, delta=0.02)        # mirror-symmetric roof -> mirror-symmetric strains
+        self.assertLess(max(s), 2.0)
+
+
 class TestDXF(unittest.TestCase):
     def test_structure(self):
         d = dxfw.DXF()
