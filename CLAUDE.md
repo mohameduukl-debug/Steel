@@ -9,6 +9,8 @@ fabric + steel cables + structural steel**, covering analysis, modelling, connec
 - Every script prints its assumptions. Pass them on to the user, with the model limitations (e.g. the DR tool is a cable-net analogy).
 - Code values: quote the tag from the reference files ([V]/[C]/[U]). Never present an [U] value as a code requirement.
   Tell the user to confirm factors against the standard edition and National Annex in force.
+- Code factors live only in `tensile-structures/reference/code_factors.json` (read via `tensile-structures/scripts/factors.py`).
+  Never hard-code a code value in a tool; add it to the register with a V/C/U status and a source.
 - Keep the shared JSON model schema (`tensile-structures/reference/model-schema.md`) backward compatible when editing tools.
 - Units: kN, m for analysis; mm for fabrication and DXF; kN/m for membrane stress; °C.
 

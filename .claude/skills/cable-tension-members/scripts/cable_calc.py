@@ -38,6 +38,9 @@ from __future__ import annotations
 import argparse
 import math
 import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tensile-structures", "scripts"))
+import factors as F  # noqa: E402  central code-factor register (V/C/U tagged)
 
 
 # ---------------------------------------------------------------- catenary
@@ -121,6 +124,19 @@ def parabola(L, h, w, H=None, f=None):
             "length": S, "sag_ratio": n}
 
 
+def fill_factors(a):
+    """fill unspecified code values from the factor register and remember their status."""
+    if getattr(a, "factors", None):
+        os.environ["TENSILE_FACTORS"] = a.factors
+    for attr, key in (("gammaR", "cable.gammaR"), ("fsls", "cable.f_sls"), ("asce", "cable.asce19_factor"),
+                      ("alpha", "cable.alpha_carbon")):
+        if hasattr(a, attr) and getattr(a, attr) is None:
+            setattr(a, attr, F.get(key))
+            setattr(a, attr + "_st", F.status(key))
+        elif hasattr(a, attr):
+            setattr(a, attr + "_st", "user")
+
+
 # ----------------------------------------------------------------- commands
 def cmd_sag(a):
     if sum(v is not None for v in (a.H, a.f, a.S)) != 1:
@@ -190,14 +206,14 @@ def cmd_resist(a):
         FRd_en = min(FRd_en, a.Fk / a.gammaR)
     print("EN 1993-1-11 (6.2) — group B/C tension component")
     print(f"  F_min = {a.Fmin:.1f} kN  k_e = {a.ke:.2f}  ->  F_uk = {Fuk:.1f} kN")
-    print(f"  F_Rd = F_uk/(1.5·γR) = {Fuk / (1.5 * a.gammaR):.1f} kN   (γR = {a.gammaR})"
+    print(f"  F_Rd = F_uk/(1.5·γR) = {Fuk / (1.5 * a.gammaR):.1f} kN   (γR = {a.gammaR} [{getattr(a, 'gammaR_st', '?')}])"
           + (f";  F_k/γR = {a.Fk / a.gammaR:.1f} kN" if a.Fk else ""))
     rows = [("EN ULS", a.FEd, FRd_en)]
     if a.Fser is not None:
         lim = a.fsls * Fuk
-        rows.append((f"EN SLS (≤{a.fsls:.2f}·F_uk, check NA Table 7.2)", a.Fser, lim))
+        rows.append((f"EN SLS (≤{a.fsls:.2f}·F_uk [{getattr(a, 'fsls_st', '?')}])", a.Fser, lim))
     Sd = a.Fmin * a.Nf
-    rows.append((f"ASCE 19 (S_d = S_n·N_f ≥ {a.asce:.1f}·T)", a.asce * (a.T_asce or a.FEd / 1.4), Sd))
+    rows.append((f"ASCE 19 (S_d ≥ {a.asce:.1f}·T [{getattr(a, 'asce_st', '?')}])", a.asce * (a.T_asce or a.FEd / 1.4), Sd))
     for name, dem, cap in rows:
         print(f"  {name:<44} demand {dem:9.1f}  capacity {cap:9.1f}  util {dem / cap:5.2f}"
               + ("  <-- FAIL" if dem > cap else ""))
@@ -244,6 +260,7 @@ def cmd_freq(a):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--factors", default=None, help="project code-factor file (give before the sub-command)")
     sp = ap.add_subparsers(dest="cmd", required=True)
 
     s = sp.add_parser("sag")
@@ -262,7 +279,7 @@ def main(argv=None):
     s.add_argument("--H", type=float)
     s.add_argument("--f", type=float)
     s.add_argument("--EA", type=float, required=True)
-    s.add_argument("--alpha", type=float, default=12e-6, help="1/K (12e-6 carbon, 16e-6 stainless)")
+    s.add_argument("--alpha", type=float, default=None, help="1/K (register: carbon 12e-6; stainless 16e-6)")
     s.add_argument("--T-install", type=float, default=20.0)
     s.add_argument("--T-ref", type=float, default=20.0)
     s.add_argument("--fittings", type=float, default=0.0, help="total fitting length both ends [mm]")
@@ -275,13 +292,13 @@ def main(argv=None):
     s = sp.add_parser("resist")
     s.add_argument("--Fmin", type=float, required=True, help="minimum breaking force of the rope [kN]")
     s.add_argument("--ke", type=float, default=1.0, help="termination loss factor (1.0 socket, 0.9 swaged)")
-    s.add_argument("--gammaR", type=float, default=1.0, help="EN 1993-1-11 Table 6.2 / NA (min 1.0 per EAD)")
+    s.add_argument("--gammaR", type=float, default=None, help="EN 1993-1-11 Table 6.2 / NA (register default)")
     s.add_argument("--Fk", type=float, default=None, help="0.2%% proof force (bars) [kN]")
     s.add_argument("--FEd", type=float, required=True, help="ULS design force [kN]")
     s.add_argument("--Fser", type=float, default=None, help="characteristic (SLS) force [kN]")
-    s.add_argument("--fsls", type=float, default=0.5, help="SLS limit as fraction of F_uk (verify NA)")
+    s.add_argument("--fsls", type=float, default=None, help="SLS limit as fraction of F_uk (register default)")
     s.add_argument("--Nf", type=float, default=1.0, help="ASCE 19 fitting factor")
-    s.add_argument("--asce", type=float, default=2.2, help="ASCE 19 factor on T (2.2)")
+    s.add_argument("--asce", type=float, default=None, help="ASCE 19 factor on T (register default 2.2)")
     s.add_argument("--T-asce", type=float, default=None, help="unfactored ASCE combination tension [kN]")
     s.add_argument("--Fmin-force", type=float, default=None, help="min. cable force in any combination [kN]")
 
@@ -292,7 +309,7 @@ def main(argv=None):
     s.add_argument("--w1", type=float, required=True)
     s.add_argument("--EA", type=float, required=True)
     s.add_argument("--dT", type=float, default=0.0)
-    s.add_argument("--alpha", type=float, default=12e-6)
+    s.add_argument("--alpha", type=float, default=None)
 
     s = sp.add_parser("freq")
     s.add_argument("--L", type=float, required=True)
@@ -301,6 +318,7 @@ def main(argv=None):
     s.add_argument("--modes", type=int, default=3)
 
     a = ap.parse_args(argv)
+    fill_factors(a)
     return {"sag": cmd_sag, "length": cmd_length, "edge": cmd_edge, "resist": cmd_resist,
             "irvine": cmd_irvine, "freq": cmd_freq}[a.cmd](a)
 

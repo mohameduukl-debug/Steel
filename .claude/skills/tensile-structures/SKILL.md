@@ -93,6 +93,20 @@ python3 $S/fabrication-drawings/scripts/export_dxf.py sail.json --forces --out s
 * `reference/model-schema.md`: JSON model format shared by all tools.
 * `reference/standards-map.md`: which standard covers what (EU/US/JP), with verification status.
 
+## Code-factor register (one place for every code value)
+All tools read partial factors, stress factors, γR, k_e, SLS limits, ASCE factors and more from
+`reference/code_factors.json`. Each entry is tagged **V** (confirmed from a source), **C** (standard
+recommended value, NA may differ) or **U** (unverified), and every tool prints the tag next to the value it uses.
+```bash
+python3 .claude/skills/tensile-structures/scripts/factors.py report                  # list; flags U values
+python3 .claude/skills/tensile-structures/scripts/factors.py template > project_factors.json
+# fill in values from your code edition + National Annex, then either:
+export TENSILE_FACTORS=project_factors.json        # all tools
+python3 <tool>.py ... --factors project_factors.json   # one run (cable_calc: before the sub-command)
+```
+A project file only needs the keys you change (see `examples/project_factors_example.json`).
+Before issuing calculations, make sure no **U** factor governs a check.
+
 ## Honesty about code values
 Research for this skill used web search excerpts (primary PDFs were not
 accessible). Values are tagged **[verified-search]**, **[code-knowledge]** or

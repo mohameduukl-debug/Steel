@@ -24,6 +24,9 @@ from __future__ import annotations
 import argparse
 import math
 import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tensile-structures", "scripts"))
+import factors as F  # noqa: E402  central code-factor register (V/C/U tagged)
 
 CURVES = {"a0": 0.13, "a": 0.21, "b": 0.34, "c": 0.49, "d": 0.76}
 
@@ -38,7 +41,10 @@ def chs(D, t):
     return A, I, Wel, Wpl, i
 
 
-def check(D, t, L, N, M, fy, k=1.0, curve=None, cold=False, psi=0.0, E=210000.0, gM0=1.0, gM1=1.0):
+def check(D, t, L, N, M, fy, k=1.0, curve=None, cold=False, psi=0.0, E=None, gM0=None, gM1=None):
+    E = F.get("steel.E") if E is None else E
+    gM0 = F.get("steel.gM0") if gM0 is None else gM0
+    gM1 = F.get("steel.gM1") if gM1 is None else gM1
     eps = math.sqrt(235 / fy)
     r = D / t
     cls = 1 if r <= 50 * eps ** 2 else 2 if r <= 70 * eps ** 2 else 3 if r <= 90 * eps ** 2 else 4
@@ -82,7 +88,11 @@ def main(argv=None):
     ap.add_argument("--fy", type=float, default=355.0)
     ap.add_argument("--cold", action="store_true", help="cold-formed CHS (curve c)")
     ap.add_argument("--curve", choices=list(CURVES), default=None)
+    ap.add_argument("--factors", default=None, help="project code-factor file")
     a = ap.parse_args(argv)
+    if a.factors:
+        os.environ["TENSILE_FACTORS"] = a.factors
+    print(f"Partial factors: {F.tag('steel.gM0')}, {F.tag('steel.gM1')}")
     r = check(a.D, a.t, a.L, a.N, a.M, a.fy, a.k, a.curve, a.cold, a.psi)
     print(f"CHS {a.D}x{a.t}  S{int(a.fy)}  L={a.L} m  k={a.k}  N_Ed={a.N} kN  M_Ed={a.M} kNm")
     for key, v in r.items():

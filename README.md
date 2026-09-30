@@ -51,6 +51,11 @@ python3 $S/tensile-connections/scripts/pin_connection.py --F 250 --Fser 170 --d 
 python3 $S/fabrication-drawings/scripts/cutting_pattern.py cone.json --strip 2 --comp-warp 0.5 --comp-weft 2 --out cone_patterns
 ```
 
+## Code factors
+Every code value (partial factors, stress factors, γR, k_e, SLS limits …) sits in one register,
+`.claude/skills/tensile-structures/reference/code_factors.json`, tagged V/C/U. Override it per project with
+`--factors project.json` or `TENSILE_FACTORS=project.json`. Run `factors.py report` to list unverified values.
+
 ## Using the skills in Claude Code
 Open this repo in Claude Code and ask naturally, e.g.:
 * "Form-find a 12 m hypar sail with two high points at 4 m and check the edge cables."

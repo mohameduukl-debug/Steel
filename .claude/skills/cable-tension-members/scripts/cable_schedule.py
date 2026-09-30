@@ -48,6 +48,8 @@ import sys
 from collections import defaultdict
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "..", "tensile-structures", "scripts"))
+import factors as F  # noqa: E402
 LIB = os.path.join(HERE, "..", "reference", "cable_products.json")
 
 
@@ -80,7 +82,9 @@ def from_model(path, product, uls_factor, sls_factor, deduct):
 def compute(s):
     lib = products()
     T_ref = s.get("T_ref", 20.0)
-    gR = s.get("gammaR", 1.0)
+    gR = s.get("gammaR", F.get("cable.gammaR"))
+    asce = F.get("cable.asce19_factor")
+    fsls = s.get("f_sls", F.get("cable.f_sls"))
     out = []
     for c in s["cables"]:
         p = dict(lib.get(c.get("product", ""), {}))
@@ -89,7 +93,7 @@ def compute(s):
             if req not in p:
                 raise SystemExit(f"cable {c.get('id')}: missing '{req}' (give product or explicit value)")
         EA = p["E"] * p["A"]  # kN (E in kN/mm2 * mm2)
-        alpha = p.get("alpha", 12e-6)
+        alpha = p.get("alpha", F.get("cable.alpha_carbon"))
         T_inst = p.get("T_install", T_ref)
         Lpin = p["L_stressed"] - (p.get("deduct_A_mm", 0) + p.get("deduct_B_mm", 0)) / 1000
         Fp = p.get("F_prestress", 0.0)
@@ -111,8 +115,8 @@ def compute(s):
              "d_mm": p.get("d"), "A_mm2": p["A"], "EA_kN": round(EA), "Fmin_kN": p["Fmin"], "ke": ke,
              "F_Rd_kN": round(FRd, 1), "F_prestress_kN": Fp, "F_ULS_kN": uls, "F_SLS_kN": sls,
              "util_EN": round(uls / FRd, 3) if uls else None,
-             "util_ASCE": round(2.2 * (sls if sls else uls / 1.4) / (p["Fmin"] * p.get("Nf", 1.0)), 3) if uls else None,
-             "util_SLS": round(sls / (s.get("f_sls", 0.5) * Fuk), 3) if sls else None,
+             "util_ASCE": round(asce * (sls if sls else uls / 1.4) / (p["Fmin"] * p.get("Nf", 1.0)), 3) if uls else None,
+             "util_SLS": round(sls / (fsls * Fuk), 3) if sls else None,
              "slack_ok": (p.get("F_min_comb") is None) or p["F_min_comb"] > 0,
              "L_node_stressed_m": p["L_stressed"], "L_pin_stressed_m": round(Lpin, 4),
              "L0_pin_unstressed_Tref_m": round(L0ref, 4),
@@ -142,6 +146,8 @@ def write(rows, s, out):
         fh.write("|" + "---|" * len(cols) + "\n")
         for r in rows:
             fh.write("| " + " | ".join("" if r[k] is None else str(r[k]) for k, _ in cols) + " |\n")
+        fh.write(f"\nCode factors: {F.tag('cable.gammaR')}, {F.tag('cable.f_sls')}, "
+                 f"{F.tag('cable.asce19_factor')} (V verified-search, C code, U unverified)\n")
         fh.write(f"\nNotes\n\n1. Lengths are PIN-TO-PIN. L0 = unstressed length of the prestretched cable at "
                  f"reference temperature {s.get('T_ref', 20)} °C (EA from supplier E × metallic area).\n"
                  "2. F_Rd = F_min·k_e/(1.5·γR) to EN 1993-1-11 (γR per National Annex); ASCE 19: "
@@ -165,7 +171,10 @@ def main(argv=None):
     ap.add_argument("--deduct", type=float, default=0.0, help="node-to-pin deduction each end [mm]")
     ap.add_argument("--out", default="cable_schedule")
     ap.add_argument("--list", action="store_true", help="list library products")
+    ap.add_argument("--factors", default=None, help="project code-factor file")
     a = ap.parse_args(argv)
+    if a.factors:
+        os.environ["TENSILE_FACTORS"] = a.factors
     if a.list:
         for k, v in products().items():
             print(f"{k:<24} {v['type']:<34} d={v['d']:<5} Fmin={v['Fmin']:<7} {v['status']}")

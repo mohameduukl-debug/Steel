@@ -43,12 +43,8 @@ LIB = os.path.join(HERE, "..", "reference", "materials.json")
 CASES = {"prestress": "long", "dead": "long", "snow": "long", "live": "long",
          "wind": "short", "temperature": "short", "installation": "short"}
 
-# indicative A-factor sets (γM, A0 biax/size, A1 duration, A2 ageing, A3 temperature)
-PARTIAL = {
-    "PES/PVC":    {"gM": 1.4, "A0": 1.2, "A1_long": 1.7, "A1_short": 1.0, "A2": 1.1, "A3": 1.1},
-    "glass/PTFE": {"gM": 1.4, "A0": 1.2, "A1_long": 1.4, "A1_short": 1.0, "A2": 1.1, "A3": 1.05},
-    "other":      {"gM": 1.4, "A0": 1.2, "A1_long": 1.7, "A1_short": 1.0, "A2": 1.2, "A3": 1.1},
-}
+sys.path.insert(0, os.path.join(HERE, "..", "..", "tensile-structures", "scripts"))
+import factors as F  # noqa: E402  central code-factor register (V/C/U tagged)
 
 
 def load_lib():
@@ -56,23 +52,32 @@ def load_lib():
         return json.load(fh)
 
 
-def allowable(f, method, case, family, sf_short, sf_long, fm_combo):
+def allowable(f, method, case, family, sf_short=None, sf_long=None, fm_combo="P+D+W"):
+    """allowable membrane stress; factors not given explicitly come from the factor register."""
     dur = CASES[case]
     if method == "factor":
-        sf = sf_long if dur == "long" else sf_short
-        return f / sf, f"SF = {sf:g} ({dur}-term)"
+        key = "membrane.stress_factor_long" if dur == "long" else "membrane.stress_factor_short"
+        given = sf_long if dur == "long" else sf_short
+        sf = given if given is not None else F.get(key)
+        st = "user" if given is not None else F.status(key)
+        return f / sf, f"SF = {sf:g} ({dur}-term) [{st}]"
     if method == "fm":
-        sf = 8.0 if fm_combo == "P+D" else 5.0
-        return f / sf, f"FM DS 1-59 SF = {sf:g} for {fm_combo}"
+        key = "membrane.fm159_PD" if fm_combo == "P+D" else "membrane.fm159_other"
+        sf = F.get(key)
+        return f / sf, f"FM DS 1-59 SF = {sf:g} for {fm_combo} [{F.status(key)}]"
     if method == "japan":
-        k = 8.0 if dur == "long" else 4.0
-        return f / k, f"1/{k:g} of strength ({dur}-term)"
+        key = "membrane.japan_long_divisor" if dur == "long" else "membrane.japan_short_divisor"
+        k = F.get(key)
+        return f / k, f"1/{k:g} of strength ({dur}-term) [{F.status(key)}]"
     if method == "partial":
-        p = PARTIAL.get(family, PARTIAL["other"])
+        tab = F.get("membrane.partial")
+        p = tab.get(family, tab["other"])
         A1 = p["A1_long"] if dur == "long" else p["A1_short"]
         k = p["gM"] * p["A0"] * A1 * p["A2"] * p["A3"]
+        st = F.status("membrane.partial")
+        note = "INDICATIVE — replace with CEN/TS 19102 / NA values" if st == "U" else "project values"
         return f / k, (f"γM {p['gM']} × A0 {p['A0']} × A1 {A1} × A2 {p['A2']} × A3 {p['A3']} = {k:.2f} "
-                       f"(INDICATIVE — replace with CEN/TS 19102 values)")
+                       f"[{st}] ({note})")
     raise ValueError(method)
 
 
@@ -88,15 +93,20 @@ def main(argv=None):
     ap.add_argument("--nmin", type=float, default=None, help="min principal stress (slack check) [kN/m]")
     ap.add_argument("--case", choices=list(CASES), default="wind")
     ap.add_argument("--method", choices=["factor", "fm", "japan", "partial"], default="factor")
-    ap.add_argument("--sf-short", type=float, default=4.0)
-    ap.add_argument("--sf-long", type=float, default=5.0)
+    ap.add_argument("--sf-short", type=float, default=None, help="override short-term stress factor")
+    ap.add_argument("--sf-long", type=float, default=None, help="override long-term stress factor")
+    ap.add_argument("--factors", default=None, help="project code-factor file (overrides register)")
     ap.add_argument("--fm-combo", default="P+D+W", choices=["P+D", "P+D+S", "P+D+W", "P+D+T", "P+D+L", "P+D+R"])
-    ap.add_argument("--seam-eff", type=float, default=0.8, help="seam strength / fabric strength")
+    ap.add_argument("--seam-eff", type=float, default=None, help="seam strength / fabric strength (default register)")
     ap.add_argument("--seam-dir", choices=["warp", "weft", "both"], default="both",
                     help="which stress acts ACROSS seams (seams usually run in warp -> weft stress crosses)")
     ap.add_argument("--prestress", type=float, nargs=2, metavar=("PW", "PF"),
                     help="warp & weft prestress [kN/m] for level advice")
     a = ap.parse_args(argv)
+    if a.factors:
+        os.environ["TENSILE_FACTORS"] = a.factors
+    if a.seam_eff is None:
+        a.seam_eff = F.get("membrane.seam_efficiency")
 
     lib = load_lib()
     if a.list:

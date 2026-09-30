@@ -204,6 +204,30 @@ class TestPatterning(unittest.TestCase):
         self.assertLess(max(r["flatten_strain_max_%"] for r in rows), 0.5)
 
 
+class TestFactors(unittest.TestCase):
+    def test_project_override(self):
+        fac = load("tensile-structures", "factors")
+        self.assertEqual(fac.get("cable.gammaR"), 1.0)
+        tmp = tempfile.mkdtemp()
+        pf = os.path.join(tmp, "p.json")
+        with open(pf, "w") as fh:
+            json.dump({"cable": {"gammaR": {"value": 1.1, "status": "V", "source": "test"}}}, fh)
+        self.assertEqual(fac.get("cable.gammaR", pf), 1.1)
+        self.assertEqual(fac.get("cable.asce19_factor", pf), 2.2)  # untouched keys keep defaults
+        os.environ["TENSILE_FACTORS"] = pf
+        try:
+            s = {"cables": [{"id": "C", "A": 100.0, "E": 160.0, "Fmin": 165.0, "L_stressed": 5.0, "F_ULS": 50}]}
+            self.assertAlmostEqual(sched.compute(s)[0]["F_Rd_kN"], 100.0, places=1)  # 165/(1.5*1.1)
+        finally:
+            del os.environ["TENSILE_FACTORS"]
+
+    def test_every_entry_tagged(self):
+        fac = load("tensile-structures", "factors")
+        for path, e in fac.iter_entries():
+            self.assertIn(e["status"], ("V", "C", "U"), path)
+            self.assertTrue(e.get("source"), path)
+
+
 class TestDXF(unittest.TestCase):
     def test_structure(self):
         d = dxfw.DXF()

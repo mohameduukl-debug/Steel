@@ -22,10 +22,17 @@ from __future__ import annotations
 import argparse
 import math
 import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tensile-structures", "scripts"))
+import factors as CF  # noqa: E402  central code-factor register (V/C/U tagged)
 
 
 def en1993(F, Fser, d, d0, t, a_lug, c_lug, fy, fu, fyp, fup, fork_t, gap,
-           replaceable, gM0=1.0, gM2=1.25, gM6ser=1.0, E=210000.0, n_planes=2):
+           replaceable, gM0=None, gM2=None, gM6ser=None, E=None, n_planes=2):
+    gM0 = CF.get("steel.gM0") if gM0 is None else gM0
+    gM2 = CF.get("steel.gM2") if gM2 is None else gM2
+    gM6ser = CF.get("steel.gM6ser") if gM6ser is None else gM6ser
+    E = CF.get("steel.E") if E is None else E
     """Return list of (check, demand, capacity, utilisation, clause)."""
     F *= 1e3
     Fser *= 1e3
@@ -81,7 +88,7 @@ def aisc(F_kN, d, d0, t, a_lug, w_lug, fy, fu, method="LRFD"):
     F = F_kN * 1e3
     lrfd = method.upper() == "LRFD"
     out = []
-    beff = min(2 * t + 16.0, (w_lug - d0) / 2)
+    beff = min(2 * t + CF.get("aisc.beff_add_mm"), (w_lug - d0) / 2)
     # D5.1(a) tensile rupture on net effective area
     Pn = fu * 2 * t * beff
     out.append(("D5.1a tensile rupture net effective area [kN]", Pn, 0.75 if lrfd else 1 / 2.00))
@@ -134,13 +141,17 @@ def main(argv=None):
     ap.add_argument("--replaceable", action="store_true", help="pin designed to be replaceable (SLS checks)")
     ap.add_argument("--aisc", action="store_true", help="also run AISC 360 D5/J7 lug checks")
     ap.add_argument("--method", default="LRFD", choices=["LRFD", "ASD"])
+    ap.add_argument("--factors", default=None, help="project code-factor file")
     a = ap.parse_args(argv)
+    if a.factors:
+        os.environ["TENSILE_FACTORS"] = a.factors
     Fser = a.Fser if a.Fser is not None else a.F / 1.4
     fork_t = a.fork_t if a.fork_t is not None else 0.6 * a.t
     if a.d0 < a.d:
         sys.exit("hole must be larger than pin")
     rows = en1993(a.F, Fser, a.d, a.d0, a.t, a.a_lug, a.c_lug, a.fy, a.fu, a.pin_fy, a.pin_fu,
                   fork_t, a.gap, a.replaceable)
+    print(f"Partial factors: {CF.tag('steel.gM0')}, {CF.tag('steel.gM2')}, {CF.tag('steel.gM6ser')}")
     w = report(rows, f"EN 1993-1-8 pin connection  F_Ed={a.F} kN  F_Ed,ser={Fser:.1f} kN  "
                      f"pin d={a.d} hole d0={a.d0} lug t={a.t} fork cheeks {fork_t:.1f} mm")
     if a.aisc:

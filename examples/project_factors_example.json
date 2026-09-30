@@ -1,0 +1,14 @@
+{
+  "_note": "EXAMPLE ONLY - replace every value with the one from your standard edition + National Annex, and cite it.",
+  "cable": {
+    "gammaR": {"value": 1.0, "status": "V", "source": "EXAMPLE: EN 1993-1-11 + NA Table 6.2 (cite clause)"},
+    "f_sls":  {"value": 0.45, "status": "V", "source": "EXAMPLE: EN 1993-1-11 Table 7.2 + NA (cite)"}
+  },
+  "steel": {
+    "gM0": {"value": 1.0, "status": "V", "source": "EXAMPLE: National Annex to EN 1993-1-1"}
+  },
+  "membrane": {
+    "stress_factor_short": {"value": 4.0, "status": "V", "source": "EXAMPLE: project specification clause x.y"},
+    "stress_factor_long":  {"value": 5.5, "status": "V", "source": "EXAMPLE: project specification clause x.y"}
+  }
+}

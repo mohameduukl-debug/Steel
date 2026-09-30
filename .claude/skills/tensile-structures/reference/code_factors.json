@@ -1,0 +1,51 @@
+{
+  "_readme": "Central code-factor register used by every tool. status: V = confirmed from a named source (search excerpt); C = standard clause content / recommended value, NA may differ; U = unverified typical value. Override any value in a PROJECT file (same structure, only the keys you change) and pass it with --factors project.json or env TENSILE_FACTORS=project.json. Run `python3 factors.py report` to list everything still unverified.",
+
+  "membrane": {
+    "stress_factor_short": {"value": 4.0, "status": "U", "source": "practice: 4 short-term (wind); literature 4-8 (Gosling et al. 2018)"},
+    "stress_factor_long":  {"value": 5.0, "status": "U", "source": "practice: 5-6 long-term (snow, prestress); Birdair 'usually 5'"},
+    "fm159_PD":            {"value": 8.0, "status": "V", "source": "FM Global DS 1-59 (2021) Table 2.2.6.1, P+D, new-fabric strength"},
+    "fm159_other":         {"value": 5.0, "status": "V", "source": "FM Global DS 1-59 (2021) Table 2.2.6.1, P+D+(L|S|R|W|T)"},
+    "japan_long_divisor":  {"value": 8.0, "status": "U", "source": "MLIT Notification 666 (reported)"},
+    "japan_short_divisor": {"value": 4.0, "status": "U", "source": "MLIT Notification 666 (reported)"},
+    "seam_efficiency":     {"value": 0.8, "status": "V", "source": "PVC HF 0.80-0.90, PTFE heat-seal 0.70-0.80 (tensilecraft); use test value"},
+    "partial": {
+      "status": "U",
+      "source": "German A-factor practice (Minte/Reinhardt) as placeholder for CEN/TS 19102:2023 Annex C / NA values",
+      "PES/PVC":    {"gM": 1.4, "A0": 1.2, "A1_long": 1.7, "A1_short": 1.0, "A2": 1.1, "A3": 1.1},
+      "glass/PTFE": {"gM": 1.4, "A0": 1.2, "A1_long": 1.4, "A1_short": 1.0, "A2": 1.1, "A3": 1.05},
+      "other":      {"gM": 1.4, "A0": 1.2, "A1_long": 1.7, "A1_short": 1.0, "A2": 1.2, "A3": 1.1}
+    },
+    "gamma_prestress":     {"value": 1.0, "status": "V", "source": "Eng. Struct. 214 (2020) calibration: gP=1.0 with gS=gW=2.0 (or gP=1.2 with 1.5)"},
+    "gamma_variable":      {"value": 1.5, "status": "C", "source": "EN 1990 gQ; calibration study suggests 2.0 with gP=1.0"}
+  },
+
+  "cable": {
+    "gammaR":         {"value": 1.0, "status": "V", "source": "EAD 200001-00-0602: F_Rd=F_uk/(1.5 gR), gR not < 1.0; EN 1993-1-11 Table 6.2/NA"},
+    "resistance_div": {"value": 1.5, "status": "V", "source": "EN 1993-1-11 6.2 / EAD (F_uk/1.5)"},
+    "ke_socket":      {"value": 1.0, "status": "V", "source": "EN 1993-1-11 Table 6.3 metal/resin sockets"},
+    "ke_swaged":      {"value": 0.9, "status": "V", "source": "EN 1993-1-11 Table 6.3 swaged; Ronstan -10%"},
+    "ke_ferrule":     {"value": 0.9, "status": "U", "source": "EN 1993-1-11 Table 6.3 (recalled)"},
+    "ke_ubolt":       {"value": 0.8, "status": "U", "source": "EN 1993-1-11 Table 6.3 (recalled)"},
+    "f_sls":          {"value": 0.5, "status": "U", "source": "EN 1993-1-11 Table 7.2 recommended (numbers not retrieved); practice 0.45-0.50 F_uk"},
+    "asce19_factor":  {"value": 2.2, "status": "V", "source": "ASCE/SEI 19-16: S_d >= 2.2 T_n"},
+    "alpha_carbon":   {"value": 1.2e-5, "status": "C", "source": "EN 1993-1-1 / typical steel"},
+    "alpha_stainless":{"value": 1.6e-5, "status": "C", "source": "EN 1993-1-4 austenitic"}
+  },
+
+  "steel": {
+    "gM0":     {"value": 1.0,  "status": "C", "source": "EN 1993-1-1 recommended (NA may differ, e.g. 1.05/1.1)"},
+    "gM1":     {"value": 1.0,  "status": "C", "source": "EN 1993-1-1 recommended"},
+    "gM2":     {"value": 1.25, "status": "C", "source": "EN 1993-1-8 recommended"},
+    "gM6ser":  {"value": 1.0,  "status": "V", "source": "EN 1993-1-8 recommended (IDEA StatiCa summary)"},
+    "gC":      {"value": 1.5,  "status": "C", "source": "EN 1992-1-1 concrete (base plates)"},
+    "E":       {"value": 210000, "status": "C", "source": "EN 1993-1-1"},
+    "beta_w": {"status": "C", "source": "EN 1993-1-8 Table 4.1", "S235": 0.8, "S275": 0.85, "S355": 0.9, "S420": 1.0, "S460": 1.0}
+  },
+
+  "aisc": {
+    "phi_pin": {"value": 0.75, "status": "V", "source": "AISC 360 D5/J7"},
+    "phi_yield": {"value": 0.90, "status": "C", "source": "AISC 360 D2"},
+    "beff_add_mm": {"value": 16.0, "status": "V", "source": "AISC 360 D5 b_eff = 2t + 0.63 in"}
+  }
+}
