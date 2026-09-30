@@ -140,6 +140,36 @@
       "value": 1.6e-05,
       "status": "C",
       "source": "EN 1993-1-4 austenitic"
+    },
+    "clamp_mu": {
+      "value": 0.1,
+      "status": "U",
+      "source": "friction galvanised strand on steel clamp ~0.1 (recalled EN 1993-1-11 6.4 / practice); test for the project clamp"
+    },
+    "clamp_gamma": {
+      "value": 1.65,
+      "status": "U",
+      "source": "γM,fr for cable clamps (recalled EN 1993-1-11); verify"
+    },
+    "clamp_loss": {
+      "value": 0.8,
+      "status": "U",
+      "source": "residual bolt preload after cable diameter reduction / creep (practice placeholder); re-tighten after stressing"
+    },
+    "saddle_p_lim_FLC": {
+      "value": 40.0,
+      "status": "U",
+      "source": "transverse pressure limit FLC on steel saddle ~40 N/mm² (recalled EN 1993-1-11); verify"
+    },
+    "saddle_p_lim_OSS": {
+      "value": 25.0,
+      "status": "U",
+      "source": "transverse pressure limit open spiral strand, placeholder (lower than FLC); verify"
+    },
+    "saddle_min_R_over_d": {
+      "value": 20.0,
+      "status": "U",
+      "source": "practice minimum saddle radius ~20–30 d (OSS) / 20–40 d (FLC); below: strength reduction per supplier / ASCE 19 N_d"
     }
   },
   "steel": {
@@ -274,9 +304,9 @@
       "source": "EN 1992-4 γMc = γc·γinst = 1.5 × 1.0 (headed fasteners)"
     },
     "gamma_Ms_steel": {
-      "value": 1.5,
-      "status": "U",
-      "source": "EN 1992-4 γMs = 1.2·(f_uk/f_yk) ≥ 1.4 for steel failure; 1.5 used as typical placeholder"
+      "value": "1.2*fuk/fyk>=1.4",
+      "status": "C",
+      "source": "EN 1992-4 Table 4.1: γMs = 1.2·f_uk/f_yk ≥ 1.4 (computed per anchor grade)"
     }
   },
   "aluminium": {

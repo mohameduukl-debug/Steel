@@ -44,6 +44,7 @@ biax = load("membrane-fabric", "biaxial_fit")
 memb = load("steel-supports", "member_check")
 joint = load("tensile-connections", "steel_joint_checks")
 frame = load("steel-supports", "frame2d")
+fat = load("tensile-connections", "fatigue_check")
 found = load("steel-supports", "foundation_check")
 cut = load("fabrication-drawings", "cutting_pattern")
 dxfw = load("fabrication-drawings", "dxf_writer")
@@ -391,6 +392,36 @@ class TestClass4AndFoundations(unittest.TestCase):
         self.assertAlmostEqual(info["W_kN"], 2 * 2 * 1.2 * 24, places=6)
         self.assertAlmostEqual(rows[0][2], 0.9 * 115.2, places=6)
         self.assertAlmostEqual(rows[1][2], (0.9 * 115.2 - 60) * 0.45 / 1.1, places=6)
+
+
+class TestAnchorsFatigueClamps(unittest.TestCase):
+    def test_single_anchor_cone_and_pullout(self):
+        rows, info = joint.anchor_group(1, 1, 0, 0, 1000, 1000, 200, 20, 38, "8.8", 30, 50.0, cracked=True)
+        self.assertAlmostEqual(info["N0_Rk_c"], 8.9 * math.sqrt(30) * 200 ** 1.5 / 1e3, places=6)
+        self.assertAlmostEqual(rows[2][2], info["N0_Rk_c"] / 1.5, places=6)          # far from edges: Ac = A0
+        self.assertAlmostEqual(rows[1][2], 7.5 * math.pi / 4 * (38 ** 2 - 20 ** 2) * 30 / 1e3 / 1.5, places=6)
+        self.assertAlmostEqual(info["gMs"], 1.5, places=9)                              # 1.2·800/640
+
+    def test_anchor_group_area_ratio(self):
+        rows, info = joint.anchor_group(2, 2, 200, 200, 400, 400, 250, 24, 45, "8.8", 30, 150.0)
+        self.assertAlmostEqual(info["NRk_c"] / info["N0_Rk_c"], 950 ** 2 / 750 ** 2, places=6)
+
+    def test_fatigue_curve_points(self):
+        # at Δσ_C/γMf and 2e6 cycles the damage is exactly 1
+        D, _ = fat.check([(71 / 1.35, 2e6)], 71, 1.35)
+        self.assertAlmostEqual(D, 1.0, places=9)
+        D, _ = fat.check([(0.4 * 71 / 1.35, 1e9)], 71, 1.35)                            # below cut-off
+        self.assertEqual(D, 0.0)
+        D, _ = fat.check([(40, 1e6), (25, 5e6)], 71, 1.35)
+        self.assertAlmostEqual(D, 1e6 / (2e6 * (71 / 54) ** 3) + 5e6 / (5e6 * (0.737 * 71 / 33.75) ** 5), places=6)
+
+    def test_cable_clamp_and_saddle(self):
+        a = type("A", (), dict(dT=12.0, nb=2, bolt_d=16.0, grade="8.8", surfaces=2))
+        u = quiet(cab.cmd_clamp, a)
+        FRd = 2 * 0.1 * 2 * 0.7 * 800 * 157 / 1e3 * 0.8 / 1.65
+        self.assertAlmostEqual(u, 12.0 / FRd, places=6)
+        b = type("B", (), dict(T=400.0, R=0.6, d=40.0, type="FLC", delta=6.0, E=160.0))
+        self.assertAlmostEqual(quiet(cab.cmd_saddle, b), 400e3 / (600 * 40) / 40.0, places=6)
 
 
 class TestJoints(unittest.TestCase):

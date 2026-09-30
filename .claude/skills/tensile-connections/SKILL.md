@@ -38,6 +38,20 @@ python3 steel_joint_checks.py baseplate --col CHS --D 219.1 --tc 8 --B 400 --H 4
 - clampbar: bolt force = n × peak factor × spacing; warns above ~200 mm spacing. The aluminium plate goes to EN 1999 separately.
 - baseplate: compression with the equivalent T-stub (c = t√(f_y/3f_jd)), uplift with T-stub modes 1, 2, 1-2 (no prying) and 3 per anchor, shear by friction plus anchors (α_bc). Anchor embedment and concrete breakout (EN 1992-4) are not included.
 
+### EN 1992-4 anchors, aluminium clamp plates, fatigue
+```bash
+python3 steel_joint_checks.py anchor --n1 2 --n2 2 --s1 200 --s2 200 --c1 400 --c2 400 --hef 250 --d 24 --N 150
+python3 steel_joint_checks.py clampbar --n 12 --spacing 150 --d 10 --t 6 --plate alu6082
+python3 fatigue_check.py --category 71 --spectrum 40:1e6 --spectrum 25:5e6                # welded lug detail
+python3 fatigue_check.py --cable spiral_socket --spectrum 60:2e6                           # tension component
+```
+- anchor (cast-in headed, tension): steel failure with γMs = 1.2·f_uk/f_yk ≥ 1.4; pull-out N_Rk,p = k2·A_h·f_ck
+  (k2 = 7.5 cracked / 10.5 uncracked [V]); concrete cone N⁰ = k1·√f_ck·h_ef^1.5 (k1 = 8.9 / 12.7 [V]) × A_c/A⁰ × ψ_s × ψ_re,
+  with s_cr = 3h_ef and c_cr = 1.5h_ef [V]; γMc = 1.5 [V]. Not included: splitting, blow-out, shear/combined.
+- clampbar `--plate alu6082`: bearing on 6082-T6 (f_u 290/310 MPa by thickness, γM2 = 1.25 [V]; Table 8.5 form [U]).
+- fatigue_check: EN 1993-1-9 curve (m = 3/5, knee 0.737Δσ_C at 5×10⁶, cut-off 0.405Δσ_C at 10⁸, γMf by method and
+  consequence [V]), Palmgren–Miner. Cable categories and slope from the register are [U]; use supplier fatigue data.
+
 ## The connection families (details in `reference/`)
 
 | Interface | Standard solutions | Governing checks |

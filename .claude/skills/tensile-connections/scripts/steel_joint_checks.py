@@ -196,6 +196,39 @@ def baseplate(a):
     return rows, {"fjd": fjd, "c": c}
 
 
+# ------------------------------------------------------------ EN 1992-4 anchors
+def anchor_group(n1, n2, s1, s2, c1, c2, hef, d, dh, grade, fck, NEd, cracked=True, psi_re=1.0):
+    """cast-in headed anchors, rectangular group n1 × n2, spacings s1/s2, min edge distances c1/c2 (mm),
+    uniform tension N_Ed [kN] (concentric). Steel, pull-out (per anchor) and concrete cone (group)."""
+    fyb, fub, _ = BOLT[grade]
+    As = AS.get(int(d), 0.78 * math.pi * d * d / 4)
+    gMs = max(1.2 * fub / fyb, 1.4)                               # EN 1992-4 Table 4.1
+    gMc = g("anchor_EN1992_4.gamma_Mc")
+    n = n1 * n2
+    NRks = As * fub / 1e3
+    k2 = g("anchor_EN1992_4.k2_pullout_cracked" if cracked else "anchor_EN1992_4.k2_pullout_uncracked")
+    Ah = math.pi / 4 * (dh ** 2 - d ** 2)
+    NRkp = k2 * Ah * fck / 1e3
+    k1 = g("anchor_EN1992_4.k_cr_N" if cracked else "anchor_EN1992_4.k_ucr_N")
+    scr = g("anchor_EN1992_4.s_cr_N_per_hef") * hef
+    ccr = g("anchor_EN1992_4.c_cr_N_per_hef") * hef
+    N0 = k1 * math.sqrt(fck) * hef ** 1.5 / 1e3                  # kN
+    A0 = scr ** 2
+    wx = min(c1, ccr) + s1 * (n1 - 1) + min(c1, ccr) if n1 > 0 else scr
+    wy = min(c2, ccr) + s2 * (n2 - 1) + min(c2, ccr)
+    Ac = min(wx * wy, n * A0)
+    cmin = min(c1, c2)
+    psi_s = min(1.0, 0.7 + 0.3 * cmin / ccr)
+    NRkc = N0 * (Ac / A0) * psi_s * psi_re
+    rows = [
+        row(f"steel failure per anchor M{d:g} {grade} (γMs={gMs:.2f}) [kN]", NEd / n, NRks / gMs, "EN 1992-4 7.2.1.3"),
+        row(f"pull-out per anchor (k2={k2}, A_h={Ah:.0f} mm²) [kN]", NEd / n, NRkp / gMc, "EN 1992-4 7.2.1.5"),
+        row(f"concrete cone, group (N0={N0:.1f} kN, Ac/A0={Ac / A0:.2f}, ψs={psi_s:.2f}) [kN]", NEd, NRkc / gMc,
+            "EN 1992-4 7.2.1.4"),
+    ]
+    return rows, {"N0_Rk_c": N0, "NRk_c": NRkc, "gMs": gMs, "gMc": gMc}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--factors", default=None, help="project code-factor file (before the sub-command)")
@@ -240,6 +273,24 @@ def main(argv=None):
     c.add_argument("--mode", choices=["shear", "tension"], default="shear")
     c.add_argument("--prying", type=float, default=1.3)
     c.add_argument("--peak", type=float, default=1.5, help="stress concentration factor at clamp line")
+    c.add_argument("--plate", choices=["steel", "alu6082"], default="steel",
+                   help="bearing ply material (alu6082: EN 1999-1-1, f_u and γM2 from the register)")
+
+    an = sp.add_parser("anchor")
+    an.add_argument("--n1", type=int, default=2)
+    an.add_argument("--n2", type=int, default=2)
+    an.add_argument("--s1", type=float, default=200.0)
+    an.add_argument("--s2", type=float, default=200.0)
+    an.add_argument("--c1", type=float, default=300.0, help="edge distance in direction 1 [mm]")
+    an.add_argument("--c2", type=float, default=300.0)
+    an.add_argument("--hef", type=float, required=True, help="effective embedment [mm]")
+    an.add_argument("--d", type=float, default=24.0)
+    an.add_argument("--dh", type=float, default=None, help="head / washer plate diameter [mm] (default 1.9 d)")
+    an.add_argument("--grade", default="8.8", choices=list(BOLT))
+    an.add_argument("--fck", type=float, default=30.0)
+    an.add_argument("--N", type=float, required=True, help="design tension on the group [kN]")
+    an.add_argument("--uncracked", action="store_true")
+    an.add_argument("--psi-re", type=float, default=1.0, help="shell spalling factor (0.5 + hef/200 ≤ 1 if dense reinforcement)")
 
     p = sp.add_parser("baseplate")
     p.add_argument("--col", choices=["CHS", "I"], default="CHS")
@@ -286,12 +337,31 @@ def main(argv=None):
         F = a.n * a.peak * a.spacing / 1e3  # kN per bolt
         if a.mode == "shear":
             rows, R = bolts([(0, 0)], 0, F, 0, 0, 1, a.d, a.grade, a.t, a.fu_plate, 3 * a.d, 1.5 * a.d, 0, 0, True)
+            if a.plate == "alu6082":
+                fu_al = g("aluminium.6082T6_fu_thin" if a.t <= 5 else "aluminium.6082T6_fu_thick")
+                gM2a = g("aluminium.gM2")
+                d0 = R["d0"]
+                ab = min(3 * a.d / (3 * d0), BOLT[a.grade][1] / fu_al, 1.0)
+                k1 = min(2.8 * 1.5 * a.d / d0 - 1.7, 2.5)
+                FbA = k1 * ab * fu_al * a.d * a.t / gM2a / 1e3
+                rows = [r for r in rows if not r[0].startswith("bearing")]
+                rows.append(row(f"bearing on aluminium 6082-T6 t={a.t:g} (f_u={fu_al}, γM2={gM2a}) [kN]", F, FbA,
+                                f"EN 1999-1-1 T8.5 [{CF.status('aluminium.bearing_formula')}]"))
         else:
             rows, R = bolts([(0, 0)], 0, 0, 0, F, a.prying, a.d, a.grade, a.t, a.fu_plate, 3 * a.d, 1.5 * a.d, 0, 0, True)
         print(f"Clamp line: n={a.n} kN/m × peak {a.peak} × spacing {a.spacing:g} mm = {F:.2f} kN per bolt ({a.mode})")
         if a.spacing > 200:
             print("NOTE: TensiNet guidance: clamp bolt spacing hardly more than ~200 mm [V]")
         print("Aluminium clamp plate/keder bearing and bending: check to EN 1999-1-1 separately.")
+        return report("", rows)
+    if a.cmd == "anchor":
+        dh = a.dh or 1.9 * a.d
+        rows, info = anchor_group(a.n1, a.n2, a.s1, a.s2, a.c1, a.c2, a.hef, a.d, dh, a.grade, a.fck, a.N,
+                                  not a.uncracked, a.psi_re)
+        print(f"{a.n1}x{a.n2} cast-in headed anchors M{a.d:g} {a.grade}, h_ef={a.hef:g} mm, C{a.fck:g} "
+              f"{'uncracked' if a.uncracked else 'cracked'}; factors {CF.tag('anchor_EN1992_4.gamma_Mc')}, "
+              f"{CF.tag('anchor_EN1992_4.k_cr_N')}")
+        print("Not included: splitting, blow-out (edge), anchor reinforcement, shear/combined (EN 1992-4 7.2.2–7.2.3).")
         return report("", rows)
     rows, info = baseplate(a)
     print(f"Base plate {a.B:g}x{a.H:g}x{a.tp:g} S{int(a.fy)} on C{a.fck:g}; column {a.col}")

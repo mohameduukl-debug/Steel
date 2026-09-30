@@ -14,6 +14,9 @@ python3 cable_calc.py edge   --chord 10 --sag 1.0 --n 3.0                  # T =
 python3 cable_calc.py resist --Fmin 537 --ke 0.9 --FEd 240 --Fser 170 --Fmin-force 12
 python3 cable_calc.py irvine --L 20 --w0 0.1 --H0 50 --w1 1.0 --EA 20000 [--dT -30]
 python3 cable_calc.py freq   --L 15 --T 80 --m 3.4
+python3 cable_calc.py clamp  --dT 12 --nb 2 --bolt-d 16             # cross / edge clamp slip resistance
+python3 cable_calc.py saddle --T 400 --R 0.6 --d 40 --type FLC      # transverse pressure, R/d, wire bending
+python3 ../../tensile-connections/scripts/fatigue_check.py --cable spiral_socket --spectrum 60:2e6   # fatigue
 ```
 ### `scripts/cable_schedule.py`
 Builds the fabrication schedule (CSV and Markdown) from a JSON list, or straight from a
@@ -36,6 +39,11 @@ k_e: metal/resin sockets 1.0; swaged 0.9 [V]; ferrules 0.9, U-bolt grips 0.8 [U]
 Manufacturer check: Pfeifer Z_R,d = Z_B,k/1.5 (γR = 1.0) [V].
 
 **ASCE/SEI 19** [V]: `S_d = S_n·N_f (or N_d) ≥ 2.2·T_n`. The older 2.0 factor with transient loads, and any LRFD in 19-22, are [U].
+
+**Clamps and saddles** (factors [U], confirm by clamp test / supplier): slip resistance
+F_Rd = n_s·μ·n_b·F_p,C·k_loss/γM,fr with F_p,C = 0.7·f_ub·A_s; saddle pressure p = T/(R·d) against the FLC/OSS limit;
+R/d minimum; outer-wire bending σ_b = E·δ/(2R) (Reuleaux upper bound).
+**Fatigue:** Palmgren–Miner with `fatigue_check.py` (EN 1993-1-9 curve for steel details; single-slope cable curve).
 
 **SLS:** keep the characteristic force around ≤ 0.45–0.50 F_uk (NA Table 7.1/7.2) [U numbers]. Prestretch cyclically to ~0.45–0.55 F_uk.
 **No-slack:** F > 0 in every combination (with favourable prestress, temperature and length tolerance).

@@ -250,6 +250,42 @@ def cmd_irvine(a):
     return H
 
 
+def cmd_clamp(a):
+    """slip resistance of a bolted cable clamp (cross clamp, edge clamp, saddle clamp)."""
+    AS = {10: 58, 12: 84.3, 16: 157, 20: 245, 24: 353, 27: 459, 30: 561}
+    fub = {"8.8": 800, "10.9": 1000, "A4-70": 700, "A4-80": 800}[a.grade]
+    As = AS.get(int(a.bolt_d), 0.78 * math.pi * a.bolt_d ** 2 / 4)
+    Fp = 0.7 * fub * As / 1e3                                        # EN 1993-1-8 preload F_p,C
+    mu, gfr, kl = F.get("cable.clamp_mu"), F.get("cable.clamp_gamma"), F.get("cable.clamp_loss")
+    FRd = a.surfaces * mu * a.nb * Fp * kl / gfr
+    print(f"Cable clamp: {a.nb} bolts M{a.bolt_d:g} {a.grade}, F_p,C = 0.7·f_ub·A_s = {Fp:.1f} kN each, "
+          f"{a.surfaces} friction surfaces")
+    print(f"  μ = {mu} [{F.status('cable.clamp_mu')}], preload retained {kl} [{F.status('cable.clamp_loss')}], "
+          f"γM,fr = {gfr} [{F.status('cable.clamp_gamma')}]")
+    u = a.dT / FRd
+    print(f"  slip resistance F_Rd = {FRd:.1f} kN  vs  force to hold {a.dT:.1f} kN  -> util {u:.2f}"
+          + ("  <-- FAIL" if u > 1 else "  OK"))
+    print("  Re-tighten bolts after stressing (strand diameter reduces under tension); confirm μ by clamp test.")
+    return u
+
+
+def cmd_saddle(a):
+    """cable over a saddle / deviator: transverse pressure, radius ratio, wire bending stress."""
+    p = a.T * 1e3 / (a.R * 1000 * a.d)                             # N/mm² on projected width d
+    key = "cable.saddle_p_lim_FLC" if a.type == "FLC" else "cable.saddle_p_lim_OSS"
+    plim = F.get(key)
+    Rd = a.R * 1000 / a.d
+    Rmin = F.get("cable.saddle_min_R_over_d")
+    sb = a.E * 1000 * a.delta / (2 * a.R * 1000)                   # MPa, outer wire bending
+    print(f"Saddle: T = {a.T} kN, R = {a.R} m, cable Ø{a.d:g} mm ({a.type}), wire δ = {a.delta} mm")
+    print(f"  transverse pressure p = T/(R·d) = {p:.1f} N/mm²  vs limit {plim} [{F.status(key)}]  -> util {p / plim:.2f}"
+          + ("  <-- FAIL" if p > plim else ""))
+    print(f"  R/d = {Rd:.1f}  vs minimum {Rmin} [{F.status('cable.saddle_min_R_over_d')}]"
+          + ("  <-- below: apply strength reduction (supplier / ASCE 19 N_d)" if Rd < Rmin else "  OK"))
+    print(f"  outer-wire bending stress σ_b = E·δ/(2R) = {sb:.0f} MPa (Reuleaux upper bound — inter-wire slip lowers it; relevant for fatigue; use a liner)")
+    return p / plim
+
+
 def cmd_freq(a):
     print(f"Taut cable L={a.L} m, T={a.T} kN, m={a.m} kg/m")
     c = math.sqrt(a.T * 1000 / a.m)
@@ -311,6 +347,21 @@ def main(argv=None):
     s.add_argument("--dT", type=float, default=0.0)
     s.add_argument("--alpha", type=float, default=None)
 
+    s = sp.add_parser("clamp")
+    s.add_argument("--dT", type=float, required=True, help="force the clamp must hold along the cable [kN]")
+    s.add_argument("--nb", type=int, default=2, help="number of clamp bolts")
+    s.add_argument("--bolt-d", type=float, default=16.0)
+    s.add_argument("--grade", default="8.8", choices=["8.8", "10.9", "A4-70", "A4-80"])
+    s.add_argument("--surfaces", type=int, default=2, help="friction surfaces (clamp halves on the cable)")
+
+    s = sp.add_parser("saddle")
+    s.add_argument("--T", type=float, required=True, help="cable force [kN]")
+    s.add_argument("--R", type=float, required=True, help="saddle radius [m]")
+    s.add_argument("--d", type=float, required=True, help="cable diameter [mm]")
+    s.add_argument("--type", choices=["FLC", "OSS"], default="OSS")
+    s.add_argument("--delta", type=float, default=5.0, help="outer wire diameter [mm]")
+    s.add_argument("--E", type=float, default=160.0, help="cable modulus [kN/mm²]")
+
     s = sp.add_parser("freq")
     s.add_argument("--L", type=float, required=True)
     s.add_argument("--T", type=float, required=True, help="tension [kN]")
@@ -320,7 +371,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     fill_factors(a)
     return {"sag": cmd_sag, "length": cmd_length, "edge": cmd_edge, "resist": cmd_resist,
-            "irvine": cmd_irvine, "freq": cmd_freq}[a.cmd](a)
+            "irvine": cmd_irvine, "freq": cmd_freq, "clamp": cmd_clamp, "saddle": cmd_saddle}[a.cmd](a)
 
 
 if __name__ == "__main__":

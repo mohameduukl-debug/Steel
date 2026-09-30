@@ -34,6 +34,8 @@ python3 "$S/cable-tension-members/scripts/cable_calc.py" resist --Fmin 367 --ke 
 python3 "$S/cable-tension-members/scripts/cable_schedule.py" --from-model sail.json \
         --envelope sail_cases_envelope.json --product Ronstan-ACS2-GS-17.0 --deduct 250 --out sail_cables
 python3 "$S/cable-tension-members/scripts/cable_schedule.py" "$HERE/schedule_example.json" --out schedule_example
+python3 "$S/cable-tension-members/scripts/cable_calc.py" clamp --dT 8 --nb 2 --bolt-d 16
+python3 "$S/tensile-connections/scripts/fatigue_check.py" --cable spiral_socket --spectrum 40:2e6 --spectrum 20:1e7
 
 echo; echo "== 5. Corner plate resolution + pin/lug check (corner forces from the uplift run) =="
 python3 "$S/tensile-connections/scripts/corner_plate.py" --m EC1:15:83:180:48 --m EC2:105:83:-48:180 \
@@ -48,6 +50,8 @@ python3 "$S/tensile-connections/scripts/steel_joint_checks.py" baseplate --col C
         --tp 25 --Nc 300 --Nt 60 --V 25 --anchors 4 --anchor-d 20 --edge 55
 
 python3 "$S/steel-supports/scripts/frame2d.py" arch --L 20 --f 4 --n 20 --section CHS:219.1x8 --q 3.5 --check --Lz 5
+python3 "$S/tensile-connections/scripts/steel_joint_checks.py" anchor --n1 2 --n2 2 --s1 200 --s2 200 --c1 400 \
+        --c2 400 --hef 250 --d 24 --N 60
 python3 "$S/steel-supports/scripts/foundation_check.py" block --B 2.5 --L 2.5 --D 1.5 --V 60 --H 45 --ha 0.3 --mu 0.45 --qRd 200
 
 echo; echo "== 7. Patterns, GA DXF and steel part drawings =="
