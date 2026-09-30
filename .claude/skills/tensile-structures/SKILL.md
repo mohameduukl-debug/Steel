@@ -48,35 +48,46 @@ Key couplings:
 
 | # | Stage | Output | Skill → tool |
 |---|-------|--------|--------------|
-| 1 | Concept: shape type, supports, material family, prestress level | sketch, plan, heights | this skill + `membrane-fabric` |
-| 2 | **Form finding** | equilibrium surface, cable sags, first reactions | `tensile-analysis` → `form_find_fdm.py` |
-| 3 | Load analysis (prestress, wind ↑↓, snow, temperature) | stresses, deflections, reactions, slack/ponding | `tensile-analysis` → `dynamic_relaxation.py` (prelim), FE software (final) |
-| 4 | Membrane checks | warp/weft/seam utilisation | `membrane-fabric` → `membrane_check.py` |
-| 5 | Cable design and schedule | sizes, F_Rd, unstressed lengths | `cable-tension-members` → `cable_calc.py`, `cable_schedule.py` |
-| 6 | Steel supports | mast, arch, ring, foundation checks | `steel-supports` → `mast_check.py` |
-| 7 | Connections | corner plates, pins, lugs, clamps, mast heads | `tensile-connections` → `pin_connection.py`, `corner_plate.py` |
-| 8 | Patterning | cutting patterns (compensated), seam layout | `fabrication-drawings` → `cutting_pattern.py` |
-| 9 | Fabrication and shop drawings | GA, panel plan, patterns DXF, cable schedule, steel shop drawings, erection and prestress plan | `fabrication-drawings` → `export_dxf.py`, DXF writer |
+| 1 | Concept: shape, supports, material family, prestress level | sketch, plan, heights | this skill + `membrane-fabric` |
+| 2 | **Form finding** (sail, hypar, cone, arch tunnel, multi-bay ridge/valley, custom) | equilibrium surface, cable sags, support/arch loads | `tensile-analysis` → `form_find_fdm.py` |
+| 3 | Material data | E·t, ν, compensation from biaxial tests | `membrane-fabric` → `biaxial_fit.py` |
+| 4 | **Load analysis**: prestress, wind (directions, zones), snow, ponding | stresses (warp/weft/principal), wrinkling, deflection, envelopes | `tensile-analysis` → `membrane_dr.py` (orthotropic CST), `dynamic_relaxation.py` (net, fast), `run_cases.py` |
+| 5 | Membrane checks | fabric/seam utilisation per case, tear, ETFE | `membrane-fabric` → `membrane_check.py --envelope` |
+| 6 | Cables | F_Rd, SLS, clamps, saddles, fatigue, schedule with unstressed lengths | `cable-tension-members` → `cable_calc.py`, `cable_schedule.py --envelope` |
+| 7 | Steel supports | members (CHS/RHS/I, LTB, class 4), arch/mast stability (α_cr, 2nd order), foundations | `steel-supports` → `member_check.py`, `frame2d.py`, `foundation_check.py` (`mast_check.py` quick) |
+| 8 | Connections | pins/lugs, corner plates, welds, bolts, base plates, EN 1992-4 anchors, aluminium clamps, fatigue | `tensile-connections` → `pin_connection.py`, `corner_plate.py`, `steel_joint_checks.py`, `fatigue_check.py` |
+| 9 | Patterning | geodesic seams, compensation/decompensation, auto-split, notches, panel sheets, nesting | `fabrication-drawings` → `cutting_pattern.py`, `nest_panels.py` |
+| 10 | Drawings | GA/setting-out DXF, steel part drawings with weld symbols | `fabrication-drawings` → `export_dxf.py`, `steel_part_dxf.py`, `dxf_writer.py` |
+| 11 | **Calculation report** | Markdown + HTML report with factors (V/C/U), results, governing utilisations, limitations | this skill → `scripts/report.py` |
 
-Loop back as needed. Connection geometry changes the cable lengths
-(node-to-pin deductions). Steel stiffness changes the stresses. Patterning can
-move the seams, which changes the warp direction and so the stiffness.
+Loop back as needed. Connection geometry changes the cable lengths (node-to-pin deductions); steel stiffness
+changes the stresses; patterning can move the seams (warp direction and stiffness).
+
+### Calculation report
+```bash
+python3 .claude/skills/tensile-structures/scripts/report.py --title "Project X" --model sail.json \
+        --cases sail_cases_envelope.json --material PVC-III --cables sail_cables.csv \
+        --patterns sail_patterns.csv --extra steel_checks.txt --out project_report
+```
+Sections: design basis (every factor with its V/C/U tag and the list of unverified ones), form finding, load cases
+and envelopes, membrane check per case, cable schedule, patterns, further checks (pasted tool output), governing
+utilisations and limitations.
 
 ## End-to-end quick run (all tools are stdlib Python 3, no installs)
 
 ```bash
 S=.claude/skills
 python3 $S/tensile-analysis/scripts/form_find_fdm.py sail4 --size 10 --high 3 --n 16 --qc 12 --prestress 2.0 --out sail --obj
-python3 $S/tensile-analysis/scripts/dynamic_relaxation.py sail.json --Et-u 800 --Et-v 600 --EA-cable 14000 --pressure 0.9 --out sail_up
-python3 $S/membrane-fabric/scripts/membrane_check.py --material PVC-II --nw 8.5 --nf 8.5 --case wind
-python3 $S/cable-tension-members/scripts/cable_schedule.py --from-model sail.json --product Ronstan-ACS2-GS-20.1 --deduct 250 --out sail_cables
-python3 $S/tensile-connections/scripts/corner_plate.py --m EC1:15:83:180:48 --m EC2:105:83:48:180 --m strap:60:6:100:173
+python3 $S/tensile-analysis/scripts/run_cases.py sail.json examples/load_cases_example.json --out sail_cases
+python3 $S/membrane-fabric/scripts/membrane_check.py --material PVC-III --envelope sail_cases_envelope.json
+python3 $S/cable-tension-members/scripts/cable_schedule.py --from-model sail.json --envelope sail_cases_envelope.json --product Ronstan-ACS2-GS-17.0 --deduct 250 --out sail_cables
 python3 $S/tensile-connections/scripts/pin_connection.py --F 150 --d 30 --d0 31 --t 20 --a-lug 45 --c-lug 35
-python3 $S/steel-supports/scripts/member_check.py --section CHS:168.3x8 --L 6 --N 250 --My 5
-python3 $S/fabrication-drawings/scripts/cutting_pattern.py sail.json --panels-along v --strip 3 --comp-warp 0.8 --comp-weft 1.6 --out sail_patterns
-python3 $S/fabrication-drawings/scripts/export_dxf.py sail.json --forces --out sail_GA
+python3 $S/steel-supports/scripts/frame2d.py mast --H 6 --D-base 168.3 --D-mid 168.3 --D-top 168.3 --t 8 --N 250 --check
+python3 $S/fabrication-drawings/scripts/cutting_pattern.py sail.json --seams geodesic --strip 2 --auto-split --sheets --out sail_patterns
+python3 $S/fabrication-drawings/scripts/nest_panels.py sail_patterns.json --out sail_nest
+python3 $S/tensile-structures/scripts/report.py --model sail.json --cases sail_cases_envelope.json --material PVC-III --cables sail_cables.csv --patterns sail_patterns.csv --out report
 ```
-`examples/run_demo.sh` runs this whole pipeline.
+`examples/run_demo.sh` runs the whole pipeline, including the arch and multi-bay examples.
 
 ## Rules of thumb to sanity-check any design (verify for the project)
 

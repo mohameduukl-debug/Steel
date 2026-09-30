@@ -74,4 +74,8 @@ python3 "$S/fabrication-drawings/scripts/cutting_pattern.py" multibay.json --sea
         --auto-split --notch 1000 --sheets --project "Demo market roof" --out multibay_patterns | tail -4
 python3 "$S/fabrication-drawings/scripts/nest_panels.py" multibay_patterns.json --gap 20 --out multibay_nest
 
+echo; echo "== 9. Calculation report =="
+python3 "$S/tensile-structures/scripts/report.py" --title "Demo sail" --model sail.json --cases sail_cases_envelope.json \
+        --material PVC-III --cables sail_cables.csv --patterns sail_patterns.csv --out sail_report
+
 echo; echo "Done. Files in $OUT:"; ls -1 "$OUT"

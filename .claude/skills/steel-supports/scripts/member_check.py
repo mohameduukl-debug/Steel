@@ -487,4 +487,7 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    import signal
+    if hasattr(signal, "SIGPIPE"):
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)  # quiet exit when piped into head/grep
     main(sys.argv[1:])

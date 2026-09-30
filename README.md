@@ -6,19 +6,20 @@ the fabric, the cables and the structural steel, and how the three connect.
 
 ```
 .claude/skills/
-├── tensile-structures/     HUB: load path, how fabric-cable-steel interact, workflow, standards map, JSON schema
+├── tensile-structures/     HUB: load path, interactions, workflow, standards map, JSON schema, code-factor register
+│   └── scripts/factors.py, report.py
 ├── membrane-fabric/        materials (PVC, PTFE, silicone, ETFE, ePTFE), prestress, stress checks, seams
-│   └── scripts/membrane_check.py
+│   └── scripts/membrane_check.py, biaxial_fit.py
 ├── cable-tension-members/  spiral strand / FLC / stainless / bars; EN 1993-1-11, ASCE 19; lengths; schedules
 │   └── scripts/cable_calc.py, cable_schedule.py
 ├── steel-supports/         masts, struts, arches, rings, bases, foundations/anchors
-│   └── scripts/mast_check.py
+│   └── scripts/member_check.py, frame2d.py, foundation_check.py, mast_check.py
 ├── tensile-connections/    fabric↔cable, fabric↔steel, cable↔steel; pins/lugs; corner plates; mast heads
-│   └── scripts/pin_connection.py, corner_plate.py
+│   └── scripts/pin_connection.py, corner_plate.py, steel_joint_checks.py, fatigue_check.py
 ├── tensile-analysis/       form finding (FDM, DR, URS), non-linear load analysis, software guide
-│   └── scripts/form_find_fdm.py, dynamic_relaxation.py
+│   └── scripts/form_find_fdm.py, membrane_dr.py, dynamic_relaxation.py, run_cases.py
 └── fabrication-drawings/   patterning, cutting DXF, GA DXF, steel part drawings, drawing-set contents
-    └── scripts/cutting_pattern.py, export_dxf.py, steel_part_dxf.py, dxf_writer.py
+    └── scripts/cutting_pattern.py, nest_panels.py, export_dxf.py, steel_part_dxf.py, dxf_writer.py
 ```
 
 Each skill has a `SKILL.md` (loaded by Claude Code when relevant) and a `reference/` folder with the

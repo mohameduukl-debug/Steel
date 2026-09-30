@@ -675,6 +675,62 @@ class TestFabricationExtras(unittest.TestCase):
         self.assertIn("WELD", txt)
 
 
+class TestSkillConsistency(unittest.TestCase):
+    """every tool is documented, every documented tool exists, SKILL.md frontmatter is valid."""
+
+    def skills(self):
+        return sorted(d for d in os.listdir(SK) if os.path.isfile(os.path.join(SK, d, "SKILL.md")))
+
+    def test_frontmatter(self):
+        import re
+        for d in self.skills():
+            txt = open(os.path.join(SK, d, "SKILL.md")).read()
+            m = re.match(r"---\nname: (.+)\ndescription: (.+)\n---\n", txt)
+            self.assertIsNotNone(m, d)
+            self.assertEqual(m.group(1).strip(), d)
+            self.assertLessEqual(len(m.group(2)), 1024, d)
+
+    def test_every_script_documented_and_every_reference_exists(self):
+        import re
+        docs = "".join(open(os.path.join(SK, d, "SKILL.md")).read() for d in self.skills())
+        for d in self.skills():
+            sdir = os.path.join(SK, d, "scripts")
+            for f in sorted(os.listdir(sdir)) if os.path.isdir(sdir) else []:
+                if f.endswith(".py"):
+                    self.assertTrue(f in docs, f"{d}/scripts/{f} is not mentioned in any SKILL.md")
+        for d in self.skills():
+            txt = open(os.path.join(SK, d, "SKILL.md")).read()
+            for ref in set(re.findall(r"`(reference/[\w./-]+)`", txt)):
+                self.assertTrue(os.path.exists(os.path.join(SK, d, ref)), f"{d}: missing {ref}")
+
+    def test_no_hardcoded_partial_factor_defaults(self):
+        # code factors must come from the register (CLAUDE.md rule): no literal gM0=1.0 style defaults in signatures
+        import re
+        for d in self.skills():
+            sdir = os.path.join(SK, d, "scripts")
+            for f in os.listdir(sdir) if os.path.isdir(sdir) else []:
+                if f.endswith(".py") and f != "factors.py":
+                    src = open(os.path.join(sdir, f)).read()
+                    self.assertIsNone(re.search(r"def \w+\([^)]*gM[0-9]\w*=\s*1\.", src), f"{d}/{f}")
+
+
+class TestReport(unittest.TestCase):
+    def test_report_builds(self):
+        rep = load("tensile-structures", "report")
+        tmp = tempfile.mkdtemp()
+        p = os.path.join(tmp, "s")
+        quiet(fdm.main, ["sail4", "--n", "8", "--prestress", "2", "--out", p])
+        cf = os.path.join(tmp, "c.json")
+        with open(cf, "w") as fh:
+            json.dump({"cases": [{"name": "PS"}, {"name": "W_up", "pressure": 0.6, "duration": "short"}]}, fh)
+        quiet(cases.main, [p + ".json", cf, "--out", os.path.join(tmp, "k")])
+        md = quiet(rep.main, ["--model", p + ".json", "--cases", os.path.join(tmp, "k_envelope.json"),
+                              "--material", "PVC-II", "--out", os.path.join(tmp, "r")])
+        for sec in ("Design basis", "Geometry and form finding", "Load cases", "Membrane check", "Governing"):
+            self.assertIn(sec, md)
+        self.assertTrue(os.path.exists(os.path.join(tmp, "r.html")))
+
+
 class TestDXF(unittest.TestCase):
     def test_structure(self):
         d = dxfw.DXF()
