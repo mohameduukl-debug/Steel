@@ -1,0 +1,13 @@
+{
+  "_note": "ILLUSTRATIVE wind zones/gradients for a 10 m four-point sail. Replace with wind-tunnel / TensiNet A1 / code-based values. Loads are characteristic; 'factor' applies the partial factor per combination.",
+  "material": {"Et_u": 800, "Et_v": 600, "EA_cable": 14000},
+  "cases": [
+    {"name": "PS", "pressure": 0.0},
+    {"name": "W000_up", "factor": 1.5, "gradient": {"dir_deg": 0, "p_windward": 0.8, "p_leeward": 0.3}},
+    {"name": "W045_up", "factor": 1.5, "gradient": {"dir_deg": 45, "p_windward": 0.8, "p_leeward": 0.3}},
+    {"name": "W090_up", "factor": 1.5, "gradient": {"dir_deg": 90, "p_windward": 0.8, "p_leeward": 0.3}},
+    {"name": "W_down", "factor": 1.5, "pressure": -0.4},
+    {"name": "W_edge", "factor": 1.5, "pressure": 0.3, "zones": [{"poly": [[0, 0], [3, 0], [3, 10], [0, 10]], "p": 1.0}]},
+    {"name": "S_uniform", "factor": 1.5, "snow": 0.5, "ponding": true}
+  ]
+}

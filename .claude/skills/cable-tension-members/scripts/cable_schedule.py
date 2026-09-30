@@ -58,6 +58,21 @@ def products():
         return json.load(fh)["products"]
 
 
+def apply_envelope(s, env_path, key):
+    """overwrite F_ULS (key='F_ULS', also F_min_comb) or F_SLS from a run_cases.py envelope."""
+    with open(env_path) as fh:
+        env = json.load(fh)
+    for c in s["cables"]:
+        g = env["groups"].get(c["id"])
+        if not g:
+            continue
+        c[key] = round(g["max"], 1)
+        if key == "F_ULS":
+            c["F_min_comb"] = round(g["min"], 2)
+            c["note"] = f"forces from envelope {os.path.basename(env_path)} (governing {g['case_max']})"
+    return s
+
+
 def from_model(path, product, uls_factor, sls_factor, deduct):
     with open(path) as fh:
         m = json.load(fh)
@@ -168,6 +183,8 @@ def main(argv=None):
     ap.add_argument("--uls-factor", type=float, default=3.0,
                     help="placeholder ULS force = factor × max prestress force (replace with analysis!)")
     ap.add_argument("--sls-factor", type=float, default=2.0)
+    ap.add_argument("--envelope", default=None, help="run_cases.py ULS envelope -> F_ULS and min force per group")
+    ap.add_argument("--envelope-sls", default=None, help="run_cases.py SLS envelope -> F_SLS per group")
     ap.add_argument("--deduct", type=float, default=0.0, help="node-to-pin deduction each end [mm]")
     ap.add_argument("--out", default="cable_schedule")
     ap.add_argument("--list", action="store_true", help="list library products")
@@ -181,6 +198,10 @@ def main(argv=None):
         return
     if a.from_model:
         s = from_model(a.from_model, a.product, a.uls_factor, a.sls_factor, a.deduct)
+        if a.envelope:
+            s = apply_envelope(s, a.envelope, "F_ULS")
+        if a.envelope_sls:
+            s = apply_envelope(s, a.envelope_sls, "F_SLS")
     elif a.schedule:
         with open(a.schedule) as fh:
             s = json.load(fh)

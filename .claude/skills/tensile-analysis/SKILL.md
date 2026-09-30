@@ -27,6 +27,25 @@ This uses kinetic-damping DR on the cable-net analogy. Links are tension-only, a
 normal to the surface; snow acts on plan area. Output: displacements, forces, stresses, slack count, reactions.
 A zero-load run converges at iteration 0, which proves the prestress state is in equilibrium.
 
+**Ponding** (`--ponding`): after the snow/rain case converges, a priority-flood fills every basin of the
+**deformed** surface to its spill level (outlets = free edges, supports, nodes with `"drain": true`), applies the
+water weight and re-runs until the water volume converges or grows (reported as PONDING INSTABILITY). Any basin
+counts as a FAIL: ponding must be avoided.
+```bash
+python3 dynamic_relaxation.py flat.json --snow 0.5 --ponding -v
+```
+
+### `scripts/run_cases.py`: load-case sets and envelopes
+```bash
+python3 run_cases.py sail.json examples/load_cases_example.json --out sail_cases
+python3 ../../cable-tension-members/scripts/cable_schedule.py --from-model sail.json \
+        --envelope sail_cases_envelope.json --product Ronstan-ACS2-GS-17.0 --deduct 250
+```
+Each case is solved non-linearly and separately. Options per case: uniform `pressure`, `snow`, pressure `zones` (plan
+polygons), a directional `gradient` (windward → leeward, to screen wind directions), `factor`, `ponding`.
+Outputs: `_envelope.json` (edge and cable-group max/min with governing case, reactions per support per case, reaction
+envelope) and `_summary.md`. Cp zones and gradients must come from tunnel data, TensiNet A1 or conservative code values.
+
 **Limits (state them in any report):** a net model ignores fabric shear stiffness and Poisson coupling, with warp along
 grid u. Use it for concept, sizing and checking. Final design needs orthotropic membrane FE with wrinkling in
 dedicated software.

@@ -46,6 +46,11 @@ SLS versions for deflection, ponding and slack. Partial factors: project code (e
 * Check: iterative non-linear analysis with load following the deformed geometry (water depth builds at low points) until
   converged or runaway. Remedies: more curvature or prestress, drainage points, steeper falls.
 * The hanging (sag) direction under snow usually governs PVC.
+* Tool: `dynamic_relaxation.py --ponding`. Algorithm: (1) solve the snow/rain case; (2) priority-flood (Barnes et al. 2014)
+  over the mesh graph from the outlets (free edges, supports, drains) gives each node's spill level, so depth = level − z;
+  (3) nodal water load = γ_w·depth·plan area (γ_w = 10 kN/m³), fill-to-spill = blocked drains; (4) re-solve from the
+  deformed shape; (5) repeat until the volume changes < 1 % (stable basin, still a FAIL) or depth > limit / no convergence
+  (instability). A surface that drains everywhere reports "no basin".
 
 ## 5. Deflection and serviceability
 No universal numeric limit [V: none found]. Criteria: clearance to steel, lights and people (ASCE 55 §6.10); no ponding;

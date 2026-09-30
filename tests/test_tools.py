@@ -33,6 +33,7 @@ def quiet(fn, *a, **k):
 fdm = load("tensile-analysis", "form_find_fdm")
 dr = load("tensile-analysis", "dynamic_relaxation")
 cab = load("cable-tension-members", "cable_calc")
+cases = load("tensile-analysis", "run_cases")
 sched = load("cable-tension-members", "cable_schedule")
 pin = load("tensile-connections", "pin_connection")
 corner = load("tensile-connections", "corner_plate")
@@ -100,6 +101,53 @@ class TestDynamicRelaxation(unittest.TestCase):
             self.assertAlmostEqual(tot_pull, tot_load, delta=0.01 * max(1.0, abs(tot_load)))
         self.assertGreater(m["analysis"]["max_displacement_m"], 0.05)
         self.assertLess(m["analysis"]["max_residual_kN"], 1e-4)
+
+
+class TestPondingAndCases(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def ff(self, *args):
+        p = os.path.join(self.tmp, "m")
+        quiet(fdm.main, list(args) + ["--out", p])
+        with open(p + ".json") as fh:
+            return json.load(fh), p + ".json"
+
+    def test_flat_hypar_ponds(self):
+        m, _ = self.ff("hypar", "--size", "10", "--high", "0.3", "--n", "12", "--prestress", "0.6")
+        r = dr.analyse(m, snow=0.5, do_ponding=True)
+        self.assertGreater(r["analysis"]["ponding"]["water_volume_m3"], 1.0)
+        self.assertIn("INSTABILITY", r["analysis"]["ponding"]["status"])
+
+    def test_sail_drains(self):
+        m, _ = self.ff("sail4", "--n", "10", "--prestress", "2")
+        r = dr.analyse(m, snow=0.75, do_ponding=True)
+        self.assertLess(r["analysis"]["ponding"]["water_volume_m3"], 1e-6)
+
+    def test_priority_flood_bowl(self):
+        # 3x3 bowl: centre 1 m below a flat rim of outlets -> depth 1 m at centre only
+        X = [[i, j, 0.0 if (i, j) != (1, 1) else -1.0] for j in range(3) for i in range(3)]
+        model = {"nodes": [{"fixed": (i, j) != (1, 1)} for j in range(3) for i in range(3)],
+                 "edges": [{"n": [4, k], "kind": "membrane"} for k in (1, 3, 5, 7)], "faces": []}
+        d = dr.water_depths(model, X, dr.outlets(model))
+        self.assertAlmostEqual(d[4], 1.0)
+        self.assertAlmostEqual(sum(d.values()), 1.0)
+
+    def test_cases_envelope(self):
+        m, path = self.ff("sail4", "--n", "8", "--prestress", "2")
+        cf = os.path.join(self.tmp, "c.json")
+        with open(cf, "w") as fh:
+            json.dump({"cases": [{"name": "PS"}, {"name": "UP", "factor": 1.5, "pressure": 0.6},
+                                 {"name": "G", "gradient": {"dir_deg": 0, "p_windward": 1.0, "p_leeward": 0.0}},
+                                 {"name": "Z", "pressure": 0.1, "zones": [{"poly": [[0, 0], [5, 0], [5, 10], [0, 10]],
+                                                                          "p": 1.0}]}]}, fh)
+        env = quiet(cases.run, path, cf, None)
+        self.assertEqual(len(env["summary"]), 4)
+        for g, v in env["groups"].items():
+            self.assertGreaterEqual(v["max"], v["min"])
+            self.assertEqual(v["case_min"], "PS")
+        self.assertTrue(cases.point_in_poly(1, 1, [[0, 0], [2, 0], [2, 2], [0, 2]]))
+        self.assertFalse(cases.point_in_poly(3, 1, [[0, 0], [2, 0], [2, 2], [0, 2]]))
 
 
 class TestCables(unittest.TestCase):

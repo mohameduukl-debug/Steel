@@ -18,6 +18,9 @@ python3 "$S/tensile-analysis/scripts/dynamic_relaxation.py" sail.json --Et-u 800
 python3 "$S/tensile-analysis/scripts/dynamic_relaxation.py" sail.json --Et-u 800 --Et-v 600 \
         --EA-cable 14000 --snow 0.75 --out sail_snow
 
+echo; echo "== 2b. Load-case set (wind directions, zones, snow + ponding) and envelope =="
+python3 "$S/tensile-analysis/scripts/run_cases.py" sail.json "$HERE/load_cases_example.json" --out sail_cases
+
 echo; echo "== 3. Membrane check (PVC Type III, stress-factor method) =="
 python3 "$S/membrane-fabric/scripts/membrane_check.py" --material PVC-III --nw 8.6 --nf 8.6 --case wind
 python3 "$S/membrane-fabric/scripts/membrane_check.py" --material PVC-III --nw 7.4 --nf 7.4 --case snow
@@ -26,7 +29,7 @@ echo; echo "== 4. Cables: edge-cable check + schedule =="
 python3 "$S/cable-tension-members/scripts/cable_calc.py" edge --chord 10.44 --sag 1.17 --n 8.0
 python3 "$S/cable-tension-members/scripts/cable_calc.py" resist --Fmin 367 --ke 1.0 --FEd 125 --Fser 85 --Fmin-force 10
 python3 "$S/cable-tension-members/scripts/cable_schedule.py" --from-model sail.json \
-        --product Ronstan-ACS2-GS-20.1 --deduct 250 --uls-factor 7 --sls-factor 4.7 --out sail_cables
+        --envelope sail_cases_envelope.json --product Ronstan-ACS2-GS-17.0 --deduct 250 --out sail_cables
 python3 "$S/cable-tension-members/scripts/cable_schedule.py" "$HERE/schedule_example.json" --out schedule_example
 
 echo; echo "== 5. Corner plate resolution + pin/lug check (corner forces from the uplift run) =="
