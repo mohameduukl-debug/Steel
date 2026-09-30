@@ -70,6 +70,43 @@ def status(path: str, project: str | None = None) -> str:
     return node.get("status", "?") if isinstance(node, dict) else "?"
 
 
+def frange(path: str, project: str | None = None):
+    """(lo, hi) sensitivity range of an unverified factor, or None."""
+    node = load(project)
+    for p in path.split("."):
+        node = node[p]
+    r = node.get("range") if isinstance(node, dict) else None
+    return tuple(r) if r else None
+
+
+def sensitivity(check_fn, path: str, project: str | None = None):
+    """Evaluate check_fn(value) -> utilisation at the register value and both ends of the factor range.
+
+    Returns dict(value, lo, hi, u, u_lo, u_hi, robust) where robust = the OK/NOT OK decision is the same
+    over the whole range. check_fn receives the factor value (scale for table entries)."""
+    base = get(path, project)
+    if isinstance(base, dict):          # table entry (e.g. membrane.partial): the range is a scale on it
+        base = 1.0
+    rng = frange(path, project)
+    u = check_fn(base)
+    if not rng:
+        return {"value": base, "u": u, "robust": True, "lo": None, "hi": None, "u_lo": u, "u_hi": u}
+    u_lo, u_hi = check_fn(rng[0]), check_fn(rng[1])
+    decisions = {x <= 1.0 for x in (u, u_lo, u_hi)}
+    return {"value": base, "lo": rng[0], "hi": rng[1], "u": u, "u_lo": u_lo, "u_hi": u_hi,
+            "robust": len(decisions) == 1}
+
+
+def sens_line(name: str, res: dict) -> str:
+    if res["lo"] is None:
+        return f"  sensitivity {name}: no range, value taken as fixed ([V]/[C])"
+    verdict = ("ROBUST — decision unchanged over the range" if res["robust"] else
+               "DEPENDS ON THIS UNCERTAIN FACTOR — confirm the value before issue")
+    pts = [(res["value"], res["u"])] + [(v, u) for v, u in ((res["lo"], res["u_lo"]), (res["hi"], res["u_hi"]))
+                                           if v != res["value"]]
+    return (f"  sensitivity {name}: " + ", ".join(f"util {u:.2f} at {v:g}" for v, u in pts) + f" -> {verdict}")
+
+
 def tag(path: str, project: str | None = None) -> str:
     """short printable provenance, e.g. 'gammaR=1.0 [V]'."""
     return f"{path.split('.')[-1]}={get(path, project)} [{status(path, project)}]"

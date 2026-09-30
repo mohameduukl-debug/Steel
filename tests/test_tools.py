@@ -49,6 +49,8 @@ found = load("steel-supports", "foundation_check")
 cut = load("fabrication-drawings", "cutting_pattern")
 dxfw = load("fabrication-drawings", "dxf_writer")
 nestm = load("fabrication-drawings", "nest_panels")
+msel = load("membrane-fabric", "material_select")
+CF = load("tensile-structures", "factors")
 
 
 class TestFormFinding(unittest.TestCase):
@@ -422,6 +424,156 @@ class TestAnchorsFatigueClamps(unittest.TestCase):
         self.assertAlmostEqual(u, 12.0 / FRd, places=6)
         b = type("B", (), dict(T=400.0, R=0.6, d=40.0, type="FLC", delta=6.0, E=160.0))
         self.assertAlmostEqual(quiet(cab.cmd_saddle, b), 400e3 / (600 * 40) / 40.0, places=6)
+
+
+class TestSensitivity(unittest.TestCase):
+    """uncertain-factor sensitivity (factors.sensitivity) and its use in the cable/membrane tools."""
+
+    def test_robust_flag(self):
+        lo, hi = CF.frange("cable.f_sls")
+        self.assertEqual((lo, hi), (0.45, 0.5))                        # EN 1993-1-11 Table 7.2 values
+        r = CF.sensitivity(lambda f: 0.40 / f, "cable.f_sls")
+        self.assertTrue(r["robust"])
+        r = CF.sensitivity(lambda f: 0.47 / f, "cable.f_sls")          # 1.04 at 0.45, 0.94 at 0.50
+        self.assertFalse(r["robust"])
+        self.assertAlmostEqual(r["u_lo"], 0.47 / 0.45)
+        self.assertIn("DEPENDS", CF.sens_line("x", r))
+
+    def test_table_entry_is_a_scale(self):
+        r = CF.sensitivity(lambda s: s, "membrane.partial")
+        self.assertEqual(r["value"], 1.0)
+        self.assertEqual((r["lo"], r["hi"]), tuple(CF.frange("membrane.partial")))
+
+    def test_every_unverified_factor_has_a_range(self):
+        for path, e in CF.iter_entries():
+            if e["status"] == "U" and "value" in e and isinstance(e["value"], (int, float)):
+                self.assertIsNotNone(CF.frange(path), path)
+                lo, hi = CF.frange(path)
+                self.assertLessEqual(lo, hi, path)
+
+    def test_membrane_override_and_cli(self):
+        al, _ = mem.allowable(100, "japan", "snow", "PES/PVC", override={"membrane.japan_long_divisor": 7.0})
+        self.assertAlmostEqual(al, 100 / 7.0)
+        a1, _ = mem.allowable(100, "partial", "snow", "PES/PVC")
+        a2, _ = mem.allowable(100, "partial", "snow", "PES/PVC", override={"membrane.partial": 1.2})
+        self.assertAlmostEqual(a1 / a2, 1.2)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            mem.main(["--material", "PVC-III", "--nw", "9", "--nf", "8", "--case", "snow", "--method", "partial",
+                      "--sensitivity"])
+        self.assertIn("sensitivity partial", out.getvalue())
+
+    def test_cable_cli_sensitivity(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cab.main(["resist", "--Fmin", "367", "--termination", "ferrule", "--FEd", "125", "--Fser", "85",
+                      "--sensitivity"])
+            cab.main(["clamp", "--dT", "8", "--sensitivity"])
+        txt = out.getvalue()
+        self.assertIn("k_e (ferrule)", txt)
+        self.assertIn("f_sls on SLS", txt)
+        self.assertIn("unfavourable ends", txt)
+
+    def test_fatigue_sensitivity_matches_check(self):
+        spec = [(40.0, 2e6)]
+        res = quiet(fat.cable_sensitivity, spec, "dsC_spiral_socket", 1.35, 1.0, 4.0)
+        lo = CF.frange("fatigue_cables.dsC_spiral_socket")[0]
+        self.assertAlmostEqual(res[0]["u_lo"], fat.check(spec, lo, 1.35, 1.0, 4.0)[0])
+
+    def test_schedule_sls_sensitivity(self):
+        s = {"cables": [{"id": "C1", "A": 100.0, "E": 160.0, "Fmin": 150.0, "L_stressed": 10.0, "F_SLS": 60.0}]}
+        rows = sched.compute(s)
+        lines = quiet(sched.sls_sensitivity, rows, s)
+        self.assertIn("C1 SLS", lines[0])
+        self.assertTrue(rows[0]["sls_robust"])                        # 60/(0.45*150) = 0.89 and 0.80
+
+
+class TestCableExtras(unittest.TestCase):
+    def test_stress_area_iso898(self):
+        # ISO 898-1 tabulated tensile stress areas
+        for d, As in ((20, 245), (30, 561), (36, 817), (48, 1470)):
+            self.assertAlmostEqual(cab.stress_area(d, cab.metric_pitch(d)), As, delta=0.01 * As)
+
+    def test_rod_resistance(self):
+        a = type("A", (), dict(d=30.0, pitch=None, d_shank=None, fy=460.0, fu=610.0, FEd=180.0, fitting_Rd=None))
+        NRd = quiet(cab.cmd_rod, a)
+        As = cab.stress_area(30, 3.5)
+        self.assertAlmostEqual(NRd, min(math.pi * 900 / 4 * 460 / 1.0, 0.9 * 610 * As / 1.25) / 1e3, places=6)
+
+    def test_irvine_crossover(self):
+        # Irvine (1981): at λ² = 4π² the first symmetric in-plane frequency equals the first antisymmetric one (ω̄ = 2π)
+        self.assertAlmostEqual(cab.irvine_symmetric(1, 4 * math.pi ** 2), 2 * math.pi, places=9)
+        self.assertAlmostEqual(cab.irvine_symmetric(1, 1e-9), math.pi, places=4)      # taut string limit
+
+    def test_tension_from_frequencies(self):
+        L, m, T, EI = 15.0, 3.4, 50e3, 3000.0
+        f = lambda n: n / (2 * L) * math.sqrt(T / m) * math.sqrt(1 + n * n * math.pi ** 2 * EI / (T * L * L))  # noqa
+        pairs = [(n, f(n)) for n in (1, 2, 3, 4)]
+        Tfit, EIfit, _ = cab.tension_from_freqs(L, m, pairs)
+        self.assertAlmostEqual(Tfit, 50.0, places=6)
+        self.assertAlmostEqual(EIfit, 3000.0, places=3)
+        Tg, _, _ = cab.tension_from_freqs(L, m, pairs, EI=3000.0)
+        self.assertAlmostEqual(Tg, 50.0, places=6)
+
+    def test_sag_corrected_tension(self):
+        H, L, m, EA = 10.0, 40.0, 5.0, 50000.0                          # λ² ≈ 190: strongly sag-affected
+        lam2 = (m * 9.81e-3 * L / H) ** 2 * L / (H * L / EA)
+        c0 = math.sqrt(H * 1e3 / m)
+        pairs = [(1, cab.irvine_symmetric(1, lam2) * c0 / (2 * math.pi * L)), (2, c0 / L),
+                 (3, cab.irvine_symmetric(2, lam2) * c0 / (2 * math.pi * L))]
+        T_string = cab.tension_from_freqs(L, m, pairs, EI=0.0)[0]
+        T, _, _, lam = cab.sag_corrected_tension(L, m, pairs, EI=0.0, EA=EA)
+        self.assertGreater(T_string, 30.0)                               # string model is far off
+        self.assertAlmostEqual(T, 10.0, places=3)
+        self.assertAlmostEqual(lam / lam2, 1.0, delta=1e-3)
+
+    def test_stress_turns(self):
+        a = type("A", (), dict(L=10.0, EA=14000.0, F1=5.0, F2=20.0, pitch=3.5, thread="double", k_sup=None, w=0.0))
+        self.assertAlmostEqual(quiet(cab.cmd_stress_turns, a), 15 * 10 / 14000 * 1000 / 7.0, places=9)
+        a.w = 0.02                                                       # Ernst secant modulus
+        EAs = 14000 / (1 + 0.2 ** 2 * 25 * 14000 / (24 * 25 * 400))
+        self.assertAlmostEqual(quiet(cab.cmd_stress_turns, a), 15 * 10 / EAs * 1000 / 7.0, places=9)
+        a.w, a.k_sup, a.thread = 0.0, 20000.0, "single"
+        self.assertAlmostEqual(quiet(cab.cmd_stress_turns, a), 15 * (10 / 14000 + 1 / 20000) * 1000 / 3.5, places=9)
+
+    def test_sls_default_is_table_7_2(self):
+        a = type("A", (), dict(Fmin=300.0, ke=1.0, gammaR=1.0, Fk=None, FEd=100.0, Fser=100.0, fsls=0.45))
+        self.assertAlmostEqual(cab.resist_utils(a)[1], 100 / (0.45 * 300))
+        self.assertEqual(CF.get("cable.f_sls"), 0.45)
+        self.assertEqual(CF.get("cable.saddle_p_lim_OSS_lined"), 60.0)
+
+
+class TestMembraneExtras2(unittest.TestCase):
+    def test_panel_frequency_classical(self):
+        # no added mass: f11 = (c/2)·√(1/a² + 1/b²), c = √(n/m)  (classical rectangular membrane)
+        f, meff = mem.panel_frequency(2.0, 2.0, 6.0, 4.0, 1.2, Ca=0.0)
+        self.assertAlmostEqual(f, 0.5 * math.sqrt(2000 / 1.2) * math.sqrt(1 / 36 + 1 / 16), places=9)
+        self.assertEqual(meff, 1.2)
+        f, meff = mem.panel_frequency(2.0, 2.0, 6.0, 4.0, 1.2, sides=2, Ca=0.67)
+        self.assertAlmostEqual(meff, 1.2 + 2 * 0.67 * 1.25 * math.sqrt(24 / math.pi), places=9)
+        n = mem.prestress_for_frequency(f, 6.0, 4.0, meff)
+        self.assertAlmostEqual(n, 2.0, places=9)                          # inverse
+
+    def test_corner_fan(self):
+        c = mem.corner_check(25.0, 90.0, 0.4, 27.0, 3, eff=0.8)
+        th = math.pi / 2
+        self.assertAlmostEqual(c["n_r0"], 25 / (th * 0.4))
+        self.assertAlmostEqual(c["n_all_reinf"], 27 * 2.6)
+        self.assertAlmostEqual(c["r_k"][1], 25 / (th * 27))
+        self.assertAlmostEqual(c["r_k"][3], 25 / (th * 27 * 2.6))
+
+    def test_material_selection(self):
+        self.assertLess(msel.fire_rank("A2-s1,d0"), msel.fire_rank("B-s2,d0"))
+        ok, out = msel.select({"n_design": 25.0, "case": "snow", "fire": "A2"})
+        self.assertTrue(ok)
+        for k, v in ok:
+            self.assertEqual(v["family"], "glass/PTFE")
+            self.assertLessEqual(v["util"], 1.0)
+        ok, _ = msel.select({"n_design": 6.0, "case": "wind", "foldable": True})
+        self.assertTrue(all(v["foldable"] for _, v in ok))
+        self.assertNotIn("Chukoh-FGT-800", [k for k, _ in ok])
+        ok, _ = msel.select({"translucency": 80})
+        self.assertEqual({v["family"] for _, v in ok}, {"ETFE"})
 
 
 class TestJoints(unittest.TestCase):

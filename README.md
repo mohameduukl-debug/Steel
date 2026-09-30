@@ -9,7 +9,7 @@ the fabric, the cables and the structural steel, and how the three connect.
 ├── tensile-structures/     HUB: load path, interactions, workflow, standards map, JSON schema, code-factor register
 │   └── scripts/factors.py, report.py
 ├── membrane-fabric/        materials (PVC, PTFE, silicone, ETFE, ePTFE), prestress, stress checks, seams
-│   └── scripts/membrane_check.py, biaxial_fit.py
+│   └── scripts/membrane_check.py, material_select.py, biaxial_fit.py
 ├── cable-tension-members/  spiral strand / FLC / stainless / bars; EN 1993-1-11, ASCE 19; lengths; schedules
 │   └── scripts/cable_calc.py, cable_schedule.py
 ├── steel-supports/         masts, struts, arches, rings, bases, foundations/anchors
@@ -56,6 +56,9 @@ python3 $S/fabrication-drawings/scripts/cutting_pattern.py cone.json --strip 2 -
 Every code value (partial factors, stress factors, γR, k_e, SLS limits …) sits in one register,
 `.claude/skills/tensile-structures/reference/code_factors.json`, tagged V/C/U. Override it per project with
 `--factors project.json` or `TENSILE_FACTORS=project.json`. Run `factors.py report` to list unverified values.
+Each uncertain factor carries a `range`. The `--sensitivity` option (membrane_check, cable_calc, cable_schedule,
+fatigue_check) re-runs the check at both ends of the range and reports ROBUST (the decision does not depend on the
+factor) or DEPENDS (confirm the value before issue).
 
 ## Using the skills in Claude Code
 Open this repo in Claude Code and ask naturally, e.g.:
@@ -73,6 +76,9 @@ Claude loads `tensile-structures` first and then the specialist skills and tools
 * Catenary matches the parabola for small sag; T_B − T_A = w·h.
 * A flat (developable) panel flattens with zero strain and exact area.
 * Every generated DXF was opened with `ezdxf` recover/audit (0 errors) and rendered for visual checks.
+* Cable force from frequencies recovers T and EI exactly. The Irvine correction recovers T when λ² ≈ 190 (the string
+  model is 3.5× off) and reproduces Irvine's crossover ω̄ = 2π at λ² = 4π². ISO 898-1 stress areas match.
+* The panel frequency reduces to the classical rectangular-membrane result when the added mass is zero.
 
 ## Important limitations
 * The research behind the reference files used web-search excerpts (primary standards were not accessible).

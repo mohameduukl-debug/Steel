@@ -23,7 +23,10 @@ python3 membrane_check.py --material PVC-II --prestress 2.0 2.0                 
 - `--method factor` (default): allowable = f/SF. SF = 4 short-term (wind), 5 long-term (snow, prestress); both editable.
 - `--method fm`: FM Global DS 1-59 factors on new-fabric strength (8 for P+D, 5 with S/W/T/L/R).
 - `--method japan`: 1/8 long-term, 1/4 short-term (reported; verify).
-- `--method partial`: n_Rd = f_k/(γM·A0·A1·A2·A3). The defaults are **indicative German A-factor values**. Replace them with CEN/TS 19102 Annex C, National Annex or project values, and feed in design stresses from factored non-linear runs.
+- `--method partial`: n_Rd = f_k/(γM·A0·A1·A2·A3). The defaults are **German A-factor practice** values: fabric γM 1.4,
+  A0 1.0–1.2, A1 1.6–1.7, A2 1.1–1.2, A3 1.1–1.25 (Bautechnik; Knippers' *Construction Manual*). They are not
+  CEN/TS 19102 values. Replace them with CEN/TS 19102 Annex C, National Annex or project values, and feed in design
+  stresses from factored non-linear runs.
 - Seams are checked with `--seam-eff` (default 0.8; PVC HF 0.8–0.9, PTFE heat-seal 0.7–0.8).
 
 More checks in the same tool:
@@ -39,6 +42,36 @@ python3 membrane_check.py --material ETFE-250um --nw 2.5                        
   Allowable = n_c/tear_factor, where tear_factor is [U] and must be agreed with the checker.
 - `--curvature R_res R_oth --p`: bounds from n₁/R₁ + n₂/R₂ = p. The resisting direction is ≤ n0 + pR; the other
   direction is ≥ n0 − pR, so it flags slack risk. Hand sizing only.
+
+Panel frequency, corner reinforcement and sensitivity:
+```bash
+python3 membrane_check.py --material PVC-III --prestress 2 2 --flutter 6 4 --f-target 2.0   # f11 + prestress needed
+python3 membrane_check.py --material PVC-III --case wind --corner 25 90 0.4 --layers 3      # radial fan at a corner
+python3 membrane_check.py --material PVC-III --nw 9 --nf 8 --case snow --method partial --sensitivity
+```
+- `--flutter A B`: f11 = ½·√((n_w/A² + n_f/B²)/m_eff) for a flat A × B panel (lower bound: curvature stiffens it).
+  m_eff = fabric mass + C_a·ρ_air·r_eq per air side. For light fabrics the air is most of the mass. C_a is [U]
+  (Lamb's plate value 0.67, range 0.55–0.9). `--f-target` gives the prestress for a target frequency. No code sets a
+  frequency limit, so agree the target with the wind engineer.
+- `--corner R THETA R0`: the corner force fans out as n(r) = R/(θ·r). The tool checks the stress at the plate or
+  clamp radius against n_all·(1 + (k−1)·η) for k plies (η [U], default 0.8) and gives how far each ply must extend.
+- `--sensitivity`: re-runs every check that uses an uncertain factor (Japanese divisors, the partial-factor set as a
+  scale 0.78–1.24, tear factor, ETFE γ, C_a, ply efficiency; single point or `--envelope`) at both ends of the
+  factor's range. It prints ROBUST when the OK / NOT OK decision holds over the range, or DEPENDS when it does not.
+  The stress-factor (4/5) and FM methods use [V] factors only.
+
+### `scripts/material_select.py`: filter and rank fabrics for a project
+```bash
+python3 material_select.py --n-design 25 --case snow --fire A2 --translucency 10
+python3 material_select.py --n-design 6 --case wind --foldable --life 15 --max-cost 2
+```
+- The strength requirement uses the same `allowable()` as `membrane_check.py`, with seams in the weaker direction.
+  ETFE is checked as σ = n/t against f_y1/γ.
+- Filters: EN 13501-1 class (A1 < A2 < B …), translucency, service life, foldability, family, relative cost.
+- Ranking: cost index, then the utilisation closest to `--u-target` (0.8). Every excluded material is listed with
+  the reason.
+- Fire, light, life, fold and cost data are *typical family values* (`family_defaults`). Use them for screening and
+  confirm with the product's classification report, datasheet and warranty.
 
 ### `scripts/biaxial_fit.py`: biaxial test → stiffness + compensation (EN 17117-1/-2 style)
 ```bash

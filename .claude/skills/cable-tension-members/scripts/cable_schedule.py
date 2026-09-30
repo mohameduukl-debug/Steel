@@ -189,6 +189,8 @@ def main(argv=None):
     ap.add_argument("--out", default="cable_schedule")
     ap.add_argument("--list", action="store_true", help="list library products")
     ap.add_argument("--factors", default=None, help="project code-factor file")
+    ap.add_argument("--sensitivity", action="store_true",
+                    help="re-check the SLS limit over the range of f_sls (EN 1993-1-11 Table 7.2: 0.45-0.50)")
     a = ap.parse_args(argv)
     if a.factors:
         os.environ["TENSILE_FACTORS"] = a.factors
@@ -214,8 +216,33 @@ def main(argv=None):
         print(f"{r['id']:<8}{str(r['type'])[:21]:<22}{r['F_Rd_kN']:8.1f}{(r['F_ULS_kN'] or 0):8.1f}"
               f"{(r['util_EN'] or 0):8.2f}{r['L_pin_stressed_m']:10.4f}{r['L0_pin_unstressed_Tref_m']:10.4f}"
               + ("" if r["slack_ok"] else "  SLACK!") + ("  FAIL" if (r["util_EN"] or 0) > 1 else ""))
+    if a.sensitivity:
+        sens = sls_sensitivity(rows, s)
+        with open(a.out + ".md", "a") as fh:
+            fh.write("\nSensitivity (f_sls range):\n\n" + "\n".join(sens) + "\n")
     print(f"Wrote {a.out}.csv and {a.out}.md")
     return rows
+
+
+def sls_sensitivity(rows, s):
+    """SLS utilisation at both ends of the f_sls range for every cable (skipped if f_sls is given)."""
+    if "f_sls" in s or not F.frange("cable.f_sls"):
+        lines = ["  f_sls set by the schedule / project without a range: no sensitivity needed"]
+        print(lines[0])
+        return lines
+    lines = []
+    for r in rows:
+        if not r["F_SLS_kN"]:
+            continue
+        Fuk = r["Fmin_kN"] * r["ke"]
+        res = F.sensitivity(lambda f, r=r, Fuk=Fuk: r["F_SLS_kN"] / (f * Fuk), "cable.f_sls")
+        r["sls_robust"] = res["robust"]
+        lines.append(F.sens_line(f"{r['id']} SLS", res))
+    if not lines:
+        lines.append("  no SLS forces in the schedule")
+    for ln in lines:
+        print(ln)
+    return lines
 
 
 if __name__ == "__main__":

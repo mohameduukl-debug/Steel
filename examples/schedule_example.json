@@ -2,7 +2,6 @@
   "project": "Demo canopy — cable schedule example",
   "T_ref": 20,
   "gammaR": 1.0,
-  "f_sls": 0.5,
   "cables": [
     {"id": "EC-1", "product": "Ronstan-ACS2-GS-20.1", "qty": 2, "L_stressed": 10.62, "T_install": 28,
      "F_prestress": 18, "F_ULS": 95, "F_SLS": 60, "F_min_comb": 9, "F_meas": 18,

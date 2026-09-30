@@ -32,9 +32,17 @@ Allowable stress 1/8 of strength long-term, 1/4 short-term; membrane classes A (
 Limit states to EN 1990. Resistance = characteristic strength / (γ_M × modification factors)
 with **k_biax** (biaxial), **k_age** (ageing/environment), **k_dur,M** (load duration),
 **k_temp** (temperature) [V names]. Annex A material classes, Annex B ageing tests, Annex C typical k values [V].
-Exact formula and numbers: [U]. Read the TS.
+Exact formula and numbers: [U]. Read the TS. prCEN/TS values seen: k_temp,0 = 0.8 and k_temp,50 = 1.2–1.4
+(proposed 1.4–1.5) in SLS design (Stranghöner, TexComp 2021). ETFE: base material γM0 = 1.10 (f_u23 = 40 MPa gives
+f_Rd = 36.4 MPa), SLS elastic limit f_el23 = 15 MPa, welds γM1 = 1.45 (QL1) to 1.15 (QL3) (IASS 2024 paper 247)
+[single source].
 
-German A-factor method (predecessor, Minte/Reinhardt) [U values]:
+German A-factor method (predecessor, Minte/Reinhardt) [values seen in ≥2 sources for A1/A2, but not a code in your
+jurisdiction]: Bautechnik "Materialprüfung und Bemessung im Zelt- und Membranbau" and Knippers, *Construction Manual
+for Polymers + Membranes*. Fabric γM = 1.4, connections 1.5; A0 1.0–1.2 fabric, 1.2 connections; A1 1.6–1.7;
+A2 1.1–1.2; A3 1.1–1.25 fabric, 1.4–1.95 connections (ratio of strength at 23 °C to 70 °C). DIN 18204-1:2007 gives
+only the product A_mod·γM. `membrane_check.py --sensitivity` scales the product over 0.78–1.24.
+Earlier summary:
 `f_d = f_tk / (γ_M · A0 · A1 · A2 · A3)`, γ_M ≈ 1.4; A0 (biaxial/size) ≈ 1.2; A1 (long-term) ≈ 1.6–1.7 PVC,
 1.0–1.4 PTFE; A2 (ageing) ≈ 1.1–1.2; A3 (temperature ~70 °C) ≈ 1.1–1.2 PVC, 1.0–1.1 PTFE. Actions factored separately.
 Combined this gives about 3.5–4 (short-term) and 5–7 (long-term snow), consistent with the stress-factor practice above.

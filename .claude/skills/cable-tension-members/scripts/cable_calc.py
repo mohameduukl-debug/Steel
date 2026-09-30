@@ -15,6 +15,18 @@ Sub-commands
   irvine    change of horizontal tension due to load change / temperature
             (Irvine's cable equation, parabolic cable)
   freq      natural frequencies of a taut cable f_n = n/(2L)·sqrt(T/m)
+  freq-tension  cable force from MEASURED frequencies (taut string + bending stiffness;
+            least-squares T and EI from several modes; sag warning via Irvine λ²)
+  rod       group A tension rod (threaded bar): EN 1993-1-1/1-8 route min(A_g·f_y/γM0,
+            k2·f_u·A_s/γM2) and EN 1993-1-11 route min(F_k/γR, F_uk/(1.5γR)); fitting capacity
+  stress-turns  turnbuckle / fork adjustment for a force change: ΔL = ΔF·(L/EA_sec + 1/k_sup),
+            turns = ΔL / lead (Ernst secant modulus for a sagging cable)
+  clamp     slip resistance of a bolted cable clamp
+  saddle    cable over a saddle: transverse pressure, R/d, outer-wire bending
+
+--sensitivity (resist, clamp, saddle): re-runs the check at both ends of the range
+of every UNVERIFIED [U] factor it uses and says whether the OK / NOT OK decision
+depends on that factor.
 
 Units: kN, m, mm (diameters), kN/m (loads), °C.
 
@@ -27,6 +39,10 @@ Examples
   python3 cable_calc.py resist --Fmin 537 --ke 0.9 --FEd 240 --gammaR 1.0
   python3 cable_calc.py irvine --L 20 --w0 0.1 --H0 50 --w1 1.0 --EA 20000
   python3 cable_calc.py freq --L 15 --T 80 --m 3.4
+  python3 cable_calc.py freq-tension --L 15 --m 3.4 --EI 2.0 --f 1:2.75 --f 2:5.52 --f 3:8.30
+  python3 cable_calc.py rod --d 30 --fy 460 --fu 610 --FEd 180 --fitting-Rd 250
+  python3 cable_calc.py stress-turns --L 10 --EA 14000 --F1 5 --F2 20 --pitch 3.5 --w 0.02
+  python3 cable_calc.py resist --Fmin 367 --termination ferrule --FEd 125 --Fser 85 --sensitivity
 
 Code values: γR=1.0, k_e (1.0 sockets / 0.9 swaged) and the ASCE 2.2 factor
 are defaults taken from EAD 200001-00-0602 / ETAs / ASCE 19 practice — always
@@ -124,11 +140,22 @@ def parabola(L, h, w, H=None, f=None):
             "length": S, "sag_ratio": n}
 
 
+KE_KEY = {"socket": "cable.ke_socket", "swaged": "cable.ke_swaged", "ferrule": "cable.ke_ferrule",
+          "ubolt": "cable.ke_ubolt"}
+
+
 def fill_factors(a):
     """fill unspecified code values from the factor register and remember their status."""
     if getattr(a, "factors", None):
         os.environ["TENSILE_FACTORS"] = a.factors
-    for attr, key in (("gammaR", "cable.gammaR"), ("fsls", "cable.f_sls"), ("asce", "cable.asce19_factor"),
+    if getattr(a, "termination", None):
+        if a.ke is not None:
+            raise SystemExit("give --ke or --termination, not both")
+        a.ke, a.ke_st = F.get(KE_KEY[a.termination]), F.status(KE_KEY[a.termination])
+    elif hasattr(a, "ke"):
+        a.ke, a.ke_st = (1.0, "socket default") if a.ke is None else (a.ke, "user")
+    a.fsls_key = "cable.f_sls_bending_checked" if getattr(a, "bending_checked", False) else "cable.f_sls"
+    for attr, key in (("gammaR", "cable.gammaR"), ("fsls", a.fsls_key), ("asce", "cable.asce19_factor"),
                       ("alpha", "cable.alpha_carbon")):
         if hasattr(a, attr) and getattr(a, attr) is None:
             setattr(a, attr, F.get(key))
@@ -220,7 +247,39 @@ def cmd_resist(a):
     if a.Fmin_force is not None:
         print(f"  No-slack check: minimum force under all combinations = {a.Fmin_force:.1f} kN "
               + ("OK (>0)" if a.Fmin_force > 0 else "SLACK -> increase prestress / revise geometry"))
+    if getattr(a, "sensitivity", False):
+        resist_sensitivity(a)
     return FRd_en
+
+
+def resist_utils(a, ke=None, fsls=None):
+    """(ULS, SLS) utilisations of the EN 1993-1-11 check for given k_e / f_sls."""
+    ke = a.ke if ke is None else ke
+    fsls = a.fsls if fsls is None else fsls
+    Fuk = a.Fmin * ke
+    FRd = Fuk / (1.5 * a.gammaR)
+    if a.Fk:
+        FRd = min(FRd, a.Fk / a.gammaR)
+    return a.FEd / FRd, (a.Fser / (fsls * Fuk) if a.Fser is not None else None)
+
+
+def resist_sensitivity(a):
+    """re-check at the ends of the range of each [U] factor used (register values only)."""
+    out = []
+    print("Sensitivity to uncertain factors:")
+    if getattr(a, "termination", None) and F.status(KE_KEY[a.termination]) == "U":
+        key = KE_KEY[a.termination]
+        res = F.sensitivity(lambda k: max(u for u in resist_utils(a, ke=k) if u is not None), key)
+        print(F.sens_line(f"k_e ({a.termination}) on max(ULS, SLS)", res))
+        out.append(res)
+    if a.Fser is not None and a.fsls_st != "user" and F.frange(a.fsls_key):
+        res = F.sensitivity(lambda f: resist_utils(a, fsls=f)[1], a.fsls_key)
+        print(F.sens_line("f_sls on SLS", res))
+        out.append(res)
+    if not out:
+        print("  no factor with an uncertainty range used in this check (γR, 1.5 and ASCE 2.2 are [V]; "
+              "user values are yours)")
+    return out
 
 
 def cmd_irvine(a):
@@ -250,14 +309,22 @@ def cmd_irvine(a):
     return H
 
 
-def cmd_clamp(a):
-    """slip resistance of a bolted cable clamp (cross clamp, edge clamp, saddle clamp)."""
+def clamp_frd(a, mu=None, gfr=None, kl=None):
+    """slip resistance [kN] of a bolted cable clamp (EN 1993-1-8 preload F_p,C = 0.7·f_ub·A_s)."""
     AS = {10: 58, 12: 84.3, 16: 157, 20: 245, 24: 353, 27: 459, 30: 561}
     fub = {"8.8": 800, "10.9": 1000, "A4-70": 700, "A4-80": 800}[a.grade]
     As = AS.get(int(a.bolt_d), 0.78 * math.pi * a.bolt_d ** 2 / 4)
-    Fp = 0.7 * fub * As / 1e3                                        # EN 1993-1-8 preload F_p,C
+    Fp = 0.7 * fub * As / 1e3
+    mu = F.get("cable.clamp_mu") if mu is None else mu
+    gfr = F.get("cable.clamp_gamma") if gfr is None else gfr
+    kl = F.get("cable.clamp_loss") if kl is None else kl
+    return a.surfaces * mu * a.nb * Fp * kl / gfr, Fp
+
+
+def cmd_clamp(a):
+    """slip resistance of a bolted cable clamp (cross clamp, edge clamp, saddle clamp)."""
+    FRd, Fp = clamp_frd(a)
     mu, gfr, kl = F.get("cable.clamp_mu"), F.get("cable.clamp_gamma"), F.get("cable.clamp_loss")
-    FRd = a.surfaces * mu * a.nb * Fp * kl / gfr
     print(f"Cable clamp: {a.nb} bolts M{a.bolt_d:g} {a.grade}, F_p,C = 0.7·f_ub·A_s = {Fp:.1f} kN each, "
           f"{a.surfaces} friction surfaces")
     print(f"  μ = {mu} [{F.status('cable.clamp_mu')}], preload retained {kl} [{F.status('cable.clamp_loss')}], "
@@ -266,13 +333,25 @@ def cmd_clamp(a):
     print(f"  slip resistance F_Rd = {FRd:.1f} kN  vs  force to hold {a.dT:.1f} kN  -> util {u:.2f}"
           + ("  <-- FAIL" if u > 1 else "  OK"))
     print("  Re-tighten bolts after stressing (strand diameter reduces under tension); confirm μ by clamp test.")
+    if getattr(a, "sensitivity", False):
+        print("Sensitivity to uncertain factors (one at a time, others at register value):")
+        worst = {}
+        for key, name, kw, bad in (("cable.clamp_mu", "μ", "mu", 0), ("cable.clamp_gamma", "γM,fr", "gfr", 1),
+                                   ("cable.clamp_loss", "preload retained", "kl", 0)):
+            print(F.sens_line(name, F.sensitivity(lambda v, kw=kw: a.dT / clamp_frd(a, **{kw: v})[0], key)))
+            if F.frange(key):
+                worst[kw] = F.frange(key)[bad]
+        uw = a.dT / clamp_frd(a, **worst)[0]
+        print(f"  all ranged factors at their unfavourable ends: util {uw:.2f} -> "
+              + ("still OK" if uw <= 1 else "NOT OK: test the clamp (slip test, EN 1993-1-11 has no default μ) or add bolts"))
     return u
 
 
 def cmd_saddle(a):
     """cable over a saddle / deviator: transverse pressure, radius ratio, wire bending stress."""
     p = a.T * 1e3 / (a.R * 1000 * a.d)                             # N/mm² on projected width d
-    key = "cable.saddle_p_lim_FLC" if a.type == "FLC" else "cable.saddle_p_lim_OSS"
+    lined = getattr(a, "lined", False)
+    key = ("cable.saddle_p_lim_FLC" if a.type == "FLC" else "cable.saddle_p_lim_OSS") + ("_lined" if lined else "")
     plim = F.get(key)
     Rd = a.R * 1000 / a.d
     Rmin = F.get("cable.saddle_min_R_over_d")
@@ -283,6 +362,13 @@ def cmd_saddle(a):
     print(f"  R/d = {Rd:.1f}  vs minimum {Rmin} [{F.status('cable.saddle_min_R_over_d')}]"
           + ("  <-- below: apply strength reduction (supplier / ASCE 19 N_d)" if Rd < Rmin else "  OK"))
     print(f"  outer-wire bending stress σ_b = E·δ/(2R) = {sb:.0f} MPa (Reuleaux upper bound — inter-wire slip lowers it; relevant for fatigue; use a liner)")
+    print("  Limit = q_Rk of EN 1993-1-11 Table 6.4 (no tests); apply any partial factor the clause / NA requires. "
+          "The saddle itself is designed for k·F_uk (k: NDP) and cable slip over it per EN 1993-1-11 (μ, γM,fr).")
+    if getattr(a, "sensitivity", False):
+        print("Sensitivity to uncertain factors:")
+        print(F.sens_line(f"p_lim ({a.type}{', lined' if lined else ''})", F.sensitivity(lambda v: p / v, key)))
+        print(F.sens_line("min R/d (util = R_min/R)", F.sensitivity(lambda v: v / Rd,
+                                                                      "cable.saddle_min_R_over_d")))
     return p / plim
 
 
@@ -292,6 +378,171 @@ def cmd_freq(a):
     for n in range(1, a.modes + 1):
         print(f"  mode {n}: f = {n * c / (2 * a.L):.2f} Hz")
     print("Keep f1 clear of vortex-shedding / rain-wind ranges; add dampers or helical fillets on long stays.")
+
+
+def metric_pitch(d):
+    """ISO 261 coarse pitch; tension-rod sizes above M64 normally use the 6 mm fine series."""
+    coarse = {10: 1.5, 12: 1.75, 16: 2.0, 20: 2.5, 22: 2.5, 24: 3.0, 27: 3.0, 30: 3.5, 33: 3.5, 36: 4.0,
+              39: 4.0, 42: 4.5, 45: 4.5, 48: 5.0, 52: 5.0, 56: 5.5, 60: 5.5, 64: 6.0}
+    if d in coarse:
+        return coarse[d]
+    if d > 64:
+        return 6.0
+    raise SystemExit(f"no default pitch for M{d:g}: give --pitch")
+
+
+def stress_area(d, P):
+    """ISO 898-1 tensile stress area A_s = π/4·(d − 0.9382·P)² [mm²]."""
+    return math.pi / 4 * (d - 0.9382 * P) ** 2
+
+
+def cmd_rod(a):
+    """group A tension rod (EN 1993-1-11 group A: design to EN 1993-1-1 / 1-8)."""
+    P = a.pitch or metric_pitch(a.d)
+    As = stress_area(a.d, P)
+    dg = a.d_shank or a.d
+    Ag = math.pi * dg * dg / 4
+    gM0, gM2, gR = F.get("steel.gM0"), F.get("steel.gM2"), F.get("cable.gammaR")
+    k2 = F.get("steel.k2_thread")
+    Npl = Ag * a.fy / gM0 / 1e3
+    Nthr = k2 * a.fu * As / gM2 / 1e3
+    NRd = min(Npl, Nthr)
+    Fk, Fuk = a.fy * As / 1e3, a.fu * As / 1e3
+    N11 = min(Fk / gR, Fuk / (1.5 * gR))
+    print(f"Tension rod M{a.d:g}x{P:g} (thread A_s = {As:.0f} mm²), shank Ø{dg:g} (A_g = {Ag:.0f} mm²), "
+          f"f_y = {a.fy:g}, f_u = {a.fu:g} MPa")
+    print(f"  EN 1993-1-1 6.2.3 gross yield   A_g·f_y/γM0      = {Npl:8.1f} kN  (γM0 = {gM0} [{F.status('steel.gM0')}])")
+    print(f"  EN 1993-1-8 T3.4 thread         k2·f_u·A_s/γM2   = {Nthr:8.1f} kN  (k2 = {k2} "
+          f"[{F.status('steel.k2_thread')}], γM2 = {gM2} [{F.status('steel.gM2')}])")
+    print(f"  -> N_t,Rd (group A route)                        = {NRd:8.1f} kN  governed by "
+          f"{'thread' if Nthr < Npl else 'shank yield'}")
+    print(f"  EN 1993-1-11 6.2 route: min(F_k/γR, F_uk/(1.5γR)) on A_s = {N11:.1f} kN  (γR = {gR} "
+          f"[{F.status('cable.gammaR')}]) — for comparison / system products with an ETA")
+    caps = [("rod (group A route)", NRd)]
+    if a.fitting_Rd:
+        caps.append(("fittings (supplier / ETA design value)", a.fitting_Rd))
+    for name, cap in caps:
+        u = a.FEd / cap
+        print(f"  {name:<40} N_Ed {a.FEd:7.1f} / {cap:7.1f} kN  util {u:5.2f}" + ("  <-- FAIL" if u > 1 else ""))
+    if a.fy / a.fu > 0.9:
+        print("  NOTE: f_y/f_u > 0.9 — little ductility reserve: the thread governs; check the product ETA.")
+    print("  Notes: f_y/f_u depend on the diameter (EN 10025 thickness steps; bar products per ETA). Rolled "
+          "threads improve fatigue, not static A_s. Rods need prestress so they never go slack (no compression).")
+    return min(NRd, a.fitting_Rd or math.inf)
+
+
+def tension_from_freqs(L, m, pairs, EI=None):
+    """T [kN] from measured (n, f_n) pairs of a taut cable with pinned ends.
+
+    f_n² = n²/(4L²)·(T/m) + n⁴π²EI/(4mL⁴)   (taut string + bending, hinged ends)
+    With EI given: T_n = 4mL²f_n²/n² − n²π²EI/L² for each mode.
+    With EI None and ≥ 2 modes: least squares of y = f_n²/n² on x = n² gives T and EI."""
+    per = []
+    if EI is not None:
+        for n, f in pairs:
+            per.append((n, f, (4 * m * L * L * f * f / (n * n) - n * n * math.pi ** 2 * EI / (L * L)) / 1e3))
+        return sum(t for *_, t in per) / len(per), EI, per
+    if len(pairs) < 2:
+        for n, f in pairs:
+            per.append((n, f, 4 * m * L * L * f * f / (n * n) / 1e3))
+        return per[0][2], 0.0, per
+    xs = [n * n for n, _ in pairs]
+    ys = [f * f / (n * n) for n, f in pairs]
+    xm, ym = sum(xs) / len(xs), sum(ys) / len(ys)
+    sxx = sum((x - xm) ** 2 for x in xs)
+    b = sum((x - xm) * (y - ym) for x, y in zip(xs, ys)) / sxx
+    a0 = ym - b * xm
+    T = 4 * m * L * L * a0 / 1e3
+    EIfit = max(0.0, b * 4 * m * L ** 4 / math.pi ** 2)
+    for n, f in pairs:
+        per.append((n, f, (4 * m * L * L * f * f / (n * n) - n * n * math.pi ** 2 * EIfit / (L * L)) / 1e3))
+    return T, EIfit, per
+
+
+def irvine_symmetric(k, lam2):
+    """k-th symmetric in-plane root ω̄ = ωL/√(H/m) of Irvine's equation tan(ω̄/2) = ω̄/2 − (4/λ²)(ω̄/2)³."""
+    a, b = (2 * k - 1) * math.pi / 2, (2 * k + 1) * math.pi / 2
+    if lam2 <= 1e-12:
+        return 2 * a
+    lo, hi = a + 1e-12, b - 1e-12
+    g = lambda x: math.tan(x) - x + 4 * x ** 3 / lam2   # noqa: E731  increasing on (a, b)
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if g(mid) > 0:
+            hi = mid
+        else:
+            lo = mid
+    return lo + hi
+
+
+def sag_corrected_tension(L, m, pairs, EI=None, EA=None, g=9.81, iters=50):
+    """tension_from_freqs with Irvine's sag correction of the symmetric (odd) modes.
+
+    Each odd-mode frequency is mapped to the taut-string frequency it would have without sag,
+    f_eq = f·nπ/ω̄(λ²), with λ² = (mgL/T)²·L/(T·L/EA) evaluated at the current T; repeated to convergence."""
+    T, EIf, per = tension_from_freqs(L, m, pairs, EI)
+    if not EA:
+        return T, EIf, per, None
+    lam2 = 0.0
+    for _ in range(iters):
+        w = m * g / 1e3
+        lam2 = (w * L / T) ** 2 * L / (T * L / EA)
+        eq = [(n, f * n * math.pi / irvine_symmetric((n + 1) // 2, lam2) if n % 2 else f) for n, f in pairs]
+        T_new, EIf, per = tension_from_freqs(L, m, eq, EI)
+        if abs(T_new - T) < 1e-7 * T:
+            T = T_new
+            break
+        T = T_new
+    return T, EIf, per, lam2
+
+
+def cmd_freq_tension(a):
+    pairs = []
+    for s in a.f:
+        n, f = s.split(":")
+        pairs.append((int(n), float(f)))
+    T0, _, per0 = tension_from_freqs(a.L, a.m, pairs, a.EI)
+    T, EI, per, lam2 = sag_corrected_tension(a.L, a.m, pairs, a.EI, a.EA)
+    print(f"Cable force from measured frequencies: L = {a.L} m (free length between fittings), m = {a.m} kg/m")
+    for (n, f, t0), (_, _, t) in zip(per0, per):
+        print(f"  mode {n}: f = {f:.3f} Hz  ->  T = {t0:.2f} kN (taut string + EI)"
+              + (f", {t:.2f} kN sag-corrected" if lam2 is not None and n % 2 else ""))
+    src = "given" if a.EI is not None else ("least-squares fit" if len(pairs) > 1 else "neglected (one mode)")
+    print(f"  T = {T:.2f} kN   EI = {EI:.3g} N·m² ({src})")
+    if lam2 is not None:
+        print(f"  Irvine λ² = {lam2:.3f} at this T; symmetric modes corrected with Irvine's equation "
+              f"(string-only estimate {T0:.2f} kN, {100 * (T0 / T - 1):+.1f} %)")
+    else:
+        print("  No --EA: sag not checked. Symmetric modes (1, 3 …) read HIGH on sagging cables; prefer mode 2 "
+              "or give --EA.")
+    spread = (max(t for *_, t in per) - min(t for *_, t in per)) / T if len(per) > 1 else 0.0
+    if spread > 0.05:
+        print(f"  WARNING: modes disagree by {spread * 100:.0f} % — check mode numbering, end fixity, L and m "
+              "(include sockets/dampers in m and L).")
+    print("  Assumes pinned ends, uniform cable, level chord, T ≈ H (small sag); clamped ends raise f "
+          "(the fitted EI absorbs part of it).")
+    return T
+
+
+def cmd_stress_turns(a):
+    """turnbuckle turns to change a cable force from F1 to F2."""
+    if a.F1 <= 0 and a.w:
+        raise SystemExit("F1 must be > 0 with --w (the Ernst modulus needs tension)")
+    EA = a.EA
+    if a.w:
+        EA = a.EA / (1 + (a.w * a.L) ** 2 * (a.F1 + a.F2) * a.EA / (24 * a.F1 ** 2 * a.F2 ** 2))
+    flex = a.L / EA + (1 / a.k_sup if a.k_sup else 0.0)
+    dL = (a.F2 - a.F1) * flex * 1000                           # mm
+    lead = a.pitch * (2 if a.thread == "double" else 1)
+    turns = dL / lead
+    print(f"Stressing: F {a.F1:g} -> {a.F2:g} kN, L = {a.L} m, EA = {a.EA:.0f} kN"
+          + (f", self-weight w = {a.w} kN/m -> Ernst secant EA = {EA:.0f} kN" if a.w else ""))
+    print(f"  flexibility L/EA{' + 1/k_sup' if a.k_sup else ''} = {flex * 1e3:.4f} mm/kN")
+    print(f"  shortening needed ΔL = {dL:.1f} mm")
+    print(f"  thread pitch {a.pitch} mm, {a.thread} ({'left+right hand' if a.thread == 'double' else 'one end'}) "
+          f"-> lead {lead:g} mm/turn -> {turns:.1f} turns")
+    print("  Verify force by measurement (load cell, jack pressure or freq-tension); relieve torsion; lock nuts.")
+    return turns
 
 
 def main(argv=None):
@@ -327,12 +578,16 @@ def main(argv=None):
 
     s = sp.add_parser("resist")
     s.add_argument("--Fmin", type=float, required=True, help="minimum breaking force of the rope [kN]")
-    s.add_argument("--ke", type=float, default=1.0, help="termination loss factor (1.0 socket, 0.9 swaged)")
+    s.add_argument("--ke", type=float, default=None, help="termination loss factor (1.0 socket, 0.9 swaged)")
+    s.add_argument("--termination", choices=sorted(KE_KEY), default=None, help="k_e from the register")
+    s.add_argument("--sensitivity", action="store_true", help="re-check over the range of [U] factors")
     s.add_argument("--gammaR", type=float, default=None, help="EN 1993-1-11 Table 6.2 / NA (register default)")
     s.add_argument("--Fk", type=float, default=None, help="0.2%% proof force (bars) [kN]")
     s.add_argument("--FEd", type=float, required=True, help="ULS design force [kN]")
     s.add_argument("--Fser", type=float, default=None, help="characteristic (SLS) force [kN]")
     s.add_argument("--fsls", type=float, default=None, help="SLS limit as fraction of F_uk (register default)")
+    s.add_argument("--bending-checked", action="store_true",
+                   help="fatigue incl. bending stresses is verified -> f_SLS = 0.50 (EN 1993-1-11 Table 7.2)")
     s.add_argument("--Nf", type=float, default=1.0, help="ASCE 19 fitting factor")
     s.add_argument("--asce", type=float, default=None, help="ASCE 19 factor on T (register default 2.2)")
     s.add_argument("--T-asce", type=float, default=None, help="unfactored ASCE combination tension [kN]")
@@ -353,6 +608,7 @@ def main(argv=None):
     s.add_argument("--bolt-d", type=float, default=16.0)
     s.add_argument("--grade", default="8.8", choices=["8.8", "10.9", "A4-70", "A4-80"])
     s.add_argument("--surfaces", type=int, default=2, help="friction surfaces (clamp halves on the cable)")
+    s.add_argument("--sensitivity", action="store_true")
 
     s = sp.add_parser("saddle")
     s.add_argument("--T", type=float, required=True, help="cable force [kN]")
@@ -361,6 +617,8 @@ def main(argv=None):
     s.add_argument("--type", choices=["FLC", "OSS"], default="OSS")
     s.add_argument("--delta", type=float, default=5.0, help="outer wire diameter [mm]")
     s.add_argument("--E", type=float, default=160.0, help="cable modulus [kN/mm²]")
+    s.add_argument("--lined", action="store_true", help="soft lining (EN 1993-1-11 Table 6.4 lined values)")
+    s.add_argument("--sensitivity", action="store_true")
 
     s = sp.add_parser("freq")
     s.add_argument("--L", type=float, required=True)
@@ -368,10 +626,38 @@ def main(argv=None):
     s.add_argument("--m", type=float, required=True, help="mass [kg/m]")
     s.add_argument("--modes", type=int, default=3)
 
+    s = sp.add_parser("freq-tension")
+    s.add_argument("--L", type=float, required=True, help="free vibrating length [m]")
+    s.add_argument("--m", type=float, required=True, help="mass incl. coating [kg/m]")
+    s.add_argument("--f", action="append", required=True, help="n:f_n measured (mode number:Hz), repeatable")
+    s.add_argument("--EI", type=float, default=None, help="bending stiffness [N·m²] (else fitted from ≥ 2 modes)")
+    s.add_argument("--EA", type=float, default=None, help="axial stiffness [kN] for the sag (λ²) check")
+
+    s = sp.add_parser("rod")
+    s.add_argument("--d", type=float, required=True, help="thread nominal diameter [mm]")
+    s.add_argument("--pitch", type=float, default=None, help="thread pitch [mm] (default ISO coarse, 6 above M64)")
+    s.add_argument("--d-shank", type=float, default=None, help="shank diameter if different (upset ends) [mm]")
+    s.add_argument("--fy", type=float, required=True, help="yield / 0.2%% proof strength [MPa] (product data)")
+    s.add_argument("--fu", type=float, required=True, help="tensile strength [MPa] (product data)")
+    s.add_argument("--FEd", type=float, required=True)
+    s.add_argument("--fitting-Rd", type=float, default=None, help="fork/turnbuckle design resistance [kN]")
+
+    s = sp.add_parser("stress-turns")
+    s.add_argument("--L", type=float, required=True, help="cable length [m]")
+    s.add_argument("--EA", type=float, required=True, help="[kN]")
+    s.add_argument("--F1", type=float, required=True, help="current force [kN]")
+    s.add_argument("--F2", type=float, required=True, help="target force [kN]")
+    s.add_argument("--pitch", type=float, required=True, help="thread pitch [mm]")
+    s.add_argument("--thread", choices=["single", "double"], default="double",
+                   help="double = turnbuckle with left+right threads (lead 2·pitch)")
+    s.add_argument("--k-sup", type=float, default=None, help="support/anchor stiffness along the cable [kN/m]")
+    s.add_argument("--w", type=float, default=0.0, help="self-weight [kN/m] (Ernst sag correction)")
+
     a = ap.parse_args(argv)
     fill_factors(a)
     return {"sag": cmd_sag, "length": cmd_length, "edge": cmd_edge, "resist": cmd_resist,
-            "irvine": cmd_irvine, "freq": cmd_freq, "clamp": cmd_clamp, "saddle": cmd_saddle}[a.cmd](a)
+            "irvine": cmd_irvine, "freq": cmd_freq, "clamp": cmd_clamp, "saddle": cmd_saddle,
+            "freq-tension": cmd_freq_tension, "rod": cmd_rod, "stress-turns": cmd_stress_turns}[a.cmd](a)
 
 
 if __name__ == "__main__":

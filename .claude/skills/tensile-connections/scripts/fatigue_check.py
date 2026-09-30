@@ -64,6 +64,8 @@ def main(argv=None):
     ap.add_argument("--consequence", choices=["high", "low"], default="high")
     ap.add_argument("--gFf", type=float, default=1.0)
     ap.add_argument("--factors", default=None)
+    ap.add_argument("--sensitivity", action="store_true",
+                    help="--cable: damage at both ends of the ranges of the unverified Δσ_C and m")
     a = ap.parse_args(argv)
     if a.factors:
         os.environ["TENSILE_FACTORS"] = a.factors
@@ -89,7 +91,28 @@ def main(argv=None):
     for ds, n, N, d in rows:
         print(f"{ds:10.1f}{n:12.3g}{(f'{N:.3g}' if N != math.inf else 'inf (≤ cut-off)'):>14}{d:10.3f}")
     print(f"Damage D = {D:.3f} -> {'OK' if D <= 1 else 'NOT OK'} (Palmgren–Miner)")
+    if a.sensitivity and a.cable:
+        cable_sensitivity(spectrum, k, gMf, a.gFf, m)
     return D
+
+
+def cable_sensitivity(spectrum, k, gMf, gFf, m):
+    """D (as utilisation) over the ranges of the [U] cable fatigue factors, one at a time and combined."""
+    out = []
+    print("Sensitivity to uncertain factors:")
+    res = CF.sensitivity(lambda v: check(spectrum, v, gMf, gFf, m)[0], f"fatigue_cables.{k}")
+    print(CF.sens_line("Δσ_C (D as util)", res))
+    out.append(res)
+    if m:
+        dsC = CF.get(f"fatigue_cables.{k}")
+        res = CF.sensitivity(lambda v: check(spectrum, dsC, gMf, gFf, v)[0], "fatigue_cables.m_rope")
+        print(CF.sens_line("slope m (D as util)", res))
+        out.append(res)
+        lo = CF.frange(f"fatigue_cables.{k}")[0]
+        worst = max(check(spectrum, lo, gMf, gFf, mm)[0] for mm in CF.frange("fatigue_cables.m_rope"))
+        print(f"  Δσ_C at its low end with the worse m: D = {worst:.3f} -> "
+              + ("still OK" if worst <= 1 else "NOT OK: get the supplier's fatigue test data"))
+    return out
 
 
 if __name__ == "__main__":

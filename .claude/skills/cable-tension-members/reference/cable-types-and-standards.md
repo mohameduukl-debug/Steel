@@ -28,16 +28,30 @@ Minimum breaking force: `F_min = K·d²·R_r/1000` [kN] (EN 12385-2), `K = (π/4
 spiral strand, 0.33–0.36 for stranded rope [U]; spinning loss k_s 0.86–0.90 OSS, 0.88–0.92 FLC [U].
 
 ## 3. EN 1993-1-11 design
-* **ULS** [V via EAD 200001-00-0602]: F_Ed ≤ F_Rd = F_uk/(1.5·γR); F_uk = F_min·k_e; γR ≥ 1.0.
+* **ULS** [V via EAD 200001-00-0602]: F_Ed ≤ F_Rd = F_uk/(1.5·γR); F_uk = F_min·k_e.
   The 2006 text as recalled [U]: F_Rd = min{F_uk/(1.5γR); F_k/γR}. The F_k term matters for bars.
+* **γR (Table 6.2, NDP)** [C, NF EN 1993-1-11 text via search snippet]: 1.00, or 0.90 where measures at the
+  anchorages reduce bending from cable rotation (7.1(4)). ETAs (Fatzer ETA-15/0917, Pfeifer, Teufelberger) use 1.0,
+  and DIBt does not permit values below 1.0 [V].
+* **Group A (tension rods)**: designed to EN 1993-1-1/1-8. N_t,Rd = min(A_g·f_y/γM0; k2·f_u·A_s/γM2), k2 = 0.9 [C]
+  (`cable_calc.py rod`).
 * **k_e (Table 6.3)**: metal and resin sockets 1.0 [V]; swaged 0.9 [V]; ferrules 0.9 [U]; U-bolt grips 0.8 [U];
   wedge anchorages, button heads, nuts on bars 1.0 [U]; cement-grout sockets listed [V], value [U].
-* **SLS (Tables 7.1/7.2)**: UK NA adopts recommended values [V]; numbers not retrieved. Prestretch by cyclic
-  loading up to 0.45 f_uk during execution [V excerpt]. Practice: ≈ 0.50 F_uk characteristic, ≈ 0.45 where fatigue governs [U].
-* **Fatigue**: Δσ_c at 2×10⁶ cycles; spiral strand and FLC with sockets ≈ 150 MPa, parallel wire ≈ 160, threaded bars ≈ 50 [U];
-  slopes m = 4–5 for ropes [U]. Bending at anchorages, saddles and clamps reduces life [V].
-* **Saddles and clamps**: transverse pressure limits (FLC about 40 N/mm² [U]); friction μ ≈ 0.1 bare galvanised strand
-  on steel, γM,fr ≈ 1.65 [U]; minimum radius as a multiple of d [U].
+* **SLS (Tables 7.1/7.2)** [C, NF EN 1993-1-11 text via one search snippet; confirm the condition wording]:
+  f_const = 0.60 / 0.55 σ_uk during installation (by phase). f_SLS = 0.50 σ_uk when the fatigue check includes
+  bending stresses, otherwise 0.45 σ_uk. The derivation uses γR·γF = 1.0 × 1.10 (short-term) and 1.0 × 1.20
+  (long-term). The UK NA adopts the recommended values [V]. Prestretch by cyclic loading up to 0.45 f_uk during
+  execution [V excerpt]; Teufelberger fatigue tests use σ_sup = 0.45 σ_uk.
+* **Fatigue**: Δσ_c at 2×10⁶ cycles; spiral strand and FLC with sockets ≈ 150 MPa, parallel wire ≈ 160, threaded bars ≈ 50 [U]
+  (not confirmed in a second search). The German NA route uses Δσ_c = 112 N/mm² for full-locked hangers (BASt). The
+  current standard uses slopes m1 = 4, m2 = 6 for FLC (Maljaars). Bending at anchorages, saddles and clamps reduces
+  life [V].
+* **Saddles and clamps**: Table 6.4 transverse pressure q_Rk without tests [C, single snippet]: FLC 40 N/mm² on
+  steel and 100 with a soft lining; spiral strand 25 and 60. γM,fr = 1.65 [V: NF text, Ruan 2019, Sci. Rep. 2025].
+  EN 1993-1-11 gives no default μ, so determine it by test (literature 0.15–0.2).
+  Clamp: F_∥ ≤ μ(F_⊥ + F_r)/γM,fr, where F_r covers the losses (creep, diameter reduction under tension,
+  compaction, bolt relaxation, temperature). Saddle slip: F1/F2 ≤ e^(μα/γM,fr). The saddle is designed for k·F_uk
+  (k is an NDP, value not found). Minimum radius as a multiple of d [U].
 * **Moduli**: bars 210; spiral strand 150 ± 10 (code table, [U]; suppliers use 160 ± 10 [V]); FLC 160 ± 10; strand rope
   100 ± 10; parallel wires 205 ± 5; parallel strands 195 ± 5 [U].
 

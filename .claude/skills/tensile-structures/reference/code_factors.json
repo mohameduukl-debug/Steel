@@ -1,5 +1,5 @@
 {
-  "_readme": "Central code-factor register used by every tool. status: V = confirmed from a named source (search excerpt); C = standard clause content / recommended value, NA may differ; U = unverified typical value. Override any value in a PROJECT file (same structure, only the keys you change) and pass it with --factors project.json or env TENSILE_FACTORS=project.json. Run `python3 factors.py report` to list everything still unverified.",
+  "_readme": "Central code-factor register used by every tool. status: V = confirmed from a named source (search excerpt); C = standard clause content / recommended value, NA may differ; U = unverified typical value. Override any value in a PROJECT file (same structure, only the keys you change) and pass it with --factors project.json or env TENSILE_FACTORS=project.json. Run `python3 factors.py report` to list everything still unverified. Unverified (U) entries carry a 'range' used by --sensitivity checks: tools re-run the governing check at both ends and report whether the decision depends on the unverified value.",
   "membrane": {
     "stress_factor_short": {
       "value": 4.0,
@@ -24,12 +24,22 @@
     "japan_long_divisor": {
       "value": 8.0,
       "status": "U",
-      "source": "MLIT Notification 666 (reported); ETFE paper (PMC9735748) quotes Japanese K = 8 long-term (single source)"
+      "source": "MLIT Notification 666 (reported); ETFE paper (PMC9735748) quotes Japanese K = 8 long-term (single source); unclear whether K applies to ETFE or to fabric",
+      "range": [
+        7.0,
+        8.0
+      ],
+      "range_source": "earlier ETFE rule 7, Japanese K = 8 (PMC9735748)"
     },
     "japan_short_divisor": {
       "value": 4.0,
       "status": "U",
-      "source": "MLIT Notification 666 (reported); ETFE paper (PMC9735748) quotes Japanese K = 4 short-term (single source)"
+      "source": "MLIT Notification 666 (reported); ETFE paper (PMC9735748) quotes Japanese K = 4 short-term (single source)",
+      "range": [
+        3.5,
+        4.0
+      ],
+      "range_source": "earlier ETFE rule 3.5, Japanese K = 4"
     },
     "seam_efficiency": {
       "value": 0.8,
@@ -38,7 +48,7 @@
     },
     "partial": {
       "status": "U",
-      "source": "German A-factor practice (Minte/Reinhardt) as placeholder for CEN/TS 19102:2023 Annex C / NA values",
+      "source": "German A-factor practice (Bautechnik 'Materialprüfung und Bemessung im Zelt- und Membranbau'; Knippers, Construction Manual for Polymers + Membranes): fabric γM 1.4 (connections 1.5), A0 1.0–1.2, A1 1.6–1.7, A2 1.1–1.2, A3 1.1–1.25 (connections 1.4–1.95). NOT CEN/TS 19102:2023 values (Annex C / NA not retrieved) — placeholder",
       "PES/PVC": {
         "gM": 1.4,
         "A0": 1.2,
@@ -62,7 +72,12 @@
         "A1_short": 1.0,
         "A2": 1.2,
         "A3": 1.1
-      }
+      },
+      "range": [
+        0.78,
+        1.24
+      ],
+      "range_source": "product A0·A1·A2·A3 over the reported German ranges relative to the table values (1.936 … 3.06 vs 2.47 for PES/PVC)"
     },
     "gamma_prestress": {
       "value": 1.0,
@@ -82,19 +97,54 @@
     "tear_factor": {
       "value": 2.0,
       "status": "U",
-      "source": "no code value found; practice: design stress ≤ critical-slit (tear propagation) resistance / ≥ 2 — agree with the checking engineer"
+      "source": "no code value found; practice: design stress ≤ critical-slit (tear propagation) resistance / ≥ 2 — agree with the checking engineer; second search: codes check tensile strength only, tear strength treated as a material property (Han Bao et al. 2022, J. Ind. Textiles)",
+      "range": [
+        1.5,
+        3.0
+      ],
+      "range_source": "no code value; practice spread"
     },
     "etfe_gamma": {
       "value": 1.1,
       "status": "U",
-      "source": "CEN/TS 19102 ETFE γM0 = 1.10 (single search snippet, TexComp 2021); use with first-yield stress incl. temperature/duration effects"
+      "source": "CEN/TS 19102 ETFE base material γM0 = 1.10 (f_u23 = 40 MPa -> f_Rd 36.4 MPa; SLS elastic limit f_el23 = 15 MPa; welds γM1 1.15–1.45 by quality level) — Stranghöner TexComp 2021, IASS 2024 paper 247 (one paper line seen in 3 searches). Tool applies it to the first-yield stress (conservative)",
+      "range": [
+        1.0,
+        1.4
+      ],
+      "range_source": "γM0 1.10 (TS, single source) … conservative 1.4"
+    },
+    "rho_air": {
+      "value": 1.25,
+      "status": "C",
+      "source": "EN 1991-1-4 4.5(1) Note 2 recommended air density 1.25 kg/m³"
+    },
+    "added_mass_coeff": {
+      "value": 0.67,
+      "status": "U",
+      "source": "Lamb (1920) added virtual mass of a clamped circular plate vibrating in one fluid side: 0.6689·ρ·r; used per side for a membrane panel with r = equivalent-area radius (approximation, mode shape differs)",
+      "range": [
+        0.55,
+        0.9
+      ],
+      "range_source": "membrane vs plate mode shapes, panel aspect ratio; wind-tunnel added-mass studies scatter"
+    },
+    "corner_ply_eff": {
+      "value": 0.8,
+      "status": "U",
+      "source": "load share of each welded reinforcement ply taken = seam efficiency (practice assumption; confirm by corner test)",
+      "range": [
+        0.6,
+        0.9
+      ],
+      "range_source": "weld/transfer efficiency of reinforcement plies"
     }
   },
   "cable": {
     "gammaR": {
       "value": 1.0,
       "status": "V",
-      "source": "EAD 200001-00-0602: F_Rd=F_uk/(1.5 gR), gR not < 1.0; EN 1993-1-11 Table 6.2/NA"
+      "source": "EN 1993-1-11 Table 6.2 (NDP): 1.00; 0.90 only where measures at the anchorages reduce bending from cable rotation (7.1(4)) [NF EN 1993-1-11 full text (French edition, pdfcoffee.com) via search snippet]; ETAs (Fatzer ETA-15/0917, Pfeifer, Teufelberger; DIBt Z-14.7-759) use 1.0, values < 1.0 not permitted by DIBt"
     },
     "resistance_div": {
       "value": 1.5,
@@ -104,27 +154,42 @@
     "ke_socket": {
       "value": 1.0,
       "status": "V",
-      "source": "EN 1993-1-11 Table 6.3 metal/resin sockets"
+      "source": "EN 1993-1-11 Table 6.3 / EAD 200001-00-0602: metal/resin sockets 1.0 (Teufelberger, Fatzer ETA)"
     },
     "ke_swaged": {
       "value": 0.9,
       "status": "V",
-      "source": "EN 1993-1-11 Table 6.3 swaged; Ronstan -10%"
+      "source": "EN 1993-1-11 Table 6.3 / EAD 200001-00-0602: swaged 0.9 (Teufelberger, Fatzer ETA, Ronstan)"
     },
     "ke_ferrule": {
       "value": 0.9,
       "status": "U",
-      "source": "EN 13411-3 ferrule-secured eye terminal efficiency 0.9 (product standard); EN 1993-1-11 Table 6.3 value not confirmed"
+      "source": "EN 13411-3 ferrule-secured eye terminal efficiency 0.9 (product standard); EN 1993-1-11 Table 6.3 value not confirmed",
+      "range": [
+        0.85,
+        0.9
+      ],
+      "range_source": "EN 13411-3 efficiency 0.9; margin"
     },
     "ke_ubolt": {
       "value": 0.8,
       "status": "U",
-      "source": "EN 13411-5 U-bolt grip eye must hold ≥ 80% MBF (product standard); EN 1993-1-11 Table 6.3 value not confirmed"
+      "source": "EN 13411-5 U-bolt grip must hold ≥ 80 % MBF (product standard); Fatzer ETA lists rope clamps at 0.85 (single source); EN 1993-1-11 Table 6.3 value not confirmed",
+      "range": [
+        0.75,
+        0.85
+      ],
+      "range_source": "EN 13411-5 ≥ 0.8; Fatzer ETA 0.85"
     },
     "f_sls": {
-      "value": 0.5,
-      "status": "U",
-      "source": "EN 1993-1-11 Table 7.2 recommended (numbers not retrieved); practice 0.45-0.50 F_uk"
+      "value": 0.45,
+      "status": "C",
+      "source": "EN 1993-1-11 Table 7.2: f_SLS = 0.45 σ_uk where fatigue incl. bending stresses is not verified; 0.50 σ_uk when it is (use f_sls_bending_checked) [NF EN 1993-1-11 full text (French edition, pdfcoffee.com) via search snippet; condition wording from a snippet: confirm]. Teufelberger fatigue tests use σ_sup = 0.45 σ_uk",
+      "range": [
+        0.45,
+        0.5
+      ],
+      "range_source": "the two Table 7.2 values (condition wording from a single snippet)"
     },
     "asce19_factor": {
       "value": 2.2,
@@ -144,32 +209,67 @@
     "clamp_mu": {
       "value": 0.1,
       "status": "U",
-      "source": "friction galvanised strand on steel clamp ~0.1 (recalled EN 1993-1-11 6.4 / practice); test for the project clamp"
+      "source": "EN 1993-1-11 gives NO default μ: determine by test (clamp slip test). 0.1 is a conservative placeholder; literature uses 0.15–0.2 (Ruan 2019, Adv. Civ. Eng. doi:10.1155/2019/1438754)",
+      "range": [
+        0.08,
+        0.2
+      ],
+      "range_source": "placeholder 0.1 … literature 0.15–0.2"
     },
     "clamp_gamma": {
       "value": 1.65,
-      "status": "U",
-      "source": "γM,fr for cable clamps (recalled EN 1993-1-11); verify"
+      "status": "V",
+      "source": "EN 1993-1-11 γM,fr = 1.65 recommended [NF EN 1993-1-11 full text (French edition, pdfcoffee.com) via search snippet]; Ruan 2019 (Adv. Civ. Eng.); Sci. Rep. 2025 s41598-025-89571-3. Check: F∥ ≤ μ(F⊥ + F_r)/γM,fr"
     },
     "clamp_loss": {
       "value": 0.8,
       "status": "U",
-      "source": "residual bolt preload after cable diameter reduction / creep (practice placeholder); re-tighten after stressing"
+      "source": "residual clamping force after losses F_r (EN 1993-1-11 lists creep, diameter reduction under tension, compaction/ovalisation, bolt relaxation, temperature); 0.8 is a practice placeholder — re-tighten after stressing",
+      "range": [
+        0.7,
+        0.9
+      ],
+      "range_source": "preload retention after stressing/creep"
     },
     "saddle_p_lim_FLC": {
       "value": 40.0,
-      "status": "U",
-      "source": "transverse pressure limit FLC on steel saddle ~40 N/mm² (recalled EN 1993-1-11); verify"
+      "status": "C",
+      "source": "EN 1993-1-11 Table 6.4 transverse pressure q_Rk without tests, full locked coil on steel [NF EN 1993-1-11 full text (French edition, pdfcoffee.com) via search snippet; single snippet: confirm]"
     },
     "saddle_p_lim_OSS": {
       "value": 25.0,
-      "status": "U",
-      "source": "transverse pressure limit open spiral strand, placeholder (lower than FLC); verify"
+      "status": "C",
+      "source": "EN 1993-1-11 Table 6.4 transverse pressure q_Rk without tests, spiral strand on steel [NF EN 1993-1-11 full text (French edition, pdfcoffee.com) via search snippet; single snippet: confirm]"
     },
     "saddle_min_R_over_d": {
       "value": 20.0,
       "status": "U",
-      "source": "practice minimum saddle radius ~20–30 d (OSS) / 20–40 d (FLC); below: strength reduction per supplier / ASCE 19 N_d"
+      "source": "practice minimum saddle radius ~20–30 d (OSS) / 20–40 d (FLC); below: strength reduction per supplier / ASCE 19 N_d; EN 1993-1-11 designs saddles for k·F_uk (k NDP, value not found)",
+      "range": [
+        15.0,
+        30.0
+      ],
+      "range_source": "practice 20–30 d"
+    },
+    "f_sls_bending_checked": {
+      "value": 0.5,
+      "status": "C",
+      "source": "EN 1993-1-11 Table 7.2: 0.50 σ_uk when the fatigue check includes bending stresses [NF EN 1993-1-11 full text (French edition, pdfcoffee.com) via search snippet; confirm condition wording]"
+    },
+    "f_const_install": {
+      "value": 0.6,
+      "status": "C",
+      "source": "EN 1993-1-11 Table 7.1 f_const = 0.60 / 0.55 σ_uk depending on the installation phase [NF EN 1993-1-11 full text (French edition, pdfcoffee.com) via search snippet; confirm which phase takes which value]"
+    },
+    "saddle_p_lim_FLC_lined": {
+      "value": 100.0,
+      "status": "C",
+      "source": "EN 1993-1-11 Table 6.4 transverse pressure q_Rk without tests, full locked coil with soft lining [NF EN 1993-1-11 full text (French edition, pdfcoffee.com) via search snippet; single snippet: confirm]"
+    },
+    "saddle_p_lim_OSS_lined": {
+      "value": 60.0,
+      "status": "C",
+      "source": "EN 1993-1-11 Table 6.4 transverse pressure q_Rk without tests, spiral strand with soft lining [NF EN 1993-1-11 full text (French edition, pdfcoffee.com) via search snippet; single snippet: confirm]"
     }
   },
   "steel": {
@@ -211,6 +311,16 @@
       "S355": 0.9,
       "S420": 1.0,
       "S460": 1.0
+    },
+    "k2_thread": {
+      "value": 0.9,
+      "status": "C",
+      "source": "EN 1993-1-8 Table 3.4 bolt tension k2 = 0.9 (0.63 countersunk); used for threaded tension rods on A_s"
+    },
+    "k_net_EN1993_1_1": {
+      "value": 0.9,
+      "status": "C",
+      "source": "EN 1993-1-1 6.2.3(2)b N_u,Rd = 0.9 A_net f_u / gM2"
     }
   },
   "aisc": {
@@ -259,12 +369,22 @@
     "helical_Kt_per_m": {
       "value": 33.0,
       "status": "U",
-      "source": "Hubbell/CHANCE torque correlation Kt ≈ 10 ft^-1 for 1.5-1.75 in square shafts; use manufacturer / load test"
+      "source": "Hubbell/CHANCE torque correlation Kt ≈ 10 ft^-1 for 1.5-1.75 in square shafts; use manufacturer / load test",
+      "range": [
+        23.0,
+        40.0
+      ],
+      "range_source": "torque factor spread by shaft size (Hubbell)"
     },
     "helical_FS": {
       "value": 2.0,
       "status": "U",
-      "source": "common allowable-load factor of safety on torque-correlated ultimate capacity; verify with local code"
+      "source": "common allowable-load factor of safety on torque-correlated ultimate capacity; verify with local code",
+      "range": [
+        2.0,
+        2.5
+      ],
+      "range_source": "allowable-load FS"
     }
   },
   "anchor_EN1992_4": {
@@ -391,22 +511,42 @@
     "dsC_spiral_socket": {
       "value": 150.0,
       "status": "U",
-      "source": "EN 1993-1-11 Section 8 (recalled; not confirmed)"
+      "source": "EN 1993-1-11 Section 9 category NOT confirmed (150 recalled); German NA route uses Δσc = 112 N/mm² for full-locked hangers (BASt Leitfaden Hänger)",
+      "range": [
+        112.0,
+        160.0
+      ],
+      "range_source": "German NA 112 (FLC hangers) … 160"
     },
     "dsC_parallel_wire": {
       "value": 160.0,
       "status": "U",
-      "source": "EN 1993-1-11 Section 8 (recalled; not confirmed)"
+      "source": "EN 1993-1-11 Section 8 (recalled; not confirmed)",
+      "range": [
+        140.0,
+        160.0
+      ],
+      "range_source": "parallel wire / strand"
     },
     "dsC_threaded_bar": {
       "value": 50.0,
       "status": "U",
-      "source": "EN 1993-1-11 / EN 1993-1-9 threaded bolts in tension category 50 (recalled)"
+      "source": "EN 1993-1-11 / EN 1993-1-9 threaded bolts in tension category 50 (recalled)",
+      "range": [
+        36.0,
+        50.0
+      ],
+      "range_source": "threaded bars/bolts in tension (EN 1993-1-9 cat 50, reduced for large Ø)"
     },
     "m_rope": {
       "value": 4.0,
       "status": "U",
-      "source": "rope S-N slope ~4 (revision research proposes m1 = 4, m2 = 6 for FLC)"
+      "source": "current EN 1993-1-11 uses m1 = 4, m2 = m1 + 2 = 6 for full-locked coil ropes (Maljaars, Steel Construction stco.202100009); tool uses m = 4 with no knee (conservative)",
+      "range": [
+        3.5,
+        5.0
+      ],
+      "range_source": "rope S-N slope spread (FLC research m1 = 4)"
     }
   }
 }

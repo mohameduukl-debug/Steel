@@ -24,18 +24,32 @@ python3 "$S/tensile-analysis/scripts/membrane_dr.py" sail.json --Ew 800 --Ef 600
 echo; echo "== 2b. Load-case set (wind directions, zones, snow + ponding) and envelope =="
 python3 "$S/tensile-analysis/scripts/run_cases.py" sail.json "$HERE/load_cases_example.json" --out sail_cases
 
-echo; echo "== 3. Membrane check (PVC Type III, stress-factor method) =="
+echo; echo "== 3. Membrane: material choice, checks, panel frequency, corner, sensitivity =="
+python3 "$S/membrane-fabric/scripts/material_select.py" --n-design 8.6 --case wind --fire B --life 15 | sed -n 1,8p
 python3 "$S/membrane-fabric/scripts/membrane_check.py" --material PVC-III --nw 8.6 --nf 8.6 --case wind
-python3 "$S/membrane-fabric/scripts/membrane_check.py" --material PVC-III --nw 7.4 --nf 7.4 --case snow
+python3 "$S/membrane-fabric/scripts/membrane_check.py" --material PVC-III --nw 7.4 --nf 7.4 --case snow \
+        --method partial --sensitivity
+python3 "$S/membrane-fabric/scripts/membrane_check.py" --material PVC-III --prestress 2 2 --flutter 5 5 \
+        --f-target 2.0 --sensitivity | sed -n '/Panel frequency/,$p'
+python3 "$S/membrane-fabric/scripts/membrane_check.py" --material PVC-III --case wind --corner 30 90 0.35 \
+        --layers 3 | sed -n '/Corner/,$p'
 
 echo; echo "== 4. Cables: edge-cable check + schedule =="
 python3 "$S/cable-tension-members/scripts/cable_calc.py" edge --chord 10.44 --sag 1.17 --n 8.0
-python3 "$S/cable-tension-members/scripts/cable_calc.py" resist --Fmin 367 --ke 1.0 --FEd 125 --Fser 85 --Fmin-force 10
+python3 "$S/cable-tension-members/scripts/cable_calc.py" resist --Fmin 367 --termination swaged --FEd 125 --Fser 85 \
+        --Fmin-force 10 --sensitivity
 python3 "$S/cable-tension-members/scripts/cable_schedule.py" --from-model sail.json \
         --envelope sail_cases_envelope.json --product Ronstan-ACS2-GS-17.0 --deduct 250 --out sail_cables
-python3 "$S/cable-tension-members/scripts/cable_schedule.py" "$HERE/schedule_example.json" --out schedule_example
-python3 "$S/cable-tension-members/scripts/cable_calc.py" clamp --dT 8 --nb 2 --bolt-d 16
-python3 "$S/tensile-connections/scripts/fatigue_check.py" --cable spiral_socket --spectrum 40:2e6 --spectrum 20:1e7
+python3 "$S/cable-tension-members/scripts/cable_schedule.py" "$HERE/schedule_example.json" --out schedule_example \
+        --sensitivity
+python3 "$S/cable-tension-members/scripts/cable_calc.py" clamp --dT 8 --nb 2 --bolt-d 16 --sensitivity
+python3 "$S/tensile-connections/scripts/fatigue_check.py" --cable spiral_socket --spectrum 40:2e6 --spectrum 20:1e7 \
+        --sensitivity
+python3 "$S/cable-tension-members/scripts/cable_calc.py" rod --d 30 --fy 460 --fu 610 --FEd 150 --fitting-Rd 250
+python3 "$S/cable-tension-members/scripts/cable_calc.py" stress-turns --L 10.44 --EA 14000 --F1 5 --F2 20 \
+        --pitch 3.5 --w 0.013
+python3 "$S/cable-tension-members/scripts/cable_calc.py" freq-tension --L 10.44 --m 1.3 --EA 14000 \
+        --f 1:6.22 --f 2:12.4 --f 3:18.7
 
 echo; echo "== 5. Corner plate resolution + pin/lug check (corner forces from the uplift run) =="
 python3 "$S/tensile-connections/scripts/corner_plate.py" --m EC1:15:83:180:48 --m EC2:105:83:-48:180 \

@@ -52,8 +52,8 @@ Key couplings:
 | 2 | **Form finding** (sail, hypar, cone, arch tunnel, multi-bay ridge/valley, custom) | equilibrium surface, cable sags, support/arch loads | `tensile-analysis` → `form_find_fdm.py` |
 | 3 | Material data | E·t, ν, compensation from biaxial tests | `membrane-fabric` → `biaxial_fit.py` |
 | 4 | **Load analysis**: prestress, wind (directions, zones), snow, ponding | stresses (warp/weft/principal), wrinkling, deflection, envelopes | `tensile-analysis` → `membrane_dr.py` (orthotropic CST), `dynamic_relaxation.py` (net, fast), `run_cases.py` |
-| 5 | Membrane checks | fabric/seam utilisation per case, tear, ETFE | `membrane-fabric` → `membrane_check.py --envelope` |
-| 6 | Cables | F_Rd, SLS, clamps, saddles, fatigue, schedule with unstressed lengths | `cable-tension-members` → `cable_calc.py`, `cable_schedule.py --envelope` |
+| 5 | Membrane checks | material choice, fabric/seam utilisation per case, tear, corners, panel frequency, ETFE | `membrane-fabric` → `material_select.py`, `membrane_check.py --envelope --sensitivity` |
+| 6 | Cables | F_Rd, SLS, rods, clamps, saddles, fatigue, schedule with unstressed lengths, stressing turns, force from frequencies | `cable-tension-members` → `cable_calc.py`, `cable_schedule.py --envelope` |
 | 7 | Steel supports | members (CHS/RHS/I, LTB, class 4), arch/mast stability (α_cr, 2nd order), foundations | `steel-supports` → `member_check.py`, `frame2d.py`, `foundation_check.py` (`mast_check.py` quick) |
 | 8 | Connections | pins/lugs, corner plates, welds, bolts, base plates, EN 1992-4 anchors, aluminium clamps, fatigue | `tensile-connections` → `pin_connection.py`, `corner_plate.py`, `steel_joint_checks.py`, `fatigue_check.py` |
 | 9 | Patterning | geodesic seams, compensation/decompensation, auto-split, notches, panel sheets, nesting | `fabrication-drawings` → `cutting_pattern.py`, `nest_panels.py` |
@@ -117,6 +117,12 @@ python3 <tool>.py ... --factors project_factors.json   # one run (cable_calc: be
 ```
 A project file only needs the keys you change (see `examples/project_factors_example.json`).
 Before issuing calculations, make sure no **U** factor governs a check.
+
+**Sensitivity to uncertain factors.** Every U factor, and C factors quoted from a single source, carries a `range`
+with a `range_source`. `--sensitivity` in `membrane_check.py`, `cable_calc.py` (resist, clamp, saddle),
+`cable_schedule.py` and `fatigue_check.py` re-runs the check at both ends of the range. It reports **ROBUST** (the
+OK / NOT OK decision does not depend on the factor) or **DEPENDS** (confirm the value before issue). A ROBUST result
+lets you issue the check while the factor is still being verified. State that in the report.
 
 ## Honesty about code values
 Research for this skill used web search excerpts (primary PDFs were not
