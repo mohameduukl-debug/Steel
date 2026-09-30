@@ -236,6 +236,67 @@ class Section:
         return yz[0], yz[1], lt
 
 
+def shear_area_modulus(sec: Section, direction):
+    """plastic modulus of the shear area (the part whose f_y is reduced by ρ in 6.2.8)."""
+    if sec.kind == "I":
+        if direction == "z":
+            hw = sec.h - 2 * sec.tf
+            return hw ** 2 * sec.tw / 4          # ρ·A_w²/(4 t_w) with A_w = h_w t_w
+        return 2 * sec.tf * sec.b ** 2 / 4       # flanges for weak-axis shear
+    if sec.kind == "RHS":
+        if direction == "z":
+            return 2 * sec.t * (sec.h - 2 * sec.t) ** 2 / 4
+        return 2 * sec.t * (sec.b - 2 * sec.t) ** 2 / 4
+    return sec.Wpl_y * 2 / math.pi                # CHS: approx. share of the shear area 2A/π
+
+
+def effective_section(sec: Section, fy):
+    """Simplified EN 1993-1-5 §4.4 effective properties for class 4 I and RHS sections.
+
+    Compression (ψ = 1) for A_eff; bending about y: compression flange (ψ = 1) + web (ψ = −1, kσ = 23.9).
+    Neutral-axis shift of the effective section is neglected (small for doubly-symmetric sections)."""
+    if sec.kind == "CHS":
+        return None
+    eps = math.sqrt(235 / fy)
+
+    def rho_internal(ct, psi=1.0, ks=4.0):
+        lp = ct / (28.4 * eps * math.sqrt(ks))
+        return 1.0 if lp <= 0.5 + math.sqrt(0.085 - 0.055 * psi) else min(1.0, (lp - 0.055 * (3 + psi)) / lp ** 2)
+
+    def rho_outstand(ct, ks=0.43):
+        lp = ct / (28.4 * eps * math.sqrt(ks))
+        return 1.0 if lp <= 0.748 else min(1.0, (lp - 0.188) / lp ** 2)
+
+    if sec.kind == "I":
+        cf = (sec.b - sec.tw - 2 * sec.r) / 2
+        cw = sec.h - 2 * sec.tf - 2 * sec.r
+        rf = rho_outstand(cf / sec.tf)
+        rw = rho_internal(cw / sec.tw)
+        dA = 4 * (1 - rf) * cf * sec.tf + (1 - rw) * cw * sec.tw
+        rwb = rho_internal(cw / sec.tw, -1.0, 23.9)
+        # bending y: one compression flange (2 outstands) at ±(h−tf)/2; web compression zone cw/2
+        dAf = 2 * (1 - rf) * cf * sec.tf
+        z_f = (sec.h - sec.tf) / 2
+        bc = cw / 2
+        dAw = (1 - rwb) * bc * sec.tw          # ineffective strip located near the centre of the compression zone
+        z_w = bc / 2
+        dI = dAf * z_f ** 2 + dAw * z_w ** 2
+        W_eff_y = (sec.Iy - dI) / (sec.h / 2)
+        W_eff_z = sec.Wel_z * rf                 # weak-axis bending: outstands only (conservative)
+        return {"A_eff": sec.A - dA, "W_eff_y": W_eff_y, "W_eff_z": W_eff_z,
+                "rho_flange": rf, "rho_web_comp": rw, "rho_web_bend": rwb}
+    # RHS: four internal walls
+    cH, cB = sec.h - 3 * sec.t, sec.b - 3 * sec.t
+    rH, rB = rho_internal(cH / sec.t), rho_internal(cB / sec.t)
+    dA = 2 * (1 - rH) * cH * sec.t + 2 * (1 - rB) * cB * sec.t
+    rHb = rho_internal(cH / sec.t, -1.0, 23.9)
+    rBb = rho_internal(cB / sec.t, -1.0, 23.9)
+    dIy = (1 - rB) * cB * sec.t * ((sec.h - sec.t) / 2) ** 2 + 2 * (1 - rHb) * (cH / 2) * sec.t * (cH / 4) ** 2
+    dIz = (1 - rH) * cH * sec.t * ((sec.b - sec.t) / 2) ** 2 + 2 * (1 - rBb) * (cB / 2) * sec.t * (cB / 4) ** 2
+    return {"A_eff": sec.A - dA, "W_eff_y": (sec.Iy - dIy) / (sec.h / 2), "W_eff_z": (sec.Iz - dIz) / (sec.b / 2),
+            "rho_H": rH, "rho_B": rB}
+
+
 def section_class(sec: Section, fy, NEd):
     eps = math.sqrt(235 / fy)
     if sec.kind == "CHS":
@@ -284,19 +345,32 @@ def check(sec: Section, fy, L, N, My=0.0, Mz=0.0, Vy=0.0, Vz=0.0, ky=1.0, kz=1.0
     cls, cinfo = section_class(sec, fy, N)
     Wy = sec.Wpl_y if cls <= 2 else sec.Wel_y
     Wz = sec.Wpl_z if cls <= 2 else sec.Wel_z
-    NRk, MyRk, MzRk = sec.A * fy, Wy * fy, Wz * fy
-    NEd, MyEd, MzEd = N * 1e3, abs(My) * 1e6, abs(Mz) * 1e6
+    A_eff = sec.A
     rows = []
     res = {"class": cls, "class_info": cinfo}
     if cls == 4:
-        res["warning"] = "class 4: effective section (EN 1993-1-5 / 1-6) not implemented — results invalid"
+        eff = effective_section(sec, fy)
+        if eff is None:
+            res["warning"] = "class 4 CHS: shell buckling to EN 1993-1-6 required — not covered"
+        else:
+            A_eff, Wy, Wz = eff["A_eff"], eff["W_eff_y"], eff["W_eff_z"]
+            res["effective"] = eff
+    NRk, MyRk, MzRk = A_eff * fy, Wy * fy, Wz * fy
+    NEd, MyEd, MzEd = N * 1e3, abs(My) * 1e6, abs(Mz) * 1e6
     Avy, Avz = sec.shear_areas()
     for name, V, Av in (("Vz", Vz, Avz), ("Vy", Vy, Avy)):
         if V:
             Vpl = Av * fy / math.sqrt(3) / gM0 / 1e3
             rows.append((f"shear {name}", abs(V), Vpl, "6.2.6"))
-            if abs(V) > 0.5 * Vpl:
-                res["shear_note"] = "V > 0.5 Vpl: reduce bending resistance (6.2.8) — not applied"
+            if abs(V) > 0.5 * Vpl:  # 6.2.8: reduced yield strength (1 − ρ) f_y in the shear area
+                rho = (2 * abs(V) / Vpl - 1) ** 2
+                if name == "Vz":
+                    red = rho * shear_area_modulus(sec, "z")
+                    MyRk = max(MyRk - red * fy, 0.0)
+                else:
+                    red = rho * shear_area_modulus(sec, "y")
+                    MzRk = max(MzRk - red * fy, 0.0)
+                res["shear_note"] = f"V > 0.5 Vpl on {name}: bending resistance reduced (6.2.8, ρ={rho:.2f})"
     if NEd < 0:  # tension
         rows.append(("tension N_t (gross)", -N, NRk / gM0 / 1e3, "6.2.3"))
         u = -NEd / (NRk / gM0) + MyEd / (MyRk / gM0) + MzEd / (MzRk / gM0)
@@ -400,10 +474,15 @@ def main(argv=None):
         u = d / c if c else math.inf
         worst = max(worst, u)
         print(f"{name:<62}{d:9.2f}{c:10.2f}{u:7.2f}  {ref}" + ("  <-- FAIL" if u > 1 else ""))
+    if "effective" in res:
+        e = res["effective"]
+        print(f"Class 4 effective section (EN 1993-1-5 4.4, simplified): A_eff={e['A_eff'] / 100:.2f} cm², "
+              f"W_eff,y={e['W_eff_y'] / 1e3:.1f} cm³, W_eff,z={e['W_eff_z'] / 1e3:.1f} cm³")
     for k in ("warning", "shear_note"):
         if k in res:
             print("NOTE:", res[k])
-    print(f"Governing utilisation {worst:.2f} -> {'OK' if worst <= 1 and res['class'] < 4 else 'NOT OK'}")
+    ok = worst <= 1 and ("warning" not in res)
+    print(f"Governing utilisation {worst:.2f} -> {'OK' if ok else 'NOT OK'}")
     return worst, res
 
 

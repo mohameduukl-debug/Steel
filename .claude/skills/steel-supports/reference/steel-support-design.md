@@ -56,3 +56,14 @@ CC1/CC2 → EXC2 minimum; CC2 with fatigue (SC2) → EXC3; CC3 → EXC3. UK NA: 
 NDT Table 24: 100 % VT; transverse butt and partial-penetration welds in tension (U ≥ 0.5) EXC2 10 %, EXC3 20 %, EXC4 100 %;
 fillet percentages: read Table 24 [U]. WPS/WPQR to EN ISO 15614; preheat per EN 1011-2 for thick S355.
 No field welding: bolted or pinned site assembly (typical membrane specifications) [V].
+
+## 9. frame2d.py input schema (planar frames)
+```jsonc
+{"nodes": [[x, y], ...],                           // m, y vertical
+ "supports": {"0": [1, 1, 0], "12": [1, 1, 1]},    // restrained ux, uy, rz (1 = fixed)
+ "members": [{"name": "ARCH", "nodes": [0, 1, 2, ...], "section": "CHS:323.9x10", "fy": 355},
+             {"name": "GUY", "nodes": [13, 12], "truss": true, "A": 3.0e-4, "fy": null}],  // A in m2
+ "loads": {"nodal": {"6": [Fx, Fy, M]},             // kN, kNm (global)
+           "udl": [{"member": "ARCH", "qy": -12.0, "per_horizontal": true}]}}   // kN/m
+```
+Design forces must be factored (ULS combination). Run each combination separately (non-linear).

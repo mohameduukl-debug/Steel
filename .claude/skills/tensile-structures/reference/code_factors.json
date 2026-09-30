@@ -1,51 +1,372 @@
 {
   "_readme": "Central code-factor register used by every tool. status: V = confirmed from a named source (search excerpt); C = standard clause content / recommended value, NA may differ; U = unverified typical value. Override any value in a PROJECT file (same structure, only the keys you change) and pass it with --factors project.json or env TENSILE_FACTORS=project.json. Run `python3 factors.py report` to list everything still unverified.",
-
   "membrane": {
-    "stress_factor_short": {"value": 4.0, "status": "U", "source": "practice: 4 short-term (wind); literature 4-8 (Gosling et al. 2018)"},
-    "stress_factor_long":  {"value": 5.0, "status": "U", "source": "practice: 5-6 long-term (snow, prestress); Birdair 'usually 5'"},
-    "fm159_PD":            {"value": 8.0, "status": "V", "source": "FM Global DS 1-59 (2021) Table 2.2.6.1, P+D, new-fabric strength"},
-    "fm159_other":         {"value": 5.0, "status": "V", "source": "FM Global DS 1-59 (2021) Table 2.2.6.1, P+D+(L|S|R|W|T)"},
-    "japan_long_divisor":  {"value": 8.0, "status": "U", "source": "MLIT Notification 666 (reported)"},
-    "japan_short_divisor": {"value": 4.0, "status": "U", "source": "MLIT Notification 666 (reported)"},
-    "seam_efficiency":     {"value": 0.8, "status": "V", "source": "PVC HF 0.80-0.90, PTFE heat-seal 0.70-0.80 (tensilecraft); use test value"},
+    "stress_factor_short": {
+      "value": 4.0,
+      "status": "V",
+      "source": "ASCE 55-10 'current industry practice' FS 4.0 for prestress + wind (ASCE 55-10 text) and general 4–5 practice (Birdair, literature)"
+    },
+    "stress_factor_long": {
+      "value": 5.0,
+      "status": "V",
+      "source": "ASCE 55-10 'current industry practice' FS 5.0 for prestress + snow; Birdair 'usually 5'. (P + D alone: 8.0, see fm159_PD)"
+    },
+    "fm159_PD": {
+      "value": 8.0,
+      "status": "V",
+      "source": "FM Global DS 1-59 (2021) Table 2.2.6.1, P+D, new-fabric strength"
+    },
+    "fm159_other": {
+      "value": 5.0,
+      "status": "V",
+      "source": "FM Global DS 1-59 (2021) Table 2.2.6.1, P+D+(L|S|R|W|T)"
+    },
+    "japan_long_divisor": {
+      "value": 8.0,
+      "status": "U",
+      "source": "MLIT Notification 666 (reported); ETFE paper (PMC9735748) quotes Japanese K = 8 long-term (single source)"
+    },
+    "japan_short_divisor": {
+      "value": 4.0,
+      "status": "U",
+      "source": "MLIT Notification 666 (reported); ETFE paper (PMC9735748) quotes Japanese K = 4 short-term (single source)"
+    },
+    "seam_efficiency": {
+      "value": 0.8,
+      "status": "V",
+      "source": "PVC HF 0.80-0.90, PTFE heat-seal 0.70-0.80 (tensilecraft); use test value"
+    },
     "partial": {
       "status": "U",
       "source": "German A-factor practice (Minte/Reinhardt) as placeholder for CEN/TS 19102:2023 Annex C / NA values",
-      "PES/PVC":    {"gM": 1.4, "A0": 1.2, "A1_long": 1.7, "A1_short": 1.0, "A2": 1.1, "A3": 1.1},
-      "glass/PTFE": {"gM": 1.4, "A0": 1.2, "A1_long": 1.4, "A1_short": 1.0, "A2": 1.1, "A3": 1.05},
-      "other":      {"gM": 1.4, "A0": 1.2, "A1_long": 1.7, "A1_short": 1.0, "A2": 1.2, "A3": 1.1}
+      "PES/PVC": {
+        "gM": 1.4,
+        "A0": 1.2,
+        "A1_long": 1.7,
+        "A1_short": 1.0,
+        "A2": 1.1,
+        "A3": 1.1
+      },
+      "glass/PTFE": {
+        "gM": 1.4,
+        "A0": 1.2,
+        "A1_long": 1.4,
+        "A1_short": 1.0,
+        "A2": 1.1,
+        "A3": 1.05
+      },
+      "other": {
+        "gM": 1.4,
+        "A0": 1.2,
+        "A1_long": 1.7,
+        "A1_short": 1.0,
+        "A2": 1.2,
+        "A3": 1.1
+      }
     },
-    "gamma_prestress":     {"value": 1.0, "status": "V", "source": "Eng. Struct. 214 (2020) calibration: gP=1.0 with gS=gW=2.0 (or gP=1.2 with 1.5)"},
-    "gamma_variable":      {"value": 1.5, "status": "C", "source": "EN 1990 gQ; calibration study suggests 2.0 with gP=1.0"}
+    "gamma_prestress": {
+      "value": 1.0,
+      "status": "V",
+      "source": "Eng. Struct. 214 (2020) calibration: gP=1.0 with gS=gW=2.0 (or gP=1.2 with 1.5)"
+    },
+    "gamma_variable": {
+      "value": 1.5,
+      "status": "C",
+      "source": "EN 1990 gQ; calibration study suggests 2.0 with gP=1.0"
+    },
+    "asce55_10_PD": {
+      "value": 8.0,
+      "status": "V",
+      "source": "ASCE 55-10 industry-practice FS for prestress + dead (consistent with FM DS 1-59)"
+    }
   },
-
   "cable": {
-    "gammaR":         {"value": 1.0, "status": "V", "source": "EAD 200001-00-0602: F_Rd=F_uk/(1.5 gR), gR not < 1.0; EN 1993-1-11 Table 6.2/NA"},
-    "resistance_div": {"value": 1.5, "status": "V", "source": "EN 1993-1-11 6.2 / EAD (F_uk/1.5)"},
-    "ke_socket":      {"value": 1.0, "status": "V", "source": "EN 1993-1-11 Table 6.3 metal/resin sockets"},
-    "ke_swaged":      {"value": 0.9, "status": "V", "source": "EN 1993-1-11 Table 6.3 swaged; Ronstan -10%"},
-    "ke_ferrule":     {"value": 0.9, "status": "U", "source": "EN 1993-1-11 Table 6.3 (recalled)"},
-    "ke_ubolt":       {"value": 0.8, "status": "U", "source": "EN 1993-1-11 Table 6.3 (recalled)"},
-    "f_sls":          {"value": 0.5, "status": "U", "source": "EN 1993-1-11 Table 7.2 recommended (numbers not retrieved); practice 0.45-0.50 F_uk"},
-    "asce19_factor":  {"value": 2.2, "status": "V", "source": "ASCE/SEI 19-16: S_d >= 2.2 T_n"},
-    "alpha_carbon":   {"value": 1.2e-5, "status": "C", "source": "EN 1993-1-1 / typical steel"},
-    "alpha_stainless":{"value": 1.6e-5, "status": "C", "source": "EN 1993-1-4 austenitic"}
+    "gammaR": {
+      "value": 1.0,
+      "status": "V",
+      "source": "EAD 200001-00-0602: F_Rd=F_uk/(1.5 gR), gR not < 1.0; EN 1993-1-11 Table 6.2/NA"
+    },
+    "resistance_div": {
+      "value": 1.5,
+      "status": "V",
+      "source": "EN 1993-1-11 6.2 / EAD (F_uk/1.5)"
+    },
+    "ke_socket": {
+      "value": 1.0,
+      "status": "V",
+      "source": "EN 1993-1-11 Table 6.3 metal/resin sockets"
+    },
+    "ke_swaged": {
+      "value": 0.9,
+      "status": "V",
+      "source": "EN 1993-1-11 Table 6.3 swaged; Ronstan -10%"
+    },
+    "ke_ferrule": {
+      "value": 0.9,
+      "status": "U",
+      "source": "EN 13411-3 ferrule-secured eye terminal efficiency 0.9 (product standard); EN 1993-1-11 Table 6.3 value not confirmed"
+    },
+    "ke_ubolt": {
+      "value": 0.8,
+      "status": "U",
+      "source": "EN 13411-5 U-bolt grip eye must hold ≥ 80% MBF (product standard); EN 1993-1-11 Table 6.3 value not confirmed"
+    },
+    "f_sls": {
+      "value": 0.5,
+      "status": "U",
+      "source": "EN 1993-1-11 Table 7.2 recommended (numbers not retrieved); practice 0.45-0.50 F_uk"
+    },
+    "asce19_factor": {
+      "value": 2.2,
+      "status": "V",
+      "source": "ASCE/SEI 19-16: S_d >= 2.2 T_n"
+    },
+    "alpha_carbon": {
+      "value": 1.2e-05,
+      "status": "C",
+      "source": "EN 1993-1-1 / typical steel"
+    },
+    "alpha_stainless": {
+      "value": 1.6e-05,
+      "status": "C",
+      "source": "EN 1993-1-4 austenitic"
+    }
   },
-
   "steel": {
-    "gM0":     {"value": 1.0,  "status": "C", "source": "EN 1993-1-1 recommended (NA may differ, e.g. 1.05/1.1)"},
-    "gM1":     {"value": 1.0,  "status": "C", "source": "EN 1993-1-1 recommended"},
-    "gM2":     {"value": 1.25, "status": "C", "source": "EN 1993-1-8 recommended"},
-    "gM6ser":  {"value": 1.0,  "status": "V", "source": "EN 1993-1-8 recommended (IDEA StatiCa summary)"},
-    "gC":      {"value": 1.5,  "status": "C", "source": "EN 1992-1-1 concrete (base plates)"},
-    "E":       {"value": 210000, "status": "C", "source": "EN 1993-1-1"},
-    "beta_w": {"status": "C", "source": "EN 1993-1-8 Table 4.1", "S235": 0.8, "S275": 0.85, "S355": 0.9, "S420": 1.0, "S460": 1.0}
+    "gM0": {
+      "value": 1.0,
+      "status": "C",
+      "source": "EN 1993-1-1 recommended (NA may differ, e.g. 1.05/1.1)"
+    },
+    "gM1": {
+      "value": 1.0,
+      "status": "C",
+      "source": "EN 1993-1-1 recommended"
+    },
+    "gM2": {
+      "value": 1.25,
+      "status": "C",
+      "source": "EN 1993-1-8 recommended"
+    },
+    "gM6ser": {
+      "value": 1.0,
+      "status": "V",
+      "source": "EN 1993-1-8 recommended (IDEA StatiCa summary)"
+    },
+    "gC": {
+      "value": 1.5,
+      "status": "C",
+      "source": "EN 1992-1-1 concrete (base plates)"
+    },
+    "E": {
+      "value": 210000,
+      "status": "C",
+      "source": "EN 1993-1-1"
+    },
+    "beta_w": {
+      "status": "C",
+      "source": "EN 1993-1-8 Table 4.1",
+      "S235": 0.8,
+      "S275": 0.85,
+      "S355": 0.9,
+      "S420": 1.0,
+      "S460": 1.0
+    }
   },
-
   "aisc": {
-    "phi_pin": {"value": 0.75, "status": "V", "source": "AISC 360 D5/J7"},
-    "phi_yield": {"value": 0.90, "status": "C", "source": "AISC 360 D2"},
-    "beff_add_mm": {"value": 16.0, "status": "V", "source": "AISC 360 D5 b_eff = 2t + 0.63 in"}
+    "phi_pin": {
+      "value": 0.75,
+      "status": "V",
+      "source": "AISC 360 D5/J7"
+    },
+    "phi_yield": {
+      "value": 0.9,
+      "status": "C",
+      "source": "AISC 360 D2"
+    },
+    "beff_add_mm": {
+      "value": 16.0,
+      "status": "V",
+      "source": "AISC 360 D5 b_eff = 2t + 0.63 in"
+    }
+  },
+  "geotech": {
+    "gamma_G_stb": {
+      "value": 0.9,
+      "status": "C",
+      "source": "EN 1997-1 Table A.1 (EQU) stabilising permanent action"
+    },
+    "gamma_G_dst": {
+      "value": 1.1,
+      "status": "C",
+      "source": "EN 1997-1 Table A.1 (EQU) destabilising permanent action"
+    },
+    "gamma_Q_dst": {
+      "value": 1.5,
+      "status": "C",
+      "source": "EN 1997-1 Table A.1 (EQU) destabilising variable action"
+    },
+    "gamma_R_h": {
+      "value": 1.1,
+      "status": "C",
+      "source": "EN 1997-1 Table A.4 R2 sliding resistance (Design Approach 2)"
+    },
+    "gamma_conc": {
+      "value": 24.0,
+      "status": "C",
+      "source": "EN 1991-1-1 Table A.1 plain concrete ~24 kN/m3"
+    },
+    "helical_Kt_per_m": {
+      "value": 33.0,
+      "status": "U",
+      "source": "Hubbell/CHANCE torque correlation Kt ≈ 10 ft^-1 for 1.5-1.75 in square shafts; use manufacturer / load test"
+    },
+    "helical_FS": {
+      "value": 2.0,
+      "status": "U",
+      "source": "common allowable-load factor of safety on torque-correlated ultimate capacity; verify with local code"
+    }
+  },
+  "anchor_EN1992_4": {
+    "k_ucr_N": {
+      "value": 12.7,
+      "status": "V",
+      "source": "EN 1992-4 7.2.1.4 cast-in headed fasteners, uncracked (Hilti, IDEA StatiCa, civilaxis)"
+    },
+    "k_cr_N": {
+      "value": 8.9,
+      "status": "V",
+      "source": "EN 1992-4 7.2.1.4 cast-in headed fasteners, cracked"
+    },
+    "s_cr_N_per_hef": {
+      "value": 3.0,
+      "status": "V",
+      "source": "EN 1992-4 s_cr,N = 3 h_ef"
+    },
+    "c_cr_N_per_hef": {
+      "value": 1.5,
+      "status": "V",
+      "source": "EN 1992-4 c_cr,N = 1.5 h_ef"
+    },
+    "k2_pullout_cracked": {
+      "value": 7.5,
+      "status": "V",
+      "source": "EN 1992-4 7.2.1.5 N_Rk,p = k2·A_h·f_ck, cracked"
+    },
+    "k2_pullout_uncracked": {
+      "value": 10.5,
+      "status": "V",
+      "source": "EN 1992-4 7.2.1.5, uncracked"
+    },
+    "gamma_Mc": {
+      "value": 1.5,
+      "status": "V",
+      "source": "EN 1992-4 γMc = γc·γinst = 1.5 × 1.0 (headed fasteners)"
+    },
+    "gamma_Ms_steel": {
+      "value": 1.5,
+      "status": "U",
+      "source": "EN 1992-4 γMs = 1.2·(f_uk/f_yk) ≥ 1.4 for steel failure; 1.5 used as typical placeholder"
+    }
+  },
+  "aluminium": {
+    "gM1": {
+      "value": 1.1,
+      "status": "V",
+      "source": "EN 1999-1-1 recommended γM1"
+    },
+    "gM2": {
+      "value": 1.25,
+      "status": "V",
+      "source": "EN 1999-1-1 recommended γM2"
+    },
+    "6082T6_fo_thin": {
+      "value": 250,
+      "status": "V",
+      "source": "6082-T6 extrusions t ≤ 5 mm f_o (EN 755-2 / EN 1999-1-1 Table 3.2b)"
+    },
+    "6082T6_fu_thin": {
+      "value": 290,
+      "status": "V",
+      "source": "6082-T6 extrusions t ≤ 5 mm f_u"
+    },
+    "6082T6_fo_thick": {
+      "value": 260,
+      "status": "V",
+      "source": "6082-T6 extrusions 5 < t ≤ 15(25) mm f_o"
+    },
+    "6082T6_fu_thick": {
+      "value": 310,
+      "status": "V",
+      "source": "6082-T6 extrusions 5 < t ≤ 15(25) mm f_u"
+    },
+    "bearing_formula": {
+      "status": "U",
+      "source": "EN 1999-1-1 Table 8.5 F_b,Rd = k1·αb·f_u·d·t/γM2 (EN 1993-1-8 form; EN 1999 table not quoted verbatim)"
+    }
+  },
+  "fatigue_EN1993_1_9": {
+    "m1": {
+      "value": 3.0,
+      "status": "V",
+      "source": "EN 1993-1-9 7.1: m = 3 for N ≤ 5e6"
+    },
+    "m2": {
+      "value": 5.0,
+      "status": "V",
+      "source": "EN 1993-1-9: m = 5 for 5e6 < N ≤ 1e8"
+    },
+    "D_over_C": {
+      "value": 0.737,
+      "status": "V",
+      "source": "Δσ_D = 0.737 Δσ_C at 5e6"
+    },
+    "L_over_C": {
+      "value": 0.405,
+      "status": "V",
+      "source": "Δσ_L = 0.549 Δσ_D = 0.405 Δσ_C at 1e8"
+    },
+    "gMf_safe_life_high": {
+      "value": 1.35,
+      "status": "V",
+      "source": "EN 1993-1-9 Table 3.1 safe life, high consequence"
+    },
+    "gMf_safe_life_low": {
+      "value": 1.15,
+      "status": "V",
+      "source": "EN 1993-1-9 Table 3.1 safe life, low consequence"
+    },
+    "gMf_damage_tol_high": {
+      "value": 1.15,
+      "status": "V",
+      "source": "EN 1993-1-9 Table 3.1 damage tolerant, high consequence"
+    },
+    "gMf_damage_tol_low": {
+      "value": 1.0,
+      "status": "V",
+      "source": "EN 1993-1-9 Table 3.1 damage tolerant, low consequence"
+    }
+  },
+  "fatigue_cables": {
+    "dsC_spiral_socket": {
+      "value": 150.0,
+      "status": "U",
+      "source": "EN 1993-1-11 Section 8 (recalled; not confirmed)"
+    },
+    "dsC_parallel_wire": {
+      "value": 160.0,
+      "status": "U",
+      "source": "EN 1993-1-11 Section 8 (recalled; not confirmed)"
+    },
+    "dsC_threaded_bar": {
+      "value": 50.0,
+      "status": "U",
+      "source": "EN 1993-1-11 / EN 1993-1-9 threaded bolts in tension category 50 (recalled)"
+    },
+    "m_rope": {
+      "value": 4.0,
+      "status": "U",
+      "source": "rope S-N slope ~4 (revision research proposes m1 = 4, m2 = 6 for FLC)"
+    }
   }
 }

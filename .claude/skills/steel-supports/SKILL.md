@@ -18,6 +18,39 @@ python3 member_check.py --section I:500:250:10:20:12:welded --L 8 --N 200 --My 3
   **LTB** for I sections (M_cr with C1 from ψ, 6.3.2.2), interaction 6.61/6.62 (Annex B), tension members.
 - Class 4 is flagged and not designed (effective sections not implemented).
 
+- **Class 4** I/RHS: effective section to EN 1993-1-5 §4.4 (ρ for internal and outstand parts, web in bending
+  ψ = −1; neutral-axis shift neglected). Class 4 CHS stops with a warning (EN 1993-1-6 shell buckling).
+- **Shear–moment interaction** 6.2.8: for V > 0.5 V_pl, the bending resistance is reduced with ρ = (2V/V_pl − 1)².
+
+## Tool: `scripts/frame2d.py` (arches, tapered/guyed masts, frames: stability + 2nd order)
+```bash
+python3 frame2d.py arch --L 30 --f 6 --n 24 --section CHS:323.9x10 --q 12 --supports pinned --check --Lz 5
+python3 frame2d.py arch --L 30 --f 6 --shape circular --supports fixed --section CHS:273x10 --q 10 --check
+python3 frame2d.py mast --H 12 --D-base 219.1 --D-mid 323.9 --D-top 219.1 --t 8 --N 600 --Hlat 5 --check
+python3 frame2d.py mast --H 12 --N 400 --base pinned --guy 6:30000 --guy -6:30000 --check      # guyed mast
+python3 frame2d.py --input frame.json --check                                                  # any planar frame
+```
+- Beam-column elements with consistent geometric stiffness, truss elements for guys, banded solver.
+- **α_cr** by inverse iteration → EN 1993-1-1 5.2.1: first-order analysis is adequate if α_cr ≥ 10.
+- **Second order** with a buckling-mode imperfection, amplitude e0·L from Table 5.1 (elastic) for the member's curve.
+- **Member design**, two methods reported: (a) equivalent column with in-plane L_cr = π√(EI/(α_cr N_Ed)) and first-order M;
+  (b) second-order M with imperfection, then a cross-section check. Out-of-plane buckling uses `--Lz` (restraint spacing).
+- Validation (tests): Euler pinned and cantilever columns exact; simply supported beam deflection, moment and reactions exact;
+  beam-column amplification = exact tan(u)/u within 0.3 %; two-hinged and fixed parabolic arches within 1.5–2.5 % of
+  Timoshenko & Gere's γ (28.5, 45.4, 101 for f/L 0.1, 0.2, 0.2 fixed). Deep arches (f/L = 0.3) come out ~5–6 % above the
+  classical energy-method values, so use a small margin there.
+- Loads are dead (fixed direction). Follower pressure on rings/arches is not modelled; for a ring under hydrostatic
+  pressure use q_cr = 3EI/R³.
+
+## Tool: `scripts/foundation_check.py` (gravity blocks, helical anchors)
+```bash
+python3 foundation_check.py block --B 2.5 --L 2.5 --D 1.5 --V 60 --H 45 --ha 0.3 --mu 0.45 --qRd 200
+python3 foundation_check.py helical --T 8 --pull 110
+```
+- block: uplift (EQU, γ_G,stb), sliding (GEO, γ_R,h), overturning about the toe, bearing on B' = B − 2e, and eccentricity
+  within B/6. Passive resistance on the block face is ignored (conservative). μ and q_Rd come from the geotechnical report.
+- helical: Q_u = K_t·T (manufacturer torque correlation, [U]); allowable = Q_u/FS; a proof-load test is required.
+
 ## Tool: `scripts/mast_check.py` (quick CHS mast, same results as member_check for CHS)
 ```bash
 python3 mast_check.py --D 219.1 --t 8 --L 7.5 --N 420 --M 12            # pinned mast, hot-finished (curve a)

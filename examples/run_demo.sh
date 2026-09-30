@@ -44,6 +44,9 @@ python3 "$S/tensile-connections/scripts/steel_joint_checks.py" weld --F 210 --an
 python3 "$S/tensile-connections/scripts/steel_joint_checks.py" baseplate --col CHS --D 168.3 --tc 8 --B 350 --H 350 \
         --tp 25 --Nc 300 --Nt 60 --V 25 --anchors 4 --anchor-d 20 --edge 55
 
+python3 "$S/steel-supports/scripts/frame2d.py" arch --L 20 --f 4 --n 20 --section CHS:219.1x8 --q 3.5 --check --Lz 5
+python3 "$S/steel-supports/scripts/foundation_check.py" block --B 2.5 --L 2.5 --D 1.5 --V 60 --H 45 --ha 0.3 --mu 0.45 --qRd 200
+
 echo; echo "== 7. Patterns, GA DXF and steel part drawings =="
 python3 "$S/fabrication-drawings/scripts/cutting_pattern.py" sail.json --panels-along v --strip 2 --seams geodesic \
         --comp-warp 0.8 --comp-weft 1.6 --decomp-ends 0 --decomp-length 500 --seam 50 --edge 80 \

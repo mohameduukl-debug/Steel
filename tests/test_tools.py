@@ -41,6 +41,8 @@ mast = load("steel-supports", "mast_check")
 mem = load("membrane-fabric", "membrane_check")
 memb = load("steel-supports", "member_check")
 joint = load("tensile-connections", "steel_joint_checks")
+frame = load("steel-supports", "frame2d")
+found = load("steel-supports", "foundation_check")
 cut = load("fabrication-drawings", "cutting_pattern")
 dxfw = load("fabrication-drawings", "dxf_writer")
 
@@ -243,6 +245,86 @@ class TestMemberCheck(unittest.TestCase):
         rows, _ = memb.check(memb.Section("IPE300"), 355, 6.0, 0.0, 80, psi_LT=0.0)
         ltb = [r for r in rows if r[0].startswith("LTB")][0]
         self.assertIn("Mcr=169", ltb[0])
+
+
+class TestFrame2D(unittest.TestCase):
+    def EI(self, spec):
+        return 210e6 * memb.Section(spec).Iy * 1e-12
+
+    def test_euler_columns(self):
+        for base, k in (("pinned", 1.0), ("fixed", 2.0)):
+            fr = frame.gen_mast(10, 20, 219.1, 219.1, 219.1, 8, 355, base, 1.0, 0.0, [])
+            _, _, f = fr.linear()
+            lam, _ = fr.buckling(f)
+            self.assertAlmostEqual(lam / (math.pi ** 2 * self.EI("CHS:219.1x8") / (k * 10) ** 2), 1.0, delta=0.002)
+
+    def test_simply_supported_beam(self):
+        d = {"nodes": [[i * 0.5, 0] for i in range(21)], "supports": {"0": [1, 1, 0], "20": [0, 1, 0]},
+             "members": [{"name": "B", "nodes": list(range(21)), "section": "IPE300"}],
+             "loads": {"udl": [{"member": "B", "qy": -10}]}}
+        fr = frame.from_json(d)
+        dm, u, fo = fr.linear()
+        EI = self.EI("IPE300")
+        self.assertAlmostEqual(u[dm[(10, 1)]], -5 * 10 * 10 ** 4 / (384 * EI), places=9)
+        self.assertAlmostEqual(max(max(abs(x["M1"]), abs(x["M2"])) for x in fo), 125.0, places=6)
+        R = fr.reactions(dm, u)
+        self.assertAlmostEqual(R[0][1] + R[20][1], 100.0, places=6)
+
+    def test_parabolic_arch_vs_timoshenko(self):
+        # Timoshenko & Gere, Theory of Elastic Stability, uniformly loaded parabolic arches q_cr = γ EI / L^3
+        EI = self.EI("CHS:323.9x10")
+        for f_L, sup, gam in ((0.1, "pinned", 28.5), (0.2, "pinned", 45.4), (0.2, "fixed", 101.0)):
+            fr = frame.gen_arch(30, 30 * f_L, 40, "CHS:323.9x10", 355, sup, 1.0)
+            _, _, fo = fr.linear()
+            lam, _ = fr.buckling(fo)
+            self.assertAlmostEqual(lam * 30 ** 3 / EI / gam, 1.0, delta=0.04)
+
+    def test_second_order_amplification(self):
+        # pinned column, midspan point load, N = 0.5 Ncr: M2/M1 = tan(u)/u, u = (π/2)√(N/Ncr)
+        fr = frame.gen_mast(8, 16, 219.1, 219.1, 219.1, 8, 355, "pinned", 1.0, 0.0, [])
+        _, _, f = fr.linear()
+        Ncr, _ = fr.buckling(f)
+        N = 0.5 * Ncr
+        d = {"nodes": [[0, 0.5 * i] for i in range(17)], "supports": {"0": [1, 1, 0], "16": [1, 0, 0]},
+             "members": [{"name": "C", "nodes": list(range(17)), "section": "CHS:219.1x8"}],
+             "loads": {"nodal": {"16": [0, -N, 0], "8": [1.0, 0, 0]}}}
+        fr2 = frame.from_json(d)
+        _, _, f1 = fr2.linear()
+        _, _, f2 = fr2.second_order(None)
+        M1 = max(max(abs(x["M1"]), abs(x["M2"])) for x in f1)
+        M2 = max(max(abs(x["M1"]), abs(x["M2"])) for x in f2)
+        uu = math.pi / 2 * math.sqrt(0.5)   # exact beam-column solution for a midspan point load (Timoshenko)
+        self.assertAlmostEqual(M2 / M1, math.tan(uu) / uu, delta=0.01)
+
+    def test_arch_design_runs(self):
+        res = frame.run(frame.gen_arch(30, 6, 24, "CHS:323.9x10", 355, "pinned", 12.0), check=True, quiet=True)
+        self.assertGreater(res["alpha_cr"], 1.0)
+        self.assertTrue(res["design"][0]["util_equiv_column"] > 0)
+
+
+class TestClass4AndFoundations(unittest.TestCase):
+    def test_class4_rhs_effective_area(self):
+        s = memb.Section("RHS:300x300x6:cold")
+        e = memb.effective_section(s, 355)
+        eps = math.sqrt(235 / 355)
+        lp = (300 - 18) / 6 / (28.4 * eps * 2)
+        rho = (lp - 0.22) / lp ** 2
+        self.assertAlmostEqual(e["A_eff"], s.A - 4 * (1 - rho) * 282 * 6, delta=1.0)
+
+    def test_shear_reduction(self):
+        s = memb.Section("IPE300")
+        rows, res = memb.check(s, 355, 3, 0, 80, Vz=400)
+        u = [r for r in rows if r[0].startswith("section")][0][1]
+        Vpl = [r for r in rows if r[0].startswith("shear")][0][2]
+        rho = (2 * 400 / Vpl - 1) ** 2
+        W = s.Wpl_y - rho * (300 - 2 * 10.7) ** 2 * 7.1 / 4
+        self.assertAlmostEqual(u, 80e6 / (W * 355), places=4)
+
+    def test_block(self):
+        rows, info = found.block(2, 2, 1.2, 60, 45, 0.3, 0.45, 200)
+        self.assertAlmostEqual(info["W_kN"], 2 * 2 * 1.2 * 24, places=6)
+        self.assertAlmostEqual(rows[0][2], 0.9 * 115.2, places=6)
+        self.assertAlmostEqual(rows[1][2], (0.9 * 115.2 - 60) * 0.45 / 1.1, places=6)
 
 
 class TestJoints(unittest.TestCase):
