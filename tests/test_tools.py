@@ -316,6 +316,53 @@ class TestFactors(unittest.TestCase):
             self.assertTrue(e.get("source"), path)
 
 
+class TestGeodesicAndDecomp(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.mkdtemp()
+        p = os.path.join(tmp, "sail")
+        quiet(fdm.main, ["sail4", "--n", "12", "--prestress", "2", "--out", p])
+        with open(p + ".json") as fh:
+            self.m = json.load(fh)
+        self.X = [[c * 1000 for c in nd["xyz"]] for nd in self.m["nodes"]]
+
+    def test_geodesic_not_longer_than_grid_and_mating_seams(self):
+        surf = cut.Surface(self.X, self.m["faces"])
+        pans, seams, notes = cut.build_panels(self.m, self.X, "v", 2, "geodesic", surf)
+        g = self.m["grid"]
+        for k, curve in seams.items():
+            grid_line = [self.X[j * (g["nu"] + 1) + k] for j in range(g["nv"] + 1)]
+            self.assertLessEqual(cut.polylen(curve), cut.polylen(grid_line) + 1.0)
+        for a, b in zip(pans[:-1], pans[1:]):   # right seam of a == left seam of b (shared curve)
+            ra = [row[-1] for row in a["grid"]]
+            lb = [row[0] for row in b["grid"]]
+            self.assertAlmostEqual(cut.polylen(ra), cut.polylen(lb), places=6)
+
+    def test_geodesic_on_plane_is_straight(self):
+        # flat square: geodesic between two points = straight chord
+        m = fdm.gen_sail4(10, 0, 6, 1, 1, True)
+        X = [[c * 1000 for c in nd["xyz"]] for nd in m["nodes"]]
+        surf = cut.Surface(X, m["faces"])
+        pts = [X[0], [3000, 5000, 0], X[-1]]  # bent start polyline
+        geo = cut.geodesic(surf, pts, 9)
+        self.assertAlmostEqual(cut.polylen(geo), math.dist(X[0], X[-1]), delta=1.0)
+
+    def test_decompensation_at_ends(self):
+        m = fdm.gen_sail4(6, 0, 6, 1, 1, True)   # flat, developable
+        X = [[c * 1000 for c in nd["xyz"]] for nd in m["nodes"]]
+        pans, _, _ = cut.build_panels(m, X, "v", 2, "grid", None)
+        pan = pans[1]
+        end3d = cut.polylen(pan["grid"][0])
+        mid3d = cut.polylen(pan["grid"][len(pan["grid"]) // 2])
+        net, kinds, *_ = cut.process_panel(pan, 0.01, 0.02, 0.0, None, 1000.0)
+        # net ring starts with end row 0 (or reversed); measure end-row and mid-rung widths in 2D
+        ends = [i for i, k in enumerate(kinds) if k == "end"]
+        L_end = sum(math.dist(net[i], net[(i + 1) % len(net)]) for i in ends) / 2
+        self.assertAlmostEqual(L_end / end3d, 1.0, delta=0.002)       # decompensated to 0 %
+        net2, *_ = cut.process_panel(pan, 0.01, 0.02, None, None, 1000.0)
+        ys = [p[1] for p in net2]
+        self.assertAlmostEqual((max(ys) - min(ys)) / mid3d, 0.98, delta=0.002)  # full weft compensation
+
+
 class TestDXF(unittest.TestCase):
     def test_structure(self):
         d = dxfw.DXF()

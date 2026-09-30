@@ -27,6 +27,14 @@ Usable width = roll − selvedges − seam allowances.
 * Inverse methods (Bletzinger et al.) that optimise the pattern so the stresses after assembly match the prestress.
 Accept flattening strain well below the compensation values (≤ ~0.3–0.5 % [U rule]); otherwise narrow the panels.
 
+## 3b. Geodesic seams in this repo
+`cutting_pattern.py --seams geodesic`: the start polyline (mesh grid line) is shortened on the triangulated surface. Each
+interior point moves to the projection of the midpoint of its neighbours, first on 5 points, then refined 9 → 17 → … up to
+the mesh density (multi-level, so it converges in a few sweeps). Panels are rebuilt as ladders between neighbouring seams
+(rungs projected on the surface; curved end rows blended into the nearby rungs). Sampling is kept at mesh density: finer
+sampling of a faceted mesh concentrates curvature at the facet folds and inflates the flattening strain. Seams whose
+geodesic would run into a concave boundary fall back to the grid line.
+
 ## 4. Compensation and decompensation
 * Shrink each panel by warp and weft percentages so that stressing to prestress recovers the design geometry. Values come from biaxial tests at
   design prestress and stress ratio (EN 17117-2:2021) [V]. Example 1.2 % warp / 2.5 % weft [V, blog]; typical PVC 0.5–2 %
@@ -34,8 +42,10 @@ Accept flattening strain well below the compensation values (≤ ~0.3–0.5 % [U
 * Compensation depends on stress level and ratio and on viscoelasticity, so it is batch-specific.
 * **Decompensation:** edges that must match a fixed length (clamp lines, frames, pockets with fixed cable length) get
   reduced or zero compensation along that edge (MPanel variable/partial; RFEM per boundary line) [V].
-* This repo's tool applies uniform warp/weft compensation along the panel principal axes. Apply decompensation by editing the
-  NET line on the affected edge, or run fixed-length edges as separate cases.
+* This repo's tool: global warp/weft compensation along the panel axes, plus graded decompensation
+  (`--decomp-ends`, `--decomp-sides`, `--decomp-length`). Each rung (or panel-length line) is scaled about its midpoint
+  so the local compensation goes linearly from the decompensation value at the fixed edge to the full value at the
+  transition length (MPanel-style partial decompensation).
 
 ## 5. Allowances and details
 | Item | Typical |

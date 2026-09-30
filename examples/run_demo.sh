@@ -45,8 +45,9 @@ python3 "$S/tensile-connections/scripts/steel_joint_checks.py" baseplate --col C
         --tp 25 --Nc 300 --Nt 60 --V 25 --anchors 4 --anchor-d 20 --edge 55
 
 echo; echo "== 7. Patterns, GA DXF and steel part drawings =="
-python3 "$S/fabrication-drawings/scripts/cutting_pattern.py" sail.json --panels-along v --strip 2 \
-        --comp-warp 0.8 --comp-weft 1.6 --seam 50 --edge 80 --roll-width 2500 --out sail_patterns
+python3 "$S/fabrication-drawings/scripts/cutting_pattern.py" sail.json --panels-along v --strip 2 --seams geodesic \
+        --comp-warp 0.8 --comp-weft 1.6 --decomp-ends 0 --decomp-length 500 --seam 50 --edge 80 \
+        --roll-width 2500 --out sail_patterns
 python3 "$S/fabrication-drawings/scripts/export_dxf.py" sail.json --forces --out sail_GA
 python3 "$S/fabrication-drawings/scripts/steel_part_dxf.py" lug --d0 37 --d 36 --t 25 --a 50 --c 35 \
         --base 150 --height 110 --mark LP-01 --qty 4 --project "Demo sail"

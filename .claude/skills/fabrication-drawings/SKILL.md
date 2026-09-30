@@ -22,6 +22,19 @@ python3 steel_part_dxf.py lug --d0 41 --d 40 --t 20 --a 50 --c 35 --base 160 --h
 python3 steel_part_dxf.py corner --t 25 --edge 45 --hole A:0:0:52 --hole EC1:180:48:33 --hole EC2:48:180:33 \
         --hole M1:95:95:18 --mark CP-01
 ```
+**Geodesic seams + decompensation:**
+```bash
+python3 cutting_pattern.py sail.json --seams geodesic --strip 2 --comp-warp 0.8 --comp-weft 1.6 \
+        --decomp-ends 0 --decomp-length 500 --out sail_patterns
+```
+- `--seams geodesic`: every seam is relaxed on the surface into the shortest path between its boundary end points
+  (multi-level string shortening with closest-point projection). Adjacent panels share the same 3D seam curve, so
+  mating seam lengths match. A geodesic that would run into a concave (scalloped) edge is rejected for that seam; the
+  grid line is used and a NOTE is printed.
+- `--decomp-ends X`: weft compensation at the panel ends (edge-cable pockets or clamp lines of fixed length) grades
+  linearly from the full value to X % over `--decomp-length` mm. `--decomp-sides X` does the same for warp along
+  boundary sides (not seams). Exactness is tested: a 0 % end keeps its 3D width.
+
 Read the warnings: panel wider than the roll, or flattening strain > 0.5 %, means reduce `--strip` (narrower panels).
 High strain near anchor points of cones is physical (strong double curvature), so use narrow panels there.
 
