@@ -38,6 +38,13 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "tensile-structures", "scripts
 import factors as CF  # noqa: E402
 import member_check as MC  # noqa: E402
 
+# Classical in-plane buckling of uniform parabolic arches under uniform load per horizontal metre:
+# q_cr = γ·EI/L³ (Timoshenko & Gere, Theory of Elastic Stability, after Dinnik). Used only as a cross-check:
+# frame2d itself reproduces exact ring and circular-arch solutions; against this table it differs by −0.5 … +8 %,
+# so arch designs use the lower of the two α_cr values.
+CLASSICAL_PARABOLIC = {"pinned": {0.1: 28.5, 0.2: 45.4, 0.3: 46.5, 0.4: 43.9, 0.5: 38.4},
+                       "fixed": {0.1: 60.7, 0.2: 101.0, 0.3: 115.0, 0.4: 111.0, 0.5: 97.4}}
+
 E0_ELASTIC = {"a0": 1 / 350, "a": 1 / 300, "b": 1 / 250, "c": 1 / 200, "d": 1 / 150}  # EN 1993-1-1 Table 5.1
 
 
@@ -139,6 +146,7 @@ class Frame:
         self.members = {}    # name -> dict(section, fy, elems=[...], sec=Section)
         self.nodal = {}      # node -> [fx, fy, m]
         self.udl = []        # (elem index, qx_global, qy_global) per unit length
+        self.pressure = []   # (elem index, pn) FOLLOWER load per unit length along the left normal of a->b
 
     def add_member(self, name, node_ids, section=None, fy=355.0, A=None, I=None, E=None, truss=False):
         E = E or CF.get("steel.E") * 1e-3  # kN/mm2 -> we use kN, m: E in kN/m2 below
@@ -172,7 +180,17 @@ class Frame:
         L = math.hypot(dx, dy)
         return L, dx / L, dy / L
 
-    def assemble(self, dmap, n, Nax=None, geo_only=False, factor_geo=1.0):
+    def follower_terms(self, ei, pn):
+        """dF_ext/dU of a follower pressure on element ei: f_a = f_b = (pn/2)·(−Δy, Δx) (lumped part)."""
+        (a, b) = self.elems[ei]["n"]
+        h = pn / 2
+        out = []
+        for row_node in (a, b):
+            out += [((row_node, 0), (a, 1), h), ((row_node, 0), (b, 1), -h),
+                    ((row_node, 1), (a, 0), -h), ((row_node, 1), (b, 0), h)]
+        return out
+
+    def assemble(self, dmap, n, Nax=None, geo_only=False, factor_geo=1.0, follower=0.0):
         bw = 0
         for e in self.elems:
             ids = [dmap.get((v, d)) for v in e["n"] for d in range(3)]
@@ -201,6 +219,12 @@ class Frame:
                 for j in range(6):
                     if dofs[j] is not None:
                         K.add(dofs[i], dofs[j], kg[i][j])
+        if follower:
+            # tangent of loads that follow the deformation: K_t = K − dF_ext/dU (non-symmetric)
+            for ei, pn in self.pressure:
+                for r, c, v in self.follower_terms(ei, pn):
+                    if r in dmap and c in dmap:
+                        K.add(dmap[r], dmap[c], -follower * v)
         return K
 
     def load_vector(self, dmap, n, extra=None):
@@ -216,6 +240,14 @@ class Frame:
             qa = qx * c + qy * s
             qt = -qx * s + qy * c
             fl = [qa * L / 2, qt * L / 2, qt * L * L / 12, qa * L / 2, qt * L / 2, -qt * L * L / 12]
+            T = rot(c, s)
+            fg = [sum(T[m][i] * fl[m] for m in range(6)) for i in range(6)]
+            for k, (v, d) in enumerate((v, d) for v in e["n"] for d in range(3)):
+                full[(v, d)] = full.get((v, d), 0.0) + fg[k]
+        for (ei, pn) in self.pressure:
+            e = self.elems[ei]
+            L, c, s = self.geom(e)
+            fl = [0.0, pn * L / 2, pn * L * L / 12, 0.0, pn * L / 2, -pn * L * L / 12]
             T = rot(c, s)
             fg = [sum(T[m][i] * fl[m] for m in range(6)) for i in range(6)]
             for k, (v, d) in enumerate((v, d) for v in e["n"] for d in range(3)):
@@ -253,6 +285,10 @@ class Frame:
                     qt = -qx * s + qy * c
                     fe = [qa * L / 2, qt * L / 2, qt * L * L / 12, qa * L / 2, qt * L / 2, -qt * L * L / 12]
                     f = [f[i] - fe[i] for i in range(6)]
+            for (eu, pn) in self.pressure:
+                if eu == ei:
+                    fe = [0.0, pn * L / 2, pn * L * L / 12, 0.0, pn * L / 2, -pn * L * L / 12]
+                    f = [f[i] - fe[i] for i in range(6)]
             N = f[3]  # tension positive (force on end 2 along local x)
             out.append({"N": N, "V1": f[1], "M1": -f[2], "M2": f[5], "L": L})
         return out
@@ -266,11 +302,13 @@ class Frame:
         return dmap, u, self.element_forces(dmap, u)
 
     def buckling(self, forces, iters=400, tol=1e-9):
-        """smallest positive λ with det(K + λ K_G(N)) = 0 via inverse (power) iteration on K^-1(-K_G)."""
+        """smallest positive λ with det(K + λ (K_G(N) − K_P)) = 0 via inverse (power) iteration on K^-1(-K_G).
+
+        K_P = dF/dU of follower pressures (self.pressure); dead loads (nodal, udl) keep their direction."""
         dmap, n = self.dof_map()
         Nax = [f["N"] for f in forces]
         K = self.assemble(dmap, n).factor()
-        KG = self.assemble(dmap, n, Nax=Nax, geo_only=True)
+        KG = self.assemble(dmap, n, Nax=Nax, geo_only=True, follower=1.0)
 
         def op(x):
             return K.solve([-v for v in KG.matvec(x)])
@@ -309,7 +347,7 @@ class Frame:
             dmap, u, forces = self.linear()
             for _ in range(iters):
                 Nax = [f["N"] for f in forces]
-                K = self.assemble(dmap, len(u), Nax=Nax).factor()
+                K = self.assemble(dmap, len(u), Nax=Nax, follower=1.0).factor()
                 F, _ = self.load_vector(dmap, len(u))
                 u2 = K.solve(F)
                 f2 = self.element_forces(dmap, u2, Nax)
@@ -348,7 +386,7 @@ class Frame:
 
 
 # ------------------------------------------------------------ generators
-def gen_arch(L, f, n, section, fy, supports, q, shape="parabolic", P=None):
+def gen_arch(L, f, n, section, fy, supports, q, shape="parabolic", P=None, p_normal=0.0):
     fr = Frame()
     if shape == "circular":
         R = (L * L / 4 + f * f) / (2 * f)
@@ -369,6 +407,11 @@ def gen_arch(L, f, n, section, fy, supports, q, shape="parabolic", P=None):
             L_e = math.hypot(fr.nodes[b][0] - fr.nodes[a][0], fr.nodes[b][1] - fr.nodes[a][1])
             proj = abs(fr.nodes[b][0] - fr.nodes[a][0]) / L_e
             fr.udl.append((ei, 0.0, -q * proj))  # q per horizontal metre, downward
+    if q and shape == "parabolic" and not P and not p_normal:
+        fr.classical = {"L": L, "f_L": f / L, "supports": supports, "q": q}
+    if p_normal:
+        # nodes run left -> right over the crown, so the left normal points outward: inward pressure = −pn
+        fr.pressure = [(ei, -p_normal) for ei in range(n)]
     if P:
         for (node, fx, fy_) in P:
             fr.nodal[node] = [fx, fy_, 0.0]
@@ -415,6 +458,9 @@ def from_json(d):
             L_e = math.hypot(fr.nodes[b][0] - fr.nodes[a][0], fr.nodes[b][1] - fr.nodes[a][1])
             proj = abs(fr.nodes[b][0] - fr.nodes[a][0]) / L_e if u.get("per_horizontal") else 1.0
             fr.udl.append((ei, u.get("qx", 0.0) * proj, u.get("qy", 0.0) * proj))
+    for pr in d.get("loads", {}).get("pressure", []):
+        sign = 1.0 if pr.get("side", "left") == "left" else -1.0
+        fr.pressure += [(ei, sign * pr["p"]) for ei in fr.members[pr["member"]]["elems"]]
     return fr
 
 
@@ -461,9 +507,28 @@ def design(fr, lin, sec_order, alpha, members=None, Lz=None):
     return rows
 
 
+def classical_alpha(fr):
+    """α_cr from the classical parabolic-arch table (interpolated in f/L), or None outside its scope."""
+    c = getattr(fr, "classical", None)
+    if not c:
+        return None
+    tab = CLASSICAL_PARABOLIC[c["supports"]]
+    ks = sorted(tab)
+    if not ks[0] <= c["f_L"] <= ks[-1]:
+        return None
+    for k0, k1 in zip(ks[:-1], ks[1:]):
+        if k0 <= c["f_L"] <= k1:
+            gam = tab[k0] + (tab[k1] - tab[k0]) * (c["f_L"] - k0) / (k1 - k0)
+            break
+    e = fr.elems[0]
+    return gam * e["E"] * e["I"] / c["L"] ** 3 / c["q"]
+
+
 def run(fr, check=False, imp_curve=None, Lz=None, quiet=False):
     dmap, u, f1 = fr.linear()
-    lam, mode = fr.buckling(f1)
+    lam_fe, mode = fr.buckling(f1)
+    lam_cl = classical_alpha(fr)
+    lam = min(lam_fe, lam_cl) if lam_cl else lam_fe
     s1 = member_summary(fr, f1)
     # mode-shaped imperfection: amplitude e0·L of the longest compressed member (Table 5.1 elastic)
     comp = [(n, m) for n, m in s1.items() if m["N_min"] < 0 and not fr.members[n]["truss"]]
@@ -480,7 +545,7 @@ def run(fr, check=False, imp_curve=None, Lz=None, quiet=False):
     _, u2, f2 = fr.second_order(imp)
     s2 = member_summary(fr, f2)
     R = fr.reactions(dmap, u)
-    res = {"alpha_cr": lam, "first_order": s1, "second_order": s2, "reactions": R,
+    res = {"alpha_cr": lam, "alpha_cr_fe": lam_fe, "alpha_cr_classical": lam_cl, "first_order": s1, "second_order": s2, "reactions": R,
            "imperfection": {"curve": curve, "amplitude_m": amp},
            "max_disp_m": max((abs(v) for v in u), default=0.0)}
     if check:
@@ -492,6 +557,9 @@ def run(fr, check=False, imp_curve=None, Lz=None, quiet=False):
 
 def report(fr, res):
     a = res["alpha_cr"]
+    if res.get("alpha_cr_classical"):
+        print(f"α_cr: FE {res['alpha_cr_fe']:.2f}, classical parabolic-arch table {res['alpha_cr_classical']:.2f} "
+              f"(Timoshenko & Gere) -> design uses the lower value")
     print(f"Elastic critical load factor α_cr = {a:.2f}  "
           + ("(≥ 10: first-order analysis adequate, EN 1993-1-1 5.2.1)" if a >= 10 else
              "(< 10: second-order effects must be included)"))
@@ -529,6 +597,9 @@ def main(argv=None):
     ap.add_argument("--fy", type=float, default=355.0)
     ap.add_argument("--supports", choices=["pinned", "fixed"], default="pinned")
     ap.add_argument("--q", type=float, default=0.0, help="arch: load per horizontal metre, downward [kN/m]")
+    ap.add_argument("--p-normal", type=float, default=0.0,
+                    help="arch: FOLLOWER pressure normal to the arch, + toward the centre of curvature [kN/m] "
+                         "(membrane/wind pressure that turns with the arch)")
     ap.add_argument("--H", type=float, default=12.0, help="mast height [m]")
     ap.add_argument("--D-base", type=float, default=219.1)
     ap.add_argument("--D-mid", type=float, default=219.1)
@@ -549,7 +620,7 @@ def main(argv=None):
         with open(a.input) as fh:
             fr = from_json(json.load(fh))
     elif a.kind == "arch":
-        fr = gen_arch(a.L, a.f, a.n, a.section, a.fy, a.supports, a.q, a.shape)
+        fr = gen_arch(a.L, a.f, a.n, a.section, a.fy, a.supports, a.q, a.shape, p_normal=a.p_normal)
     elif a.kind == "mast":
         guys = [tuple(map(float, g.split(":"))) for g in a.guy]
         fr = gen_mast(a.H, a.n, a.D_base, a.D_mid, a.D_top, a.t, a.fy, a.base, a.N, a.Hlat, guys)

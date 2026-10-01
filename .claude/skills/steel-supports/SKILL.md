@@ -26,6 +26,7 @@ python3 member_check.py --section I:500:250:10:20:12:welded --L 8 --N 200 --My 3
 ```bash
 python3 frame2d.py arch --L 30 --f 6 --n 24 --section CHS:323.9x10 --q 12 --supports pinned --check --Lz 5
 python3 frame2d.py arch --L 30 --f 6 --shape circular --supports fixed --section CHS:273x10 --q 10 --check
+python3 frame2d.py arch --L 20 --f 4 --shape circular --section CHS:219.1x8 --p-normal 3.5     # follower pressure
 python3 frame2d.py mast --H 12 --D-base 219.1 --D-mid 323.9 --D-top 219.1 --t 8 --N 600 --Hlat 5 --check
 python3 frame2d.py mast --H 12 --N 400 --base pinned --guy 6:30000 --guy -6:30000 --check      # guyed mast
 python3 frame2d.py --input frame.json --check                                                  # any planar frame
@@ -35,21 +36,29 @@ python3 frame2d.py --input frame.json --check                                   
 - **Second order** with a buckling-mode imperfection, amplitude e0·L from Table 5.1 (elastic) for the member's curve.
 - **Member design**, two methods reported: (a) equivalent column with in-plane L_cr = π√(EI/(α_cr N_Ed)) and first-order M;
   (b) second-order M with imperfection, then a cross-section check. Out-of-plane buckling uses `--Lz` (restraint spacing).
-- Validation (tests): Euler pinned and cantilever columns exact; simply supported beam deflection, moment and reactions exact;
-  beam-column amplification = exact tan(u)/u within 0.3 %; two-hinged and fixed parabolic arches within 1.5–2.5 % of
-  Timoshenko & Gere's γ (28.5, 45.4, 101 for f/L 0.1, 0.2, 0.2 fixed). Deep arches (f/L = 0.3) come out ~5–6 % above the
-  classical energy-method values, so use a small margin there.
-- Loads are dead (fixed direction). Follower pressure on rings/arches is not modelled; for a ring under hydrostatic
-  pressure use q_cr = 3EI/R³.
+- Loads: nodal and distributed loads are **dead** (they keep their direction). `--p-normal` (or `"pressure"` in the
+  JSON) is a **follower** pressure that stays normal to the deforming member, like membrane or wind pressure. Its
+  load stiffness −dF/dU (non-symmetric) enters the buckling and second-order runs.
+- Validation (tests), all exact classical solutions:
+  - Euler pinned and cantilever columns; simply supported beam deflection, moment and reactions.
+  - Beam-column amplification tan(u)/u, within 0.3 %.
+  - Ring under constant-direction pressure 4EI/R³ and under hydrostatic pressure 3EI/R³, within 0.05 %.
+  - Two-hinged circular arches under hydrostatic pressure (π²/α² − 1)EI/R³ for α = 30°, 60°, 90°, within 0.1 %.
+- Parabolic arches under uniform vertical load: frame2d lies −0.5 … +8 % from the Timoshenko & Gere table (after
+  Dinnik). The FE converges with mesh, does not depend on EA and matches every exact case above, so the difference
+  most likely comes from the approximate classical tabulation; this is not proven. **The `arch` command therefore
+  designs with the lower of the FE and classical α_cr** and prints both.
 
 ## Tool: `scripts/foundation_check.py` (gravity blocks, helical anchors)
 ```bash
 python3 foundation_check.py block --B 2.5 --L 2.5 --D 1.5 --V 60 --H 45 --ha 0.3 --mu 0.45 --qRd 200
-python3 foundation_check.py helical --T 8 --pull 110
+python3 foundation_check.py helical --T 8 --pull 110 --sensitivity
 ```
 - block: uplift (EQU, γ_G,stb), sliding (GEO, γ_R,h), overturning about the toe, bearing on B' = B − 2e, and eccentricity
-  within B/6. Passive resistance on the block face is ignored (conservative). μ and q_Rd come from the geotechnical report.
+  e ≤ B/3 (EN 1997-1 6.5.4); a note warns when e > B/6, where the base partly lifts off. Passive resistance on the block face is ignored (conservative). μ and q_Rd come from the geotechnical report.
 - helical: Q_u = K_t·T (manufacturer torque correlation, [U]); allowable = Q_u/FS; a proof-load test is required.
+  `--sensitivity` runs K_t and FS one at a time, then both unfavourable together. The combined case can fail even
+  when each factor alone is ROBUST.
 
 ## Tool: `scripts/mast_check.py` (quick CHS mast, same results as member_check for CHS)
 ```bash

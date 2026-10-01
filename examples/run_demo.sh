@@ -67,6 +67,9 @@ python3 "$S/steel-supports/scripts/frame2d.py" arch --L 20 --f 4 --n 20 --sectio
 python3 "$S/tensile-connections/scripts/steel_joint_checks.py" anchor --n1 2 --n2 2 --s1 200 --s2 200 --c1 400 \
         --c2 400 --hef 250 --d 24 --N 60
 python3 "$S/steel-supports/scripts/foundation_check.py" block --B 2.5 --L 2.5 --D 1.5 --V 60 --H 45 --ha 0.3 --mu 0.45 --qRd 200
+python3 "$S/steel-supports/scripts/foundation_check.py" helical --T 10 --pull 90 --sensitivity
+python3 "$S/steel-supports/scripts/frame2d.py" arch --L 20 --f 4 --n 40 --shape circular --section CHS:219.1x8 \
+        --p-normal 3.5 | sed -n 1p
 
 echo; echo "== 7. Patterns, GA DXF and steel part drawings =="
 python3 "$S/fabrication-drawings/scripts/cutting_pattern.py" sail.json --panels-along v --strip 2 --seams geodesic \
@@ -90,6 +93,6 @@ python3 "$S/fabrication-drawings/scripts/nest_panels.py" multibay_patterns.json 
 
 echo; echo "== 9. Calculation report =="
 python3 "$S/tensile-structures/scripts/report.py" --title "Demo sail" --model sail.json --cases sail_cases_envelope.json \
-        --material PVC-III --cables sail_cables.csv --patterns sail_patterns.csv --out sail_report
+        --material PVC-III --method partial --cables sail_cables.csv --patterns sail_patterns.csv --out sail_report
 
 echo; echo "Done. Files in $OUT:"; ls -1 "$OUT"

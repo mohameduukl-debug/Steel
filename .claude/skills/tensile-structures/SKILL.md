@@ -120,7 +120,9 @@ Before issuing calculations, make sure no **U** factor governs a check.
 
 **Sensitivity to uncertain factors.** Every U factor, and C factors quoted from a single source, carries a `range`
 with a `range_source`. `--sensitivity` in `membrane_check.py`, `cable_calc.py` (resist, clamp, saddle),
-`cable_schedule.py` and `fatigue_check.py` re-runs the check at both ends of the range. It reports **ROBUST** (the
+`cable_schedule.py`, `fatigue_check.py`, `foundation_check.py helical` and `steel_joint_checks.py clampbar`
+re-runs the check at both ends of the range. Every U factor in the register has a range (a test enforces this). The
+report (`report.py`) adds a "Sensitivity to uncertain factors" table for the membrane envelope and the cable SLS. It reports **ROBUST** (the
 OK / NOT OK decision does not depend on the factor) or **DEPENDS** (confirm the value before issue). A ROBUST result
 lets you issue the check while the factor is still being verified. State that in the report.
 

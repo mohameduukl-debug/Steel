@@ -273,6 +273,7 @@ def main(argv=None):
     c.add_argument("--mode", choices=["shear", "tension"], default="shear")
     c.add_argument("--prying", type=float, default=1.3)
     c.add_argument("--peak", type=float, default=1.5, help="stress concentration factor at clamp line")
+    c.add_argument("--sensitivity", action="store_true", help="aluminium bearing over its [U] range")
     c.add_argument("--plate", choices=["steel", "alu6082"], default="steel",
                    help="bearing ply material (alu6082: EN 1999-1-1, f_u and γM2 from the register)")
 
@@ -347,13 +348,19 @@ def main(argv=None):
                 rows = [r for r in rows if not r[0].startswith("bearing")]
                 rows.append(row(f"bearing on aluminium 6082-T6 t={a.t:g} (f_u={fu_al}, γM2={gM2a}) [kN]", F, FbA,
                                 f"EN 1999-1-1 T8.5 [{CF.status('aluminium.bearing_formula')}]"))
+                if a.sensitivity:
+                    res = CF.sensitivity(lambda s_: F / (FbA * s_), "aluminium.bearing_formula")
+                    sens = CF.sens_line("aluminium bearing (scale on F_b,Rd)", res)
         else:
             rows, R = bolts([(0, 0)], 0, 0, 0, F, a.prying, a.d, a.grade, a.t, a.fu_plate, 3 * a.d, 1.5 * a.d, 0, 0, True)
         print(f"Clamp line: n={a.n} kN/m × peak {a.peak} × spacing {a.spacing:g} mm = {F:.2f} kN per bolt ({a.mode})")
         if a.spacing > 200:
             print("NOTE: TensiNet guidance: clamp bolt spacing hardly more than ~200 mm [V]")
         print("Aluminium clamp plate/keder bearing and bending: check to EN 1999-1-1 separately.")
-        return report("", rows)
+        w = report("", rows)
+        if a.sensitivity:
+            print(locals().get("sens") or "  sensitivity: no uncertain factor in this check (steel plate)")
+        return w
     if a.cmd == "anchor":
         dh = a.dh or 1.9 * a.d
         rows, info = anchor_group(a.n1, a.n2, a.s1, a.s2, a.c1, a.c2, a.hef, a.d, dh, a.grade, a.fck, a.N,

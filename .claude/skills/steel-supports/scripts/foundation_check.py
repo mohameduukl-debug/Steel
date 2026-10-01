@@ -15,7 +15,7 @@ are project inputs from the geotechnical report.
 
 Examples
   python3 foundation_check.py block --B 2.0 --L 2.0 --D 1.2 --V 110 --H 85 --ha 0.3 --mu 0.45 --qRd 200
-  python3 foundation_check.py helical --T 12 --pull 120        # T kNm installation torque
+  python3 foundation_check.py helical --T 12 --pull 120 --sensitivity   # T kNm installation torque
 """
 from __future__ import annotations
 
@@ -59,9 +59,9 @@ def block(B, L, D, V, H, ha, mu, qRd, cover=0.0, gamma_soil=18.0, unfactored=Fal
     return rows, {"W_kN": W, "N_kN": N}
 
 
-def helical(T, pull):
-    Kt = CF.get("geotech.helical_Kt_per_m")
-    FS = CF.get("geotech.helical_FS")
+def helical(T, pull, Kt=None, FS=None):
+    Kt = CF.get("geotech.helical_Kt_per_m") if Kt is None else Kt
+    FS = CF.get("geotech.helical_FS") if FS is None else FS
     Qu = Kt * T
     return [("helical anchor: pull ≤ Q_u/FS  [kN]", pull, Qu / FS, f"Q_u = K_t·T = {Qu:.0f} kN")], {"Qu": Qu}
 
@@ -95,6 +95,7 @@ def main(argv=None):
     h = sp.add_parser("helical")
     h.add_argument("--T", type=float, required=True, help="final installation torque [kNm]")
     h.add_argument("--pull", type=float, required=True, help="design tension [kN]")
+    h.add_argument("--sensitivity", action="store_true", help="re-check over the ranges of the [U] K_t and FS")
     a = ap.parse_args(argv)
     if a.factors:
         os.environ["TENSILE_FACTORS"] = a.factors
@@ -105,7 +106,24 @@ def main(argv=None):
     else:
         print(f"Factors: {CF.tag('geotech.helical_Kt_per_m')}, {CF.tag('geotech.helical_FS')} — proof-load test required")
         rows, info = helical(a.T, a.pull)
-    return report(rows)
+    w = report(rows)
+    if a.cmd == "helical" and a.sensitivity:
+        helical_sensitivity(a.T, a.pull)
+    return w
+
+
+def helical_sensitivity(T, pull):
+    """utilisation over the K_t and FS ranges, one at a time and both unfavourable."""
+    u = lambda **kw: pull / helical(T, pull, **kw)[0][0][2]   # noqa: E731
+    out = [CF.sensitivity(lambda v: u(Kt=v), "geotech.helical_Kt_per_m"),
+           CF.sensitivity(lambda v: u(FS=v), "geotech.helical_FS")]
+    print("Sensitivity to uncertain factors:")
+    print(CF.sens_line("K_t", out[0]))
+    print(CF.sens_line("FS", out[1]))
+    uw = u(Kt=CF.frange("geotech.helical_Kt_per_m")[0], FS=CF.frange("geotech.helical_FS")[1])
+    print(f"  both unfavourable: util {uw:.2f} -> " + ("still OK" if uw <= 1 else
+          "NOT OK: proof-load test the anchors (or raise the torque / helix size)"))
+    return out, uw
 
 
 if __name__ == "__main__":

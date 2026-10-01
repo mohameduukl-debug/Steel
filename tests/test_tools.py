@@ -348,6 +348,54 @@ class TestFrame2D(unittest.TestCase):
             lam, _ = fr.buckling(fo)
             self.assertAlmostEqual(lam * 30 ** 3 / EI / gam, 1.0, delta=0.04)
 
+    def ring_quarter(self, follower, n=48, R=20.0):
+        # quarter ring with symmetry supports (mode n = 2), inextensible (A × 1e5)
+        fr = frame.Frame()
+        for i in range(n + 1):
+            t = (math.pi / 2) * i / n
+            fr.nodes.append([R * math.sin(t), R * math.cos(t)])
+        fr.supports = {0: (1, 0, 1), n: (0, 1, 1)}
+        fr.add_member("R", list(range(n + 1)), section="CHS:323.9x10", fy=355)
+        for el in fr.elems:
+            el["A"] *= 1e5
+        if follower:
+            fr.pressure = [(ei, -1.0) for ei in range(n)]
+        else:
+            ds = (math.pi / 2) * R / n
+            for i in range(n + 1):
+                t = (math.pi / 2) * i / n
+                w = ds * (0.5 if i in (0, n) else 1.0)
+                fr.nodal[i] = [-math.sin(t) * w, -math.cos(t) * w, 0.0]
+        _, _, fo = fr.linear()
+        lam, _ = fr.buckling(fo)
+        return lam * R ** 3 / (fr.elems[0]["E"] * fr.elems[0]["I"])
+
+    def test_ring_buckling_exact(self):
+        # exact classical ring results: constant-direction pressure 4EI/R³, hydrostatic (follower) 3EI/R³
+        self.assertAlmostEqual(self.ring_quarter(False), 4.0, delta=0.002)
+        self.assertAlmostEqual(self.ring_quarter(True), 3.0, delta=0.002)
+
+    def test_circular_arch_hydrostatic_exact(self):
+        # two-hinged circular arch, uniform hydrostatic pressure: q_cr = (π²/α² − 1)·EI/R³ (Timoshenko & Gere)
+        R = 20.0
+        for deg in (30, 60, 90):
+            al = math.radians(deg)
+            fr = frame.gen_arch(2 * R * math.sin(al), R * (1 - math.cos(al)), 60, "CHS:323.9x10", 355, "pinned",
+                                0.0, shape="circular", p_normal=1.0)
+            for el in fr.elems:
+                el["A"] *= 1e5
+            _, _, fo = fr.linear()
+            lam, _ = fr.buckling(fo)
+            exact = math.pi ** 2 / al ** 2 - 1
+            self.assertAlmostEqual(lam * R ** 3 / (fr.elems[0]["E"] * fr.elems[0]["I"]) / exact, 1.0, delta=1e-3)
+
+    def test_arch_design_uses_lower_alpha(self):
+        res = frame.run(frame.gen_arch(20, 4, 20, "CHS:219.1x8", 355, "pinned", 3.5), quiet=True)
+        self.assertIsNotNone(res["alpha_cr_classical"])
+        self.assertAlmostEqual(res["alpha_cr"], min(res["alpha_cr_fe"], res["alpha_cr_classical"]))
+        EI = self.EI("CHS:219.1x8")
+        self.assertAlmostEqual(res["alpha_cr_classical"], 45.4 * EI / 20 ** 3 / 3.5, places=6)   # f/L = 0.2
+
     def test_second_order_amplification(self):
         # pinned column, midspan point load, N = 0.5 Ncr: M2/M1 = tan(u)/u, u = (π/2)√(N/Ncr)
         fr = frame.gen_mast(8, 16, 219.1, 219.1, 219.1, 8, 355, "pinned", 1.0, 0.0, [])
@@ -446,7 +494,7 @@ class TestSensitivity(unittest.TestCase):
 
     def test_every_unverified_factor_has_a_range(self):
         for path, e in CF.iter_entries():
-            if e["status"] == "U" and "value" in e and isinstance(e["value"], (int, float)):
+            if e["status"] == "U":
                 self.assertIsNotNone(CF.frange(path), path)
                 lo, hi = CF.frange(path)
                 self.assertLessEqual(lo, hi, path)
@@ -479,6 +527,32 @@ class TestSensitivity(unittest.TestCase):
         res = quiet(fat.cable_sensitivity, spec, "dsC_spiral_socket", 1.35, 1.0, 4.0)
         lo = CF.frange("fatigue_cables.dsC_spiral_socket")[0]
         self.assertAlmostEqual(res[0]["u_lo"], fat.check(spec, lo, 1.35, 1.0, 4.0)[0])
+
+    def test_helical_and_aluminium_sensitivity(self):
+        out, uw = quiet(found.helical_sensitivity, 12.0, 120.0)
+        Kt_lo, FS_hi = CF.frange("geotech.helical_Kt_per_m")[0], CF.frange("geotech.helical_FS")[1]
+        self.assertAlmostEqual(uw, 120.0 / (Kt_lo * 12.0 / FS_hi))
+        self.assertTrue(out[0]["robust"] and out[1]["robust"])
+        self.assertGreater(uw, 1.0)                                    # combined worst case fails: shown to the user
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            joint.main(["clampbar", "--n", "12", "--spacing", "150", "--d", "12", "--t", "10", "--plate", "alu6082",
+                        "--sensitivity"])
+        self.assertIn("aluminium bearing", buf.getvalue())
+
+    def test_report_sensitivity_section(self):
+        rep = load("tensile-structures", "report")
+        tmp = tempfile.mkdtemp()
+        p = os.path.join(tmp, "s")
+        quiet(fdm.main, ["sail4", "--n", "8", "--prestress", "2", "--out", p])
+        cf = os.path.join(tmp, "c.json")
+        with open(cf, "w") as fh:
+            json.dump({"cases": [{"name": "PS"}, {"name": "S", "snow": 0.5, "duration": "long"}]}, fh)
+        quiet(cases.main, [p + ".json", cf, "--out", os.path.join(tmp, "k")])
+        md = quiet(rep.main, ["--model", p + ".json", "--cases", os.path.join(tmp, "k_envelope.json"),
+                              "--material", "PVC-II", "--method", "partial", "--out", os.path.join(tmp, "r")])
+        self.assertIn("## Sensitivity to uncertain factors", md)
+        self.assertIn("`membrane.partial`", md)
 
     def test_schedule_sls_sensitivity(self):
         s = {"cables": [{"id": "C1", "A": 100.0, "E": 160.0, "Fmin": 150.0, "L_stressed": 10.0, "F_SLS": 60.0}]}

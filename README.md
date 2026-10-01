@@ -57,7 +57,7 @@ Every code value (partial factors, stress factors, γR, k_e, SLS limits …) sit
 `.claude/skills/tensile-structures/reference/code_factors.json`, tagged V/C/U. Override it per project with
 `--factors project.json` or `TENSILE_FACTORS=project.json`. Run `factors.py report` to list unverified values.
 Each uncertain factor carries a `range`. The `--sensitivity` option (membrane_check, cable_calc, cable_schedule,
-fatigue_check) re-runs the check at both ends of the range and reports ROBUST (the decision does not depend on the
+fatigue_check, foundation_check, steel_joint_checks) re-runs the check at both ends of the range and reports ROBUST (the decision does not depend on the
 factor) or DEPENDS (confirm the value before issue).
 
 ## Using the skills in Claude Code
@@ -76,6 +76,9 @@ Claude loads `tensile-structures` first and then the specialist skills and tools
 * Catenary matches the parabola for small sag; T_B − T_A = w·h.
 * A flat (developable) panel flattens with zero strain and exact area.
 * Every generated DXF was opened with `ezdxf` recover/audit (0 errors) and rendered for visual checks.
+* frame2d reproduces exact classical buckling solutions: ring 4EI/R³ (dead) and 3EI/R³ (hydrostatic follower), and
+  two-hinged circular arches (π²/α² − 1)EI/R³, all within 0.1 %. For parabolic arches it differs by −0.5 … +8 %
+  from the Timoshenko & Gere table, so arch design uses the lower of the two α_cr values.
 * Cable force from frequencies recovers T and EI exactly. The Irvine correction recovers T when λ² ≈ 190 (the string
   model is 3.5× off) and reproduces Irvine's crossover ω̄ = 2π at λ² = 4π². ISO 898-1 stress areas match.
 * The panel frequency reduces to the classical rectangular-membrane result when the added mass is zero.
