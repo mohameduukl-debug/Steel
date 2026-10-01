@@ -51,6 +51,9 @@ python3 "$S/cable-tension-members/scripts/cable_calc.py" stress-turns --L 10.44 
 python3 "$S/cable-tension-members/scripts/cable_calc.py" freq-tension --L 10.44 --m 1.3 --EA 14000 \
         --f 1:6.22 --f 2:12.4 --f 3:18.7
 
+echo; echo "== 5a. Connection precedents: Pinterest search plan before designing the corner =="
+python3 "$S/connection-precedents/scripts/precedent_search.py" queries corner-plate --material PVC | sed -n 1,12p
+
 echo; echo "== 5. Corner plate resolution + pin/lug check (corner forces from the uplift run) =="
 python3 "$S/tensile-connections/scripts/corner_plate.py" --m EC1:15:83:180:48 --m EC2:105:83:-48:180 \
         --m strap:60:6:100:173

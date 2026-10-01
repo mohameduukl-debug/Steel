@@ -51,6 +51,7 @@ dxfw = load("fabrication-drawings", "dxf_writer")
 nestm = load("fabrication-drawings", "nest_panels")
 msel = load("membrane-fabric", "material_select")
 CF = load("tensile-structures", "factors")
+prec = load("connection-precedents", "precedent_search")
 
 
 class TestFormFinding(unittest.TestCase):
@@ -864,6 +865,43 @@ class TestSkillConsistency(unittest.TestCase):
                 if f.endswith(".py") and f != "factors.py":
                     src = open(os.path.join(sdir, f)).read()
                     self.assertIsNone(re.search(r"def \w+\([^)]*gM[0-9]\w*=\s*1\.", src), f"{d}/{f}")
+
+
+class TestPrecedents(unittest.TestCase):
+    def test_every_node_has_queries_and_valid_checks(self):
+        lib = prec.load_library()
+        for node in lib["nodes"]:
+            plan = prec.build_queries(node, lib=lib)
+            self.assertTrue(plan["websearch"], node)
+            self.assertTrue(all(w["allowed_domains"] == ["pinterest.com"] for w in plan["websearch"]))
+            self.assertTrue(all(u.startswith("https://www.pinterest.com/search/pins/?q=") for u in plan["pinterest_urls"]))
+            for c in plan["checks"]:  # every referenced tool must exist
+                skill, script = c.split()[0].split("/")
+                self.assertTrue(os.path.exists(os.path.join(SK, skill, "scripts", script)), c)
+
+    def test_material_prefix_and_url_encoding(self):
+        plan = prec.build_queries("corner-plate", material="PTFE")
+        self.assertTrue(plan["websearch"][0]["query"].startswith("PTFE "))
+        self.assertIn("PTFE%20tensile%20membrane%20corner%20plate", plan["pinterest_urls"][0])
+        with self.assertRaises(KeyError):
+            prec.build_queries("no-such-node")
+
+    def test_board_ranking_ideas_and_flags(self):
+        data = prec.template("corner-plate")
+        good = {k: "yes" for k in prec.FEATURES}
+        bad = dict(good, concurrent="no", isolation="no")
+        data["precedents"] = [
+            {"title": "A", "url": "https://pin/a", "ideas": ["strap on bisector", "belt tensioner"], "features": bad},
+            {"title": "B", "url": "https://pin/b", "ideas": ["strap on bisector"], "features": good},
+        ]
+        md, summ = prec.make_board(data)
+        self.assertEqual(summ["ranking"], [2, 1])
+        self.assertEqual(summ["ideas"]["strap on bisector"], [1, 2])
+        self.assertIn((1, "concurrent"), summ["red_flags"])
+        self.assertIn("eccentric node", md)
+        self.assertIn("tensile-connections/corner_plate.py", md)
+        with self.assertRaises(ValueError):
+            prec.make_board(prec.template("mast-head"))
 
 
 class TestReport(unittest.TestCase):
