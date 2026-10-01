@@ -68,8 +68,9 @@ python3 fatigue_check.py --cable spiral_socket --spectrum 60:2e6 --sensitivity  
 | Ground | helical, rock, deadman, tension piles | uplift, proof test, anchor on cable line |
 
 ## Design procedure for any node
-0. **Precedents first**: run the `connection-precedents` skill (search Pinterest for similar details, build the
-   precedent board, agree a concept with the user). Then size that concept with the steps below.
+0. **Precedents first**: run the `connection-precedents` skill (search Pinterest, view and score the images, precedent
+   board, concept agreed with the user, `precedent_search.py check` = PASS). Then size that concept with the steps below.
+   A project hook blocks the tools of this skill until the gate has passed.
 1. Collect **concurrent** forces for every combination at the node (from the non-linear analysis).
 2. Set the geometry so **all lines of action meet at one point** (corner-plate pin, mast axis). Check it with `corner_plate.py`.
 3. Put each plate **in the plane of the force(s)** it receives (use a toggle or cardan where the plane changes).

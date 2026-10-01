@@ -1,53 +1,71 @@
 ---
 name: connection-precedents
-description: Mandatory first step before designing any steel or fabric connection in a tensile structure (corner plate, mast head or base, edge-cable clamp, keder or clamp bar, bale ring, cable fork/lug, tensioner, ridge/valley, saddle, arch attachment, ground anchor, low point). Search Pinterest for similar built details, collect 5–10 precedents, take the ideas worth using and list the mistakes not to copy (precedent board), then design and verify with tensile-connections. Use whenever the user asks to design, detail, sketch or improve a connection (وصلة معدنية، وصلة قماش، تفصيلة).
+description: Mandatory first step before designing any steel or fabric connection in a tensile structure (corner plate, mast head or base, edge-cable clamp, keder or clamp bar, bale ring, cable fork/lug, tensioner, ridge/valley, saddle, arch attachment, ground anchor, low point). Search Pinterest for similar built details, download and view the images, score them, take the ideas worth using and list the mistakes not to copy (precedent board), agree a concept, pass the gate, then size it with tensile-connections. Use whenever the user asks to design, detail, sketch or improve a connection (وصلة معدنية، وصلة قماش، تفصيلة).
 ---
 
 # Connection precedents: look at Pinterest first, then design
 
-Rule: **before designing any metal connection or fabric connection, search Pinterest for similar details and take
-ideas from them.** Only then size it with `tensile-connections` (and the other specialist skills). The precedents give
-the form; our forces and the tools give the dimensions.
+Rule: **before designing any metal connection or fabric connection, search Pinterest for similar details, look at the
+pictures and take ideas from them.** Only then size the connection with `tensile-connections`. The precedents give the form;
+our forces and the tools give the dimensions. Project hooks enforce this (see Enforcement).
 
 ## Workflow
-1. **Define the node.** Interface (fabric ↔ cable ↔ steel), number and directions of the forces, material (PVC/PTFE/ETFE,
-   galvanised/stainless), and whether it must be adjustable or replaceable. Pick the node type:
-   `python3 scripts/precedent_search.py list`.
-2. **Build the search plan.**
+1. **Define the node**: interface (fabric ↔ cable ↔ steel), forces and directions, material, project scale
+   (sail / canopy / roof / stadium), adjustable or replaceable. `python3 scripts/precedent_search.py list`.
+2. **Search plan**: `python3 scripts/precedent_search.py queries corner-plate --material PVC`.
+   It prints primary, variant and Arabic queries, the fetch command, fallback domains, and the features that do not apply to the node.
+3. **Search**: `WebSearch` with `allowed_domains: ["pinterest.com"]`. Run the primary queries, at least one variant and one Arabic
+   query. Arabic: use the market term "مظلات شد إنشائي" plus the node word. Literal terms ("وصلة ركن") return tents and furniture.
+   The Arabic results are mostly contractor photos (form, regional practice, typical local mistakes).
+4. **Fetch and view**: pass the pin, board and ideas URLs from the results:
    ```bash
-   python3 scripts/precedent_search.py queries corner-plate --material PTFE
+   python3 scripts/pinterest_fetch.py probe        # mode A (fetch here) or B (ask the user for screenshots)
+   python3 scripts/pinterest_fetch.py fetch <URL> ... --node corner-plate --out prec_corner --details
    ```
-   It prints the WebSearch queries, the Pinterest search URLs and the fallback queries (`--json` for machine use).
-   The keyword library is `reference/search_keywords.json` (English plus Arabic terms, alternative solutions, and the checks for each node).
-3. **Search Pinterest.** Run `WebSearch` with `allowed_domains: ["pinterest.com"]` for the primary queries plus at least one
-   variant (different solution) and one Arabic query. Open boards or pins with `WebFetch` when the network allows. In some
-   environments pinterest.com cannot be fetched. Then work from the search titles/snippets, give the user the Pinterest
-   URLs from step 2, and ask them to share screenshots or pin links. Read the images they send.
-   If Pinterest gives fewer than 5 useful precedents, use the fallback queries (manufacturer galleries, TensiNet, project pages).
-4. **Review each precedent** with `reference/precedent-review.md`. Write down the ideas worth taking, and mark each
-   feature yes / no / ? (concurrency, plate in cable plane, rotation, adjustment, membrane-safe edges, drainage,
-   bimetallic isolation, replaceability).
-   ```bash
-   python3 scripts/precedent_search.py template corner-plate > precedents.json   # fill it in
-   python3 scripts/precedent_search.py board precedents.json --out corner_board
-   ```
-   The board ranks the precedents, groups the ideas, lists the red flags not to copy, gives the design checklist and
-   names the tools that must verify the chosen idea.
-5. **Show the board to the user** with links to the sources, and propose 1–3 concept options (each idea traced to its precedent #).
-   Agree on one.
-6. **Design and verify** with `tensile-connections` (design procedure steps 1–8: `corner_plate.py`, `pin_connection.py`,
-   `steel_joint_checks.py`, `fatigue_check.py`), then draw with `fabrication-drawings`.
+   It saves `NN_<pin>.jpg` and `precedents.json`. Shop listings go last. Pinterest search pages need a login, so use the
+   WebSearch results. **Open every image you judge with the Read tool.** Never judge a pin from its title.
+   If fewer than 5 relevant pins, use the fallback domains (Architen, Birdair, TensiNet, Fabritecture, Pfeifer, Macalloy …).
+   In mode B, give the user the Pinterest URLs and read the screenshots they send.
+5. **Review** each viewed image with `reference/precedent-review.md`. Set `viewed`, `kind` (photo, shop_drawing,
+   manufacturer, sketch, render, product, infographic, ai_generated), `scale`, `relevant`, the `ideas`, and the features
+   yes / no / ? / n/a. Mark off-topic pins `relevant: false`.
+6. **Board**: `python3 scripts/precedent_search.py board prec_corner/precedents.json --out corner_board`.
+   - Weighted score: critical ×3 (concurrency, plate in plane, membrane-safe), ×2 (rotation, adjustment), ×1 (drainage, isolation, replacement).
+   - Evidence factor by image type (photo 1.0 … AI image 0.2).
+   - "form only" for a critical red flag, a scale gap of 2 or more, or an infographic/AI image.
+   - Unreviewed pins are listed and not used.
+7. **Concept**: propose 1–3 options to the user. Every idea is traced to precedent numbers (`from`). An idea is marked
+   `detail: true` only when taken from an "ideas + details" precedent. Write the agreed concept into `concept`, with its
+   features (all critical = yes).
+8. **Gate**: `python3 scripts/precedent_search.py check prec_corner/precedents.json` must PASS:
+   - ≥ 3 searches, including Arabic and variant;
+   - ≥ 5 relevant viewed precedents, ≥ 3 of them real evidence;
+   - critical features judged;
+   - concept traced, no detail copied from a form-only precedent, all critical features satisfied.
+
+   A pass is recorded in `.claude/state/precedent_gate.json`.
+9. **Design and verify** with `tensile-connections` (`corner_plate.py`, `pin_connection.py`, `steel_joint_checks.py`,
+   `fatigue_check.py`), then draw with `fabrication-drawings`. Keep the board `.md` with the calculation report.
+
+## Enforcement (project hooks, `.claude/settings.json`)
+- `.claude/hooks/precedent_reminder.py` (UserPromptSubmit) adds this rule to connection-design prompts, English or Arabic.
+- `.claude/hooks/precedent_gate.py` (PreToolUse, Bash) blocks `pin_connection.py`, `corner_plate.py`,
+  `steel_joint_checks.py`, `fatigue_check.py` and `steel_part_dxf.py` until a gate has passed in the last 24 h.
+  Prefix `PRECEDENTS_SKIP=1` only when the user said to skip the precedent step, or to re-check an existing design. Say so when you do.
+  `bash examples/run_demo.sh` and the unit tests are not affected.
 
 ## Rules
-- A picture is not a design. Never take a plate thickness, pin diameter, weld or bolt size from a photo; size
+- A picture is not a design. Never take a plate thickness, pin diameter, weld or bolt size from a photo. Size
   everything from the analysis forces with the tools.
-- Precedents are often small shade sails. Check that the scale and the load level match before taking an idea for a large roof.
-- Photos show the good and the bad. Many built details are eccentric, have no adjustment or trap water. List them under red flags.
-- Respect copyright and proprietary products: cite and link the pins, and do not paste their images into our drawings.
-  Proprietary hardware (forks, sockets, keder profiles) comes from the supplier's data.
-- Record in the report what was searched and which precedent each idea came from (keep the board `.md`).
-- Every script prints its assumptions. Pass them on, and say clearly that this step finds ideas, not code compliance.
+- Small shade-sail hardware (rings, shackles, carabiners, eye bolts) is "form only" for permanent structures.
+- AI-generated images and infographics are not evidence. They do not count toward the gate.
+- Respect copyright: images are downloaded only for private review. Cite and link the pins, and never paste their images into
+  drawings or reports. Proprietary hardware comes from the supplier's data.
+- Every script prints its assumptions. Pass them on, and state that this step finds ideas, not code compliance.
 
 ## References
-- `reference/search_keywords.json`: node types, English/Arabic search phrases, variant solutions, tools to verify.
-- `reference/precedent-review.md`: how to read a connection photo, the feature checklist, typical red flags, mapping to checks.
+- `reference/search_keywords.json`: 14 node types, English/Arabic queries (Arabic tested 2026-10), variants, n/a features,
+  checks, fallback domains with reachability.
+- `reference/precedent-review.md`: how to read a connection picture, image types, scale, feature weights, typical red flags.
+- `reference/worked-example-corner.md`: the board of a real search for the demo sail corner (20 pins, 13 viewed,
+  gate passed, concept verified with corner_plate.py at 0.3 mm eccentricity). Data: `examples/precedents_corner_example.json`.

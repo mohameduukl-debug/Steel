@@ -55,7 +55,7 @@ Key couplings:
 | 5 | Membrane checks | material choice, fabric/seam utilisation per case, tear, corners, panel frequency, ETFE | `membrane-fabric` → `material_select.py`, `membrane_check.py --envelope --sensitivity` |
 | 6 | Cables | F_Rd, SLS, rods, clamps, saddles, fatigue, schedule with unstressed lengths, stressing turns, force from frequencies | `cable-tension-members` → `cable_calc.py`, `cable_schedule.py --envelope` |
 | 7 | Steel supports | members (CHS/RHS/I, LTB, class 4), arch/mast stability (α_cr, 2nd order), foundations | `steel-supports` → `member_check.py`, `frame2d.py`, `foundation_check.py` (`mast_check.py` quick) |
-| 8a | Connection precedents (always before 8) | Pinterest precedent board, ideas and red flags, agreed concept | `connection-precedents` → `precedent_search.py` |
+| 8a | Connection precedents (always before 8) | Pinterest search, images viewed and scored, precedent board, agreed concept, gate PASS | `connection-precedents` → `pinterest_fetch.py`, `precedent_search.py` |
 | 8 | Connections | pins/lugs, corner plates, welds, bolts, base plates, EN 1992-4 anchors, aluminium clamps, fatigue | `tensile-connections` → `pin_connection.py`, `corner_plate.py`, `steel_joint_checks.py`, `fatigue_check.py` |
 | 9 | Patterning | geodesic seams, compensation/decompensation, auto-split, notches, panel sheets, nesting | `fabrication-drawings` → `cutting_pattern.py`, `nest_panels.py` |
 | 10 | Drawings | GA/setting-out DXF, steel part drawings with weld symbols | `fabrication-drawings` → `export_dxf.py`, `steel_part_dxf.py`, `dxf_writer.py` |

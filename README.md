@@ -14,6 +14,8 @@ the fabric, the cables and the structural steel, and how the three connect.
 │   └── scripts/cable_calc.py, cable_schedule.py
 ├── steel-supports/         masts, struts, arches, rings, bases, foundations/anchors
 │   └── scripts/member_check.py, frame2d.py, foundation_check.py, mast_check.py
+├── connection-precedents/  FIRST step for any connection: Pinterest precedent search, image review, board, gate
+│   └── scripts/precedent_search.py, pinterest_fetch.py
 ├── tensile-connections/    fabric↔cable, fabric↔steel, cable↔steel; pins/lugs; corner plates; mast heads
 │   └── scripts/pin_connection.py, corner_plate.py, steel_joint_checks.py, fatigue_check.py
 ├── tensile-analysis/       form finding (FDM, DR, URS), non-linear load analysis, software guide
@@ -51,6 +53,17 @@ python3 $S/cable-tension-members/scripts/cable_calc.py edge --chord 10 --sag 1 -
 python3 $S/tensile-connections/scripts/pin_connection.py --F 250 --Fser 170 --d 40 --d0 41 --t 20 --a-lug 50 --c-lug 35 --replaceable --aisc
 python3 $S/fabrication-drawings/scripts/cutting_pattern.py cone.json --strip 2 --comp-warp 0.5 --comp-weft 2 --out cone_patterns
 ```
+
+## Precedents before connection design
+No connection is sized before similar built details have been looked at. The `connection-precedents` skill searches
+Pinterest (WebSearch filtered to pinterest.com, English, Arabic and variant queries), downloads the pins and images
+(`pinterest_fetch.py`), records a weighted review of each image (concurrency, plate in cable plane, membrane-safe
+edges, rotation, adjustment, drainage, isolation, replaceability; image type; scale) and builds a precedent board.
+`precedent_search.py check` is the gate. Project hooks in `.claude/settings.json` remind Claude of the rule on
+connection prompts and block `pin_connection.py`, `corner_plate.py`, `steel_joint_checks.py`, `fatigue_check.py` and
+`steel_part_dxf.py` until a gate has passed in the last 24 h (`PRECEDENTS_SKIP=1` for re-checking an existing design).
+Worked example: `examples/precedents_corner_example.json` and
+`.claude/skills/connection-precedents/reference/worked-example-corner.md`.
 
 ## Code factors
 Every code value (partial factors, stress factors, γR, k_e, SLS limits …) sits in one register,

@@ -53,6 +53,9 @@ python3 "$S/cable-tension-members/scripts/cable_calc.py" freq-tension --L 10.44 
 
 echo; echo "== 5a. Connection precedents: Pinterest search plan before designing the corner =="
 python3 "$S/connection-precedents/scripts/precedent_search.py" queries corner-plate --material PVC | sed -n 1,12p
+python3 "$S/connection-precedents/scripts/precedent_search.py" board "$HERE/precedents_corner_example.json" \
+        --out corner_precedent_board | sed -n '/## Precedents/,/Off-topic/p'
+python3 "$S/connection-precedents/scripts/precedent_search.py" check "$HERE/precedents_corner_example.json" --no-record
 
 echo; echo "== 5. Corner plate resolution + pin/lug check (corner forces from the uplift run) =="
 python3 "$S/tensile-connections/scripts/corner_plate.py" --m EC1:15:83:180:48 --m EC2:105:83:-48:180 \

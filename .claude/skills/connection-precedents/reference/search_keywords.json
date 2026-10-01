@@ -1,104 +1,392 @@
 {
-  "_note": "Search vocabulary per connection type, used to search for precedents before design. 'en' are the main search phrases (Pinterest indexes English best), 'ar' are Arabic phrases for regional boards, 'variants' are alternative solutions worth searching too, 'checks' maps the node to the repo tools that must verify any idea taken from a picture.",
-  "_suffixes": ["detail", "connection detail", "close up", "shop drawing"],
+  "_note": "Search vocabulary per connection type. 'en': main phrases (Pinterest indexes English best). 'ar': Arabic phrases tested on Pinterest in 2026-10: the regional market term is 'مظلات شد إنشائي' (literal technical terms such as 'وصلة ركن' return tents and furniture); Arabic results are mostly contractor photos of finished canopies, useful for overall form and regional practice, rarely for details. 'variants': alternative solutions to search too. 'na': checklist features that do not apply to this node. 'checks': repo tools that must verify any idea.",
+  "_suffixes": [
+    "detail",
+    "connection detail",
+    "close up",
+    "shop drawing"
+  ],
   "nodes": {
     "corner-plate": {
       "title": "Membrane corner plate (edge cables + strap to anchor/mast)",
-      "en": ["tensile membrane corner plate", "shade sail corner plate", "membrane corner fitting", "tensile fabric corner detail"],
-      "ar": ["وصلة ركن خيمة شد", "بليتة ركن مظلة قماش"],
-      "variants": ["corner plate with belt tensioner", "keder corner clamp plate", "stainless corner plate PTFE membrane"],
-      "checks": ["tensile-connections/corner_plate.py", "tensile-connections/pin_connection.py", "membrane-fabric/membrane_check.py --corner"]
+      "en": [
+        "tensile membrane corner plate",
+        "shade sail corner plate",
+        "membrane corner fitting",
+        "tensile fabric corner detail"
+      ],
+      "ar": [
+        "مظلات شد إنشائي تفاصيل الأركان",
+        "بليتة ركن مظلات شد إنشائي"
+      ],
+      "variants": [
+        "corner plate with belt tensioner",
+        "keder corner clamp plate",
+        "stainless corner plate PTFE membrane"
+      ],
+      "checks": [
+        "tensile-connections/corner_plate.py",
+        "tensile-connections/pin_connection.py",
+        "membrane-fabric/membrane_check.py --corner"
+      ],
+      "na": []
     },
     "mast-head": {
       "title": "Mast head (radiating cables / membrane peak)",
-      "en": ["tensile structure mast head detail", "mast head cable connection", "membrane mast top detail"],
-      "ar": ["رأس عمود خيمة شد", "تفصيلة رأس صاري"],
-      "variants": ["flying mast head", "mast head ear plates", "mast cap ring plate cables"],
-      "checks": ["tensile-connections/pin_connection.py", "tensile-connections/steel_joint_checks.py weld", "steel-supports/mast_check.py"]
+      "en": [
+        "tensile structure mast head detail",
+        "mast head cable connection",
+        "membrane mast top detail"
+      ],
+      "ar": [
+        "رأس عمود مظلات شد إنشائي",
+        "مظلات شد إنشائي أعمدة وكابلات"
+      ],
+      "variants": [
+        "flying mast head",
+        "mast head ear plates",
+        "mast cap ring plate cables"
+      ],
+      "checks": [
+        "tensile-connections/pin_connection.py",
+        "tensile-connections/steel_joint_checks.py weld",
+        "steel-supports/mast_check.py"
+      ],
+      "na": []
     },
     "mast-base": {
       "title": "Mast base hinge / base plate",
-      "en": ["tensile structure mast base hinge", "pinned column base detail steel", "mast base pin connection"],
-      "ar": ["قاعدة عمود مفصلية", "تفصيلة قاعدة صاري"],
-      "variants": ["spherical bearing column base", "cardan base hinge", "base plate anchor bolts canopy column"],
-      "checks": ["tensile-connections/steel_joint_checks.py baseplate", "tensile-connections/steel_joint_checks.py anchor", "tensile-connections/pin_connection.py"]
+      "en": [
+        "tensile structure mast base hinge",
+        "pinned column base detail steel",
+        "mast base pin connection"
+      ],
+      "ar": [
+        "قاعدة عمود مظلات شد إنشائي",
+        "قواعد أعمدة المظلات"
+      ],
+      "variants": [
+        "spherical bearing column base",
+        "cardan base hinge",
+        "base plate anchor bolts canopy column"
+      ],
+      "checks": [
+        "tensile-connections/steel_joint_checks.py baseplate",
+        "tensile-connections/steel_joint_checks.py anchor",
+        "tensile-connections/pin_connection.py"
+      ],
+      "na": []
     },
     "edge-cable-clamp": {
       "title": "Fabric to edge cable (pocket, clamp plates, belts)",
-      "en": ["membrane edge cable clamp", "catenary edge cable pocket", "PTFE membrane edge clamp plate", "fabric edge cable detail"],
-      "ar": ["كابل حافة القماش", "جيب كابل خيمة"],
-      "variants": ["webbing belt edge membrane", "cable pocket membrane edge", "aluminium clamp plate catenary edge"],
-      "checks": ["cable-tension-members/cable_calc.py edge", "cable-tension-members/cable_calc.py clamp", "tensile-connections/steel_joint_checks.py clampbar"]
+      "en": [
+        "membrane edge cable clamp",
+        "catenary edge cable pocket",
+        "PTFE membrane edge clamp plate",
+        "fabric edge cable detail"
+      ],
+      "ar": [
+        "كابل حافة مظلات شد إنشائي",
+        "مظلات شد إنشائي كابلات"
+      ],
+      "variants": [
+        "webbing belt edge membrane",
+        "cable pocket membrane edge",
+        "aluminium clamp plate catenary edge"
+      ],
+      "checks": [
+        "cable-tension-members/cable_calc.py edge",
+        "cable-tension-members/cable_calc.py clamp",
+        "tensile-connections/steel_joint_checks.py clampbar"
+      ],
+      "na": [
+        "concurrent"
+      ]
     },
     "keder-track": {
       "title": "Fabric to steel: keder rail / track",
-      "en": ["keder rail membrane detail", "keder profile steel connection", "aluminium keder track tensile"],
-      "ar": ["كيدر قماش", "مجرى كيدر ألومنيوم"],
-      "variants": ["adjustable keder track studs", "keder arch membrane connection"],
-      "checks": ["tensile-connections/steel_joint_checks.py clampbar", "membrane-fabric/membrane_check.py"]
+      "en": [
+        "keder rail membrane detail",
+        "keder profile steel connection",
+        "aluminium keder track tensile"
+      ],
+      "ar": [
+        "كيدر مظلات شد إنشائي",
+        "تثبيت قماش المظلات على الحديد"
+      ],
+      "variants": [
+        "adjustable keder track studs",
+        "keder arch membrane connection"
+      ],
+      "checks": [
+        "tensile-connections/steel_joint_checks.py clampbar",
+        "membrane-fabric/membrane_check.py"
+      ],
+      "na": [
+        "concurrent",
+        "rotation"
+      ]
     },
     "clamp-bar": {
       "title": "Fabric to steel: flat clamp bar",
-      "en": ["membrane clamp bar detail", "fabric clamping plate steel beam", "tensile fabric clamp strip bolts"],
-      "ar": ["شريحة تثبيت قماش", "كلامب قماش على حديد"],
-      "variants": ["stainless clamp bar membrane gutter", "clamp bar with keder"],
-      "checks": ["tensile-connections/steel_joint_checks.py clampbar", "tensile-connections/steel_joint_checks.py bolts"]
+      "en": [
+        "membrane clamp bar detail",
+        "fabric clamping plate steel beam",
+        "tensile fabric clamp strip bolts"
+      ],
+      "ar": [
+        "تثبيت قماش المظلات على الحديد",
+        "شريحة تثبيت قماش PVC"
+      ],
+      "variants": [
+        "stainless clamp bar membrane gutter",
+        "clamp bar with keder"
+      ],
+      "checks": [
+        "tensile-connections/steel_joint_checks.py clampbar",
+        "tensile-connections/steel_joint_checks.py bolts"
+      ],
+      "na": [
+        "concurrent",
+        "rotation"
+      ]
     },
     "bale-ring": {
       "title": "Cone top: bale ring / ring plate",
-      "en": ["tensile cone bale ring detail", "membrane cone top ring", "conical tensile structure ring detail"],
-      "ar": ["حلقة قمة الخيمة المخروطية", "رنج قمة مخروط"],
-      "variants": ["suspended ring cone membrane", "bale ring with rain cap"],
-      "checks": ["steel-supports/member_check.py", "tensile-connections/steel_joint_checks.py clampbar", "tensile-connections/steel_joint_checks.py weld"]
+      "en": [
+        "tensile cone bale ring detail",
+        "membrane cone top ring",
+        "conical tensile structure ring detail"
+      ],
+      "ar": [
+        "مظلات شد إنشائي مخروطية",
+        "حلقة قمة المظلة المخروطية"
+      ],
+      "variants": [
+        "suspended ring cone membrane",
+        "bale ring with rain cap"
+      ],
+      "checks": [
+        "steel-supports/member_check.py",
+        "tensile-connections/steel_joint_checks.py clampbar",
+        "tensile-connections/steel_joint_checks.py weld"
+      ],
+      "na": [
+        "rotation"
+      ]
     },
     "cable-end-fork": {
       "title": "Cable to steel: fork / clevis + pin + lug",
-      "en": ["cable fork terminal lug plate", "clevis pin gusset connection cable", "tension rod fork connection steel"],
-      "ar": ["فورك كابل على بليتة", "وصلة كابل بمسمار"],
-      "variants": ["open spelter socket gusset", "macalloy fork connection", "cable eye terminal lug"],
-      "checks": ["tensile-connections/pin_connection.py", "tensile-connections/steel_joint_checks.py weld", "tensile-connections/fatigue_check.py"]
+      "en": [
+        "cable fork terminal lug plate",
+        "clevis pin gusset connection cable",
+        "tension rod fork connection steel"
+      ],
+      "ar": [
+        "تركيب كابلات مظلات شد إنشائي",
+        "فورك كابل ستانلس"
+      ],
+      "variants": [
+        "open spelter socket gusset",
+        "macalloy fork connection",
+        "cable eye terminal lug"
+      ],
+      "checks": [
+        "tensile-connections/pin_connection.py",
+        "tensile-connections/steel_joint_checks.py weld",
+        "tensile-connections/fatigue_check.py"
+      ],
+      "na": []
     },
     "tensioner": {
       "title": "Tensioning device (turnbuckle, adjustable fork, corner screw)",
-      "en": ["turnbuckle tensile structure", "shade sail tensioner detail", "cable adjuster fork tensioning"],
-      "ar": ["شداد كابل", "مشد خيمة"],
-      "variants": ["threaded rod corner tensioner membrane", "adjustable socket cable"],
-      "checks": ["cable-tension-members/cable_calc.py stress-turns", "cable-tension-members/cable_calc.py rod"]
+      "en": [
+        "turnbuckle tensile structure",
+        "shade sail tensioner detail",
+        "cable adjuster fork tensioning"
+      ],
+      "ar": [
+        "شداد كابل مظلات",
+        "مشد كابل ستانلس مظلات"
+      ],
+      "variants": [
+        "threaded rod corner tensioner membrane",
+        "adjustable socket cable"
+      ],
+      "checks": [
+        "cable-tension-members/cable_calc.py stress-turns",
+        "cable-tension-members/cable_calc.py rod"
+      ],
+      "na": []
     },
     "ridge-valley": {
       "title": "Ridge / valley cable over membrane",
-      "en": ["valley cable membrane detail", "ridge cable tensile roof", "cable over membrane clamp"],
-      "ar": ["كابل وادي خيمة", "كابل سنام القماش"],
-      "variants": ["valley cable with cover flap", "ridge cable saddle"],
-      "checks": ["cable-tension-members/cable_calc.py clamp", "cable-tension-members/cable_calc.py edge"]
+      "en": [
+        "valley cable membrane detail",
+        "ridge cable tensile roof",
+        "cable over membrane clamp"
+      ],
+      "ar": [
+        "مظلات شد إنشائي هرمية كابلات",
+        "كابل وادي مظلات شد"
+      ],
+      "variants": [
+        "valley cable with cover flap",
+        "ridge cable saddle"
+      ],
+      "checks": [
+        "cable-tension-members/cable_calc.py clamp",
+        "cable-tension-members/cable_calc.py edge"
+      ],
+      "na": [
+        "concurrent"
+      ]
     },
     "cable-saddle": {
       "title": "Cable saddle / cross clamp",
-      "en": ["cable saddle steel detail", "cable net cross clamp", "cable clamp casting"],
-      "ar": ["سرج كابل", "كلامب تقاطع كابلات"],
-      "variants": ["cast cable clamp node", "saddle on mast cable"],
-      "checks": ["cable-tension-members/cable_calc.py clamp"]
+      "en": [
+        "cable saddle steel detail",
+        "cable net cross clamp",
+        "cable clamp casting"
+      ],
+      "ar": [
+        "كلامب كابلات مظلات شد",
+        "سرج كابل ستانلس"
+      ],
+      "variants": [
+        "cast cable clamp node",
+        "saddle on mast cable"
+      ],
+      "checks": [
+        "cable-tension-members/cable_calc.py clamp"
+      ],
+      "na": [
+        "adjustable"
+      ]
     },
     "arch-membrane": {
       "title": "Membrane to arch / tube",
-      "en": ["membrane to steel arch connection", "tensile arch fabric attachment", "fabric to tube connection lacing"],
-      "ar": ["تثبيت القماش على قوس حديد"],
-      "variants": ["keder on arch tube", "lacing membrane to pipe"],
-      "checks": ["steel-supports/frame2d.py", "tensile-connections/steel_joint_checks.py clampbar"]
+      "en": [
+        "membrane to steel arch connection",
+        "tensile arch fabric attachment",
+        "fabric to tube connection lacing"
+      ],
+      "ar": [
+        "مظلات شد إنشائي أقواس",
+        "تثبيت القماش على قوس حديد"
+      ],
+      "variants": [
+        "keder on arch tube",
+        "lacing membrane to pipe"
+      ],
+      "checks": [
+        "steel-supports/frame2d.py",
+        "tensile-connections/steel_joint_checks.py clampbar"
+      ],
+      "na": [
+        "concurrent",
+        "rotation"
+      ]
     },
     "ground-anchor": {
       "title": "Ground anchor / foundation fitting",
-      "en": ["tensile structure ground anchor detail", "guy cable anchor foundation", "shade sail footing anchor"],
-      "ar": ["أنكور أرضي كابل", "قاعدة شد كابل"],
-      "variants": ["helical anchor guy cable", "deadman anchor tensile"],
-      "checks": ["steel-supports/foundation_check.py", "tensile-connections/steel_joint_checks.py anchor"]
+      "en": [
+        "tensile structure ground anchor detail",
+        "guy cable anchor foundation",
+        "shade sail footing anchor"
+      ],
+      "ar": [
+        "تثبيت كابلات المظلات في الأرض",
+        "قواعد خرسانية مظلات شد إنشائي"
+      ],
+      "variants": [
+        "helical anchor guy cable",
+        "deadman anchor tensile"
+      ],
+      "checks": [
+        "steel-supports/foundation_check.py",
+        "tensile-connections/steel_joint_checks.py anchor"
+      ],
+      "na": []
     },
     "low-point-drain": {
       "title": "Membrane low point / drainage",
-      "en": ["tensile membrane low point drain", "membrane funnel drainage detail", "inverted cone membrane drain"],
-      "ar": ["تصريف مياه خيمة شد"],
-      "variants": ["drain ring membrane", "funnel column drainage canopy"],
-      "checks": ["tensile-analysis/run_cases.py (ponding)", "membrane-fabric/membrane_check.py"]
+      "en": [
+        "tensile membrane low point drain",
+        "membrane funnel drainage detail",
+        "inverted cone membrane drain"
+      ],
+      "ar": [
+        "تصريف مياه مظلات شد إنشائي",
+        "مظلات شد إنشائي مقلوبة تصريف"
+      ],
+      "variants": [
+        "drain ring membrane",
+        "funnel column drainage canopy"
+      ],
+      "checks": [
+        "tensile-analysis/run_cases.py (ponding)",
+        "membrane-fabric/membrane_check.py"
+      ],
+      "na": [
+        "concurrent",
+        "rotation"
+      ]
     }
+  },
+  "_fallback_sources": {
+    "_note": "Use with WebSearch allowed_domains when Pinterest gives fewer than 5 relevant precedents. Status = reachable from the cloud container in 2026-10 (curl).",
+    "domains": [
+      {
+        "domain": "architen.com",
+        "what": "articles on detailing, project photos",
+        "status": "ok"
+      },
+      {
+        "domain": "birdair.com",
+        "what": "design details page, project photos",
+        "status": "ok"
+      },
+      {
+        "domain": "tensinet.com",
+        "what": "European Design Guide chapters (PDF), project database",
+        "status": "ok"
+      },
+      {
+        "domain": "fabritecture.com",
+        "what": "project photos, details",
+        "status": "ok"
+      },
+      {
+        "domain": "pfeifer.info",
+        "what": "cable fittings, membrane hardware catalogues",
+        "status": "redirect ok"
+      },
+      {
+        "domain": "carlstahl-architektur.com",
+        "what": "stainless cable/rod hardware",
+        "status": "redirect ok"
+      },
+      {
+        "domain": "macalloy.com",
+        "what": "tension bars, forks, project photos",
+        "status": "redirect ok"
+      },
+      {
+        "domain": "ronstantensilearchitecture.com",
+        "what": "tensile hardware",
+        "status": "blocked here"
+      },
+      {
+        "domain": "sergeferrari.com",
+        "what": "membranes, projects",
+        "status": "unstable here"
+      },
+      {
+        "domain": "jakob.com",
+        "what": "Webnet / stainless rope",
+        "status": "403 here"
+      }
+    ]
   }
 }
