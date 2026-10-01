@@ -54,6 +54,21 @@ def check(spectrum, dsC, gMf, gFf=1.0, cable_m=None):
     return D, rows
 
 
+KSI = 6.894757
+
+
+def aisc_fatigue(spectrum, cat):
+    """AISC 360-22 Appendix 3: F_SR = (C_f / n)^(1/3) ≥ F_TH (MPa). Variable amplitude: equivalent stress range
+    (Σ n_i·Δσ_i³ / Σ n_i)^(1/3) above the threshold (Miner with slope 3); returns (util, rows, F_TH)."""
+    Cf_ksi, Fth_ksi = CF.get("fatigue_AISC.categories")[cat]
+    Cf, Fth = Cf_ksi * KSI ** 3, Fth_ksi * KSI
+    n_tot = sum(n for _, n in spectrum)
+    dse = (sum(n * ds ** 3 for ds, n in spectrum) / n_tot) ** (1 / 3)
+    FSR = max((Cf / n_tot) ** (1 / 3), Fth)
+    rows = [(ds, n, Cf / ds ** 3 if ds > 0 else math.inf) for ds, n in spectrum]
+    return dse / FSR, rows, Fth, FSR, dse
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--category", type=float, help="EN 1993-1-9 detail category Δσ_C [MPa]")
@@ -64,11 +79,28 @@ def main(argv=None):
     ap.add_argument("--consequence", choices=["high", "low"], default="high")
     ap.add_argument("--gFf", type=float, default=1.0)
     ap.add_argument("--factors", default=None)
+    ap.add_argument("--code", choices=CF.CODES, default=None, help="US/SA: AISC 360 Appendix 3 (steel details)")
+    ap.add_argument("--aisc-cat", choices=["A", "B", "B'", "C", "D", "E", "E'"], default=None,
+                    help="AISC detail category (with --code US|SA)")
     ap.add_argument("--sensitivity", action="store_true",
                     help="--cable: damage at both ends of the ranges of the unverified Δσ_C and m")
     a = ap.parse_args(argv)
     if a.factors:
         os.environ["TENSILE_FACTORS"] = a.factors
+    code = CF.code(a.code)
+    if code != "EU" and not a.cable:
+        if not a.aisc_cat:
+            ap.error("--code US|SA needs --aisc-cat (AISC Table A-3.1 category)")
+        spectrum = [tuple(map(float, s_.split(":"))) for s_ in a.spectrum]
+        u, rows, Fth, FSR, dse = aisc_fatigue(spectrum, a.aisc_cat)
+        std = "SBC 306 (AISC 360 App. 3 based; 2018 values [U])" if code == "SA" else "AISC 360-22 Appendix 3"
+        print(f"{std}: category {a.aisc_cat}, F_TH = {Fth:.1f} MPa [{CF.status('fatigue_AISC.categories')}], "
+              "service-load stress ranges (no load or resistance factors)")
+        for ds, n, N in rows:
+            print(f"  Δσ = {ds:.1f} MPa × {n:.3g} cycles (N at this range {N:.3g})")
+        print(f"  equivalent range (cube-root mean) {dse:.1f} MPa vs F_SR = max((C_f/n)^(1/3), F_TH) = {FSR:.1f} MPa "
+              f"-> util {u:.2f} {'OK' if u <= 1 else 'NOT OK'}")
+        return u
     key = f"fatigue_EN1993_1_9.gMf_{'safe_life' if a.method == 'safe-life' else 'damage_tol'}_{a.consequence}"
     gMf = CF.get(key)
     spectrum = [tuple(map(float, s.split(":"))) for s in a.spectrum]

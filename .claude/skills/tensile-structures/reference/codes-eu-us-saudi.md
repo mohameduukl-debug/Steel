@@ -97,6 +97,13 @@ or conservative canopy values.
 | Membrane | γM·ΠA (CEN/TS 19102), or stress factor 4/5 | β·L_t (0.17–0.33 × 0.75) | ASCE 55 (as US) |
 | Cables | F_uk/(1.5·γR), γR = 1.0 | S_d ≥ 2.2·T (ASCE 19) | ASCE 19 |
 
+## 4b. Stability of frames, arches and masts (`frame2d.py --check --code`)
+| | EU | US / SA |
+|---|---|---|
+| Global imperfection | e0 from EN 1993-1-1 Table 5.1, buckling-mode shape | 1/500 (AISC C2.2a), mode shape |
+| Second-order stiffness | EI | 0.8EI (C2.3, τb = 1) |
+| Member check | equivalent column (L_cr from α_cr) + 2nd-order cross-section | effective-length method (only if α_cr ≥ 3) or direct analysis K = 1; governing = lower permitted |
+
 ## 5. Saudi specifics and caveats
 
 - **Edition.** The SBC 2024 edition has been mandatory since 1 July 2025. The values here come from the 2018 edition

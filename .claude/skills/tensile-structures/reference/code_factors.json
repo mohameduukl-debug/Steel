@@ -422,6 +422,31 @@
       "value": 482,
       "status": "C",
       "source": "E70XX electrode 70 ksi = 482 MPa"
+    },
+    "dam_stiffness": {
+      "value": 0.8,
+      "status": "C",
+      "source": "AISC 360-22 C2.3: EI* = 0.8·τb·EI, EA* = 0.8·EA (τb = 1 for αPr/Pns ≤ 0.5)"
+    },
+    "imperfection_ratio": {
+      "value": 0.002,
+      "status": "C",
+      "source": "AISC 360-22 C2.2a: initial system imperfection 1/500 (direct modelling; notional load 0.002·Y_i equivalent)"
+    },
+    "phi_bearing": {
+      "value": 0.65,
+      "status": "C",
+      "source": "AISC 360-22 J8 concrete bearing φc = 0.65 (Ω = 2.31)"
+    },
+    "Omega_bearing": {
+      "value": 2.31,
+      "status": "C",
+      "source": "AISC 360-22 J8"
+    },
+    "mu_grout": {
+      "value": 0.55,
+      "status": "C",
+      "source": "AISC Design Guide 1 (3rd ed.) / ACI 349: steel on grout μ = 0.55, φ = 0.75 (shear by friction under compression only)"
     }
   },
   "geotech": {
@@ -982,6 +1007,11 @@
       "value": 8.0,
       "status": "V",
       "source": "ACI 318-19 17.6.3.2.2 N_p = 8·A_brg·f'c (headed)"
+    },
+    "phi_steel_shear": {
+      "value": 0.65,
+      "status": "V",
+      "source": "ACI 318-19 Table 17.5.3 ductile steel, shear"
     }
   },
   "sbc": {
@@ -1049,6 +1079,45 @@
     "membrane_fire": {
       "status": "V",
       "source": "SBC 201-18 §3102.3.1: membrane noncombustible (§703.5) or NFPA 701 Test Method 1/2; §3102.1.1 design to ASCE 55; §3102.7.1 membrane not to be used as lateral restraint of frame members"
+    }
+  },
+  "fatigue_AISC": {
+    "categories": {
+      "status": "C",
+      "source": "AISC 360-22 Appendix 3 Table A-3.1: C_f [ksi³] and threshold F_TH [ksi] for categories A–E′ (converted to MPa in the tool: C_f×6.895³, F_TH×6.895)",
+      "A": [
+        25000000000.0,
+        24.0
+      ],
+      "B": [
+        12000000000.0,
+        16.0
+      ],
+      "B'": [
+        6100000000.0,
+        12.0
+      ],
+      "C": [
+        4400000000.0,
+        10.0
+      ],
+      "D": [
+        2200000000.0,
+        7.0
+      ],
+      "E": [
+        1100000000.0,
+        4.5
+      ],
+      "E'": [
+        390000000.0,
+        2.6
+      ]
+    },
+    "note": {
+      "status": "C",
+      "info": true,
+      "source": "AISC App. 3: F_SR = (C_f/n_SR)^0.333 ≥ F_TH, applied to service-load stress ranges (no load factor, no φ). Constant-amplitude form; variable amplitude via an equivalent range (Miner, cube root mean)."
     }
   }
 }

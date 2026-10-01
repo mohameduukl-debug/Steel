@@ -122,6 +122,10 @@ python3 .claude/skills/tensile-structures/scripts/loads.py make-cases loads.json
 | `member_check.py` | EN 1993-1-1 | AISC 360-22 LRFD/ASD (`aisc_member.py`) | SBC 306: φc 0.85, φv 0.90, LRFD only [U] |
 | `steel_joint_checks.py` weld / bolts / anchor | EN 1993-1-8, EN 1992-4 | AISC J2/J3, ACI 318-19 Ch. 17 | same as US (SBC 306/304) |
 | `pin_connection.py` | EN 1993-1-8 | AISC D5/J7 govern the lug | same as US, LRFD |
+| `frame2d.py --check` | EN 1993-1-1 (equivalent column + 2nd order) | AISC effective-length + direct analysis (0.8EI, 1/500) | same, φc 0.85 |
+| `steel_joint_checks.py baseplate` | EN 1993-1-8 T-stubs | AISC J8 + Design Guide 1 | same |
+| `fatigue_check.py` (steel details) | EN 1993-1-9 | AISC App. 3 (`--aisc-cat`) | same |
+| `cable_schedule.py` | governing EN | governing ASCE 19 | ASCE 19 |
 | `cable_calc.py resist` | EN 1993-1-11 governs | ASCE 19 governs | ASCE 19 |
 | `foundation_check.py block` | EN 1997 EQU/GEO | 0.9D + 1.0W, sliding φ [U] | same, plus SBC 303 soils note |
 | `report.py` | code system, editions and caveats in the design basis | | SBC 2024 caveat |

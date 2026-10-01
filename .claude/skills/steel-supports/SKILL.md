@@ -39,6 +39,14 @@ python3 member_check.py --section IPE300 --L 6 --N 50 --My 80 --Vz 60 --code US 
   φbMn = 574 kip-ft, within 0.6 %.
 - **SBC 306-18 (Arabic text):** LRFD only, φc = 0.85 and φv = 0.90 "in all cases" [U]. `--sensitivity`
   re-checks with the AISC values. Confirm against the English CR and the SBC 2024 edition.
+- **frame2d with `--code US|SA`** (arches, masts, frames). Two AISC methods are reported:
+  - (a) effective-length method: L_c from α_cr, first-order M with B1. Permitted only when α_cr ≥ 3
+    (Δ2nd/Δ1st ≤ 1.5, App. 7).
+  - (b) direct analysis method (C2/C3): second-order run with 0.8EI and a 1/500 mode-shaped imperfection,
+    K = 1 on the physical member length (the whole mast, the whole arch).
+  - Governing utilisation = lower of (a) and (b) when (a) is permitted, otherwise (b).
+  - For arches, (b) with K = 1 on the arc length is very conservative, so (a) normally governs.
+  - Example: `python3 frame2d.py arch --L 20 --f 4 --section CHS:219.1x8 --q 3.5 --check --Lz 5 --code SA`
 - Foundations: `foundation_check.py block --code US|SA` uses 0.9D + 1.0W (strength-level wind) and a sliding
   φ = 0.8 [U]. `helical` is code-independent (manufacturer correlation plus a proof test).
 

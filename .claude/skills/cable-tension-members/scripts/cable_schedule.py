@@ -189,6 +189,8 @@ def main(argv=None):
     ap.add_argument("--out", default="cable_schedule")
     ap.add_argument("--list", action="store_true", help="list library products")
     ap.add_argument("--factors", default=None, help="project code-factor file")
+    ap.add_argument("--code", choices=F.CODES, default=None,
+                    help="governing check: EU EN 1993-1-11, US/SA ASCE 19 (both are always listed)")
     ap.add_argument("--sensitivity", action="store_true",
                     help="re-check the SLS limit over the range of f_sls (EN 1993-1-11 Table 7.2: 0.45-0.50)")
     a = ap.parse_args(argv)
@@ -210,12 +212,18 @@ def main(argv=None):
     else:
         ap.error("give a schedule JSON or --from-model")
     rows = compute(s)
+    code = F.code(a.code)
+    gov = "util_EN" if code == "EU" else "util_ASCE"
+    for r in rows:
+        r["governing"] = gov
     write(rows, s, a.out)
     print(f"{'ID':<8}{'type':<22}{'F_Rd':>8}{'F_ULS':>8}{'utilEN':>8}{'Lpin':>10}{'L0 ref':>10}")
     for r in rows:
         print(f"{r['id']:<8}{str(r['type'])[:21]:<22}{r['F_Rd_kN']:8.1f}{(r['F_ULS_kN'] or 0):8.1f}"
               f"{(r['util_EN'] or 0):8.2f}{r['L_pin_stressed_m']:10.4f}{r['L0_pin_unstressed_Tref_m']:10.4f}"
-              + ("" if r["slack_ok"] else "  SLACK!") + ("  FAIL" if (r["util_EN"] or 0) > 1 else ""))
+              + ("" if r["slack_ok"] else "  SLACK!") + ("  FAIL" if (r[gov] or 0) > 1 else ""))
+    print(f"Governing check ({code}): " + ("EN 1993-1-11 (util EN)" if code == "EU" else
+          "ASCE 19 (util ASCE)" + (" — SBC has no cable chapter; ASCE 55 refers to ASCE 19" if code == "SA" else "")))
     if a.sensitivity:
         sens = sls_sensitivity(rows, s)
         with open(a.out + ".md", "a") as fh:

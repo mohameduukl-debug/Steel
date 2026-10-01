@@ -49,6 +49,7 @@ form-finding model (`--from-model sail.json`). For each cable it gives:
 - EN and ASCE utilisation
 - slack check
 
+`--code US|SA` marks ASCE 19 as the governing check; the default EU marks EN 1993-1-11. Both are always listed.
 Product data comes from `reference/cable_products.json` (tagged by source; replace it with the supplier's ETA).
 
 ## Key design rules

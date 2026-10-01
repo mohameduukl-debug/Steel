@@ -52,6 +52,17 @@ python3 pin_connection.py --F 210 --d 36 --d0 37 --t 25 --a-lug 50 --c-lug 35 --
 - Anchors: N_sa = A_se·f_uta; N_b = k_c√f'c·h_ef^1.5 (k_c = 10 SI); A_Nc/A_Nco with 1.5h_ef; ψ_ed and
   ψ_c,N (1.25 uncracked); pullout ψ_c,P·8A_brg·f'c; φ 0.75 (steel) and 0.70 (cast-in breakout and pullout).
 - SBC 304 uses ACI 318-14 Chapter 17, with the same equations. SBC 306 is LRFD only.
+- Base plate (`baseplate --code US|SA`, AISC J8 + Design Guide 1):
+  - Bearing φ0.65·0.85f'c·A1·√(A2/A1) ≤ 1.7f'c·A1.
+  - Plate thickness for compression: t = ℓ·√(2P_u/(0.9F_y·B·N)), with ℓ = max(m, n, λn′). Round HSS uses
+    m = n = (N − 0.8D)/2.
+  - Uplift: plate bending with b_eff = 2x, and anchor steel per ACI.
+  - Shear: friction μ = 0.55 (φ 0.75) under compression only, otherwise anchor steel 0.6·A_se·f_uta (φ 0.65).
+  - Example: `python3 steel_joint_checks.py baseplate --col CHS --D 168.3 --B 350 --H 350 --tp 25 --Nc 300 --Nt 60 --code SA`
+- Fatigue (`fatigue_check.py --code US|SA --aisc-cat C --spectrum 50:2e6`), AISC Appendix 3:
+  - F_SR = (C_f/n)^(1/3) ≥ F_TH, categories A–E′ (Table A-3.1) at service-level stress ranges.
+  - Variable amplitude uses the cube-root mean range.
+  - Category C at 2·10⁶ cycles gives 89.7 MPa (13.0 ksi).
 - Pins: with `--code US|SA` the AISC D5/J7 lug checks govern the plate. The EN pin shear, bending and SLS rows
   stay as the pin design method, because AISC has no pin-bending rule.
 

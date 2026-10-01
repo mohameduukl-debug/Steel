@@ -475,6 +475,36 @@ def member_summary(fr, forces):
     return out
 
 
+def design_aisc(fr, lin, sec_order, alpha, members=None, Lz=None, code="US", method="LRFD"):
+    """AISC 360-22 / SBC 306: (a) effective-length method (L_c from α_cr, first-order M with B1);
+    (b) direct analysis method (C2/C3: second-order M with 0.8EI and a 1/500 mode-shaped imperfection, K = 1 on
+        the physical member length). The effective-length method needs α_cr ≥ 3 (Δ2nd/Δ1st ≤ 1.5, App. 7)."""
+    import aisc_member as AM
+    E = CF.get("steel.E")
+    rows = []
+    mast = [n for n in fr.members if n.startswith("M") and n[1:].isdigit() and not fr.members[n]["truss"]]
+    Lphys = sum(lin[n]["L"] for n in mast) if len(mast) > 1 else None
+    for name, m in fr.members.items():
+        if m["truss"] or not m["section"] or (members and name not in members):
+            continue
+        s1, s2 = lin[name], sec_order[name]
+        sec = m["sec"]
+        Lm = s1["L"]
+        NEd = max(-s1["N_min"], 0.0)
+        Lcr = (math.pi * math.sqrt(E * sec.Iy / (alpha * NEd * 1e3)) / 1000) if NEd > 0 and alpha < math.inf else Lm
+        kz = Lz / Lm if Lz else 1.0
+        r1, _ = AM.check(sec, m["fy"], Lm, NEd, s1["M_max"], 0.0, s1["V_max"], 0.0, Kx=Lcr / Lm, Ky=kz,
+                         code=code, method=method)
+        # DAM (AISC C2/C3): K = 1 on the PHYSICAL member length (a mast split into M00…Mnn is one member)
+        kx_dam = (Lphys / Lm) if Lphys else 1.0
+        r2, _ = AM.check(sec, m["fy"], Lm, max(-s2["N_min"], 0.0), s2["M_max"], 0.0, s2["V_max"], 0.0, Kx=kx_dam,
+                         Ky=kz, code=code, method=method, second_order=True)
+        rows.append({"member": name, "section": m["section"], "N_Ed": NEd, "M1": s1["M_max"], "M2": s2["M_max"],
+                     "Lcr_inplane": Lcr, "util_equiv_column": max(d / c for _, d, c, _ in r1),
+                     "util_second_order_section": max(d / c for _, d, c, _ in r2), "class": None})
+    return rows
+
+
 def design(fr, lin, sec_order, alpha, members=None, Lz=None):
     rows = []
     for name, m in fr.members.items():
@@ -524,7 +554,7 @@ def classical_alpha(fr):
     return gam * e["E"] * e["I"] / c["L"] ** 3 / c["q"]
 
 
-def run(fr, check=False, imp_curve=None, Lz=None, quiet=False):
+def run(fr, check=False, imp_curve=None, Lz=None, quiet=False, code="EU", method="LRFD"):
     dmap, u, f1 = fr.linear()
     lam_fe, mode = fr.buckling(f1)
     lam_cl = classical_alpha(fr)
@@ -539,17 +569,34 @@ def run(fr, check=False, imp_curve=None, Lz=None, quiet=False):
         curve = sec.curves(fr.members[name]["fy"])[0] if sec else "c"
     Lref = sum(m["L"] for n, m in comp) if len(comp) > 1 and all(n.startswith("M") for n, _ in comp) else \
         (max(m["L"] for _, m in comp) if comp else 1.0)
-    amp = E0_ELASTIC.get(curve or "c", 1 / 200) * Lref
+    if code == "EU":
+        amp = E0_ELASTIC.get(curve or "c", 1 / 200) * Lref
+    else:   # AISC C2.2a system imperfection 1/500, shaped as the buckling mode
+        amp = CF.get("aisc.imperfection_ratio") * Lref
+        curve = "AISC C2.2a 1/500"
     mx = max((abs(v) for (node, d), v in mode.items() if d < 2), default=1.0) or 1.0
     imp = {k: v / mx * amp for k, v in mode.items() if k[1] < 2}
-    _, u2, f2 = fr.second_order(imp)
+    if code != "EU":   # AISC C2.3 reduced stiffness for the second-order (direct analysis) run
+        red = CF.get("aisc.dam_stiffness")
+        saved_E = [e["E"] for e in fr.elems]
+        for e in fr.elems:
+            e["E"] *= red
+        try:
+            _, u2, f2 = fr.second_order(imp)
+        finally:
+            for e, E_ in zip(fr.elems, saved_E):
+                e["E"] = E_
+    else:
+        _, u2, f2 = fr.second_order(imp)
     s2 = member_summary(fr, f2)
     R = fr.reactions(dmap, u)
     res = {"alpha_cr": lam, "alpha_cr_fe": lam_fe, "alpha_cr_classical": lam_cl, "first_order": s1, "second_order": s2, "reactions": R,
            "imperfection": {"curve": curve, "amplitude_m": amp},
            "max_disp_m": max((abs(v) for v in u), default=0.0)}
+    res["code"] = code
     if check:
-        res["design"] = design(fr, s1, s2, lam, Lz=Lz)
+        res["design"] = (design(fr, s1, s2, lam, Lz=Lz) if code == "EU" else
+                         design_aisc(fr, s1, s2, lam, Lz=Lz, code=code, method=method))
     if not quiet:
         report(fr, res)
     return res
@@ -563,8 +610,10 @@ def report(fr, res):
     print(f"Elastic critical load factor α_cr = {a:.2f}  "
           + ("(≥ 10: first-order analysis adequate, EN 1993-1-1 5.2.1)" if a >= 10 else
              "(< 10: second-order effects must be included)"))
-    print(f"Imperfection for 2nd order: buckling-mode shape, amplitude {res['imperfection']['amplitude_m'] * 1000:.1f} mm "
-          f"(e0 curve {res['imperfection']['curve']}, EN 1993-1-1 Table 5.1 elastic)")
+    imp = res["imperfection"]
+    print(f"Imperfection for 2nd order: buckling-mode shape, amplitude {imp['amplitude_m'] * 1000:.1f} mm ("
+          + (f"e0 curve {imp['curve']}, EN 1993-1-1 Table 5.1 elastic)" if res.get("code", "EU") == "EU"
+             else f"{imp['curve']}; second-order run with 0.8EI)"))
     print(f"\n{'member':<10}{'N_min 1st':>11}{'N_min 2nd':>11}{'M 1st':>9}{'M 2nd':>9}{'V max':>9}  [kN, kNm]")
     for name in fr.members:
         a1, a2 = res["first_order"][name], res["second_order"][name]
@@ -575,13 +624,28 @@ def report(fr, res):
     for node, r in res["reactions"].items():
         print(f"  node {node:>3}: Rx={r[0]:9.2f} Ry={r[1]:9.2f} Mz={r[2]:9.2f}")
     if "design" in res:
-        print(f"\nEN 1993-1-1 member checks (factors {CF.tag('steel.gM0')}, {CF.tag('steel.gM1')})")
-        print(f"{'member':<10}{'section':<18}{'L_cr,y [m]':>11}{'equiv. column':>15}{'2nd-order sect.':>17}")
+        if res.get("code", "EU") == "EU":
+            print(f"\nEN 1993-1-1 member checks (factors {CF.tag('steel.gM0')}, {CF.tag('steel.gM1')})")
+            print(f"{'member':<10}{'section':<18}{'L_cr,y [m]':>11}{'equiv. column':>15}{'2nd-order sect.':>17}")
+        else:
+            std = "SBC 306 (AISC based, LRFD, φc 0.85 [U])" if res["code"] == "SA" else "AISC 360-22"
+            print(f"\n{std} member checks: effective-length method | direct analysis "
+                  f"(0.8EI [{CF.status('aisc.dam_stiffness')}], 1/500 imperfection, K = 1 on the member)")
+            print(f"{'member':<10}{'section':<18}{'L_c,x [m]':>11}{'eff. length':>15}{'direct anal.':>17}")
         worst = 0.0
+        aisc_code = res.get("code", "EU") != "EU"
         for r in res["design"]:
-            worst = max(worst, r["util_equiv_column"], r["util_second_order_section"])
+            if aisc_code:   # both are AISC methods: ELM allowed only if α_cr ≥ 3 (App. 7); DAM always
+                u = (min(r["util_equiv_column"], r["util_second_order_section"]) if res["alpha_cr"] >= 3
+                     else r["util_second_order_section"])
+                worst = max(worst, u)
+            else:
+                worst = max(worst, r["util_equiv_column"], r["util_second_order_section"])
             print(f"{r['member']:<10}{r['section']:<18}{r['Lcr_inplane']:11.2f}{r['util_equiv_column']:15.2f}"
                   f"{r['util_second_order_section']:17.2f}")
+        if aisc_code:
+            print("Governing = lower of the two AISC methods" + ("" if res["alpha_cr"] >= 3 else
+                  " — α_cr < 3: effective-length method NOT permitted, direct analysis governs"))
         print(f"Governing utilisation {worst:.2f} -> {'OK' if worst <= 1 else 'NOT OK'}")
 
 
@@ -611,6 +675,8 @@ def main(argv=None):
     ap.add_argument("--guy", action="append", default=[], help="guy 'dx:EA' (anchor offset m, EA kN)")
     ap.add_argument("--Lz", type=float, default=None, help="out-of-plane buckling length [m]")
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--code", choices=CF.CODES, default=None, help="member design: EU (EN 1993-1-1) | US (AISC 360) | SA (SBC 306)")
+    ap.add_argument("--method", choices=["LRFD", "ASD"], default="LRFD", help="US: LRFD or ASD (SA: LRFD only)")
     ap.add_argument("--factors", default=None)
     ap.add_argument("--out", default=None)
     a = ap.parse_args(argv)
@@ -626,7 +692,7 @@ def main(argv=None):
         fr = gen_mast(a.H, a.n, a.D_base, a.D_mid, a.D_top, a.t, a.fy, a.base, a.N, a.Hlat, guys)
     else:
         ap.error("give arch | mast | --input")
-    res = run(fr, a.check, Lz=a.Lz)
+    res = run(fr, a.check, Lz=a.Lz, code=CF.code(a.code), method=a.method)
     if a.out:
         with open(a.out + ".json", "w") as fh:
             json.dump({k: v for k, v in res.items() if k != "reactions"} | {"reactions": {str(k): v for k, v in res["reactions"].items()}},

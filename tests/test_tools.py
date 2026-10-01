@@ -734,6 +734,32 @@ class TestCodeSystems(unittest.TestCase):
         bi = [r for r in rows if r[0].startswith("biaxial")][0]
         self.assertAlmostEqual(bi[2], 0.8 * 0.33 * 0.75 * 220)
 
+    def test_frame2d_aisc_design(self):
+        fr = frame.gen_mast(6, 24, 168.3, 168.3, 168.3, 8, 355, "pinned", 250, 0.0, [])
+        res = frame.run(fr, check=True, quiet=True, code="US")
+        mid = res["design"][12]
+        self.assertLess(res["alpha_cr"], 3.0)                         # ELM not permitted -> DAM governs
+        self.assertGreaterEqual(mid["util_second_order_section"], mid["util_equiv_column"])   # DAM ≥ column curve
+        self.assertAlmostEqual(res["imperfection"]["amplitude_m"], 6.0 / 500)
+        # ELM member check equals member_check --code US on the same column
+        rows, info = aisc.check(memb.Section("CHS:168.3x8"), 355, 6.0, 250.0)
+        self.assertAlmostEqual(mid["util_equiv_column"], max(d / c for _, d, c, _ in rows), places=6)
+
+    def test_baseplate_aisc_dg1(self):
+        a = type("A", (), dict(col="CHS", D=168.3, B=350.0, H=350.0, tp=25.0, fy=355.0, fck=30.0, A2=None, Nc=300.0,
+                               Nt=0.0, V=0.0, anchors=4, anchor_d=20.0, anchor_grade="8.8"))
+        rows, info = joint.baseplate_aisc(a)
+        self.assertAlmostEqual(info["Pp"], 0.85 * 30 * 350 * 350 / 1e3)                     # J8-1
+        m = (350 - 0.8 * 168.3) / 2
+        self.assertAlmostEqual(info["t_req_c"], m * math.sqrt(2 * 300e3 / (0.9 * 355 * 350 * 350)))   # DG1
+
+    def test_aisc_fatigue_category_c(self):
+        # AISC App. 3, category C at 2·10⁶ cycles: F_SR = (44e8/2e6)^(1/3) = 13.0 ksi = 89.7 MPa
+        u, rows, Fth, FSR, dse = fat.aisc_fatigue([(50.0, 2e6)], "C")
+        self.assertAlmostEqual(FSR, (44e8 / 2e6) ** (1 / 3) * 6.894757, places=6)
+        self.assertAlmostEqual(FSR, 89.7, delta=0.1)
+        self.assertAlmostEqual(Fth, 10 * 6.894757)
+
     def test_foundation_us_stability(self):
         rows, info = found.block(2.5, 2.5, 1.5, 60, 45, 0.3, 0.45, 200, code="SA")
         self.assertAlmostEqual(rows[0][2], 0.9 * info["W_kN"])                   # 0.9D + 1.0W

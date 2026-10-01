@@ -148,9 +148,10 @@ def build(a):
     # 5 cables
     if a.cables:
         rows_c = read_csv(a.cables)
-        u = [float(r["util_EN"]) for r in rows_c if r.get("util_EN")]
+        col, lab = ("util_EN", "cables (EN 1993-1-11)") if code == "EU" else ("util_ASCE", "cables (ASCE 19)")
+        u = [float(r[col]) for r in rows_c if r.get(col)]
         if u:
-            governing.append(("cables (EN 1993-1-11)", max(u)))
+            governing.append((lab, max(u)))
         fkey = "cable.f_sls"
         if CF.frange(fkey):
             for r in rows_c:

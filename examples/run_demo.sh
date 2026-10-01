@@ -104,6 +104,12 @@ python3 "$S/steel-supports/scripts/member_check.py" --section CHS:168.3x8 --L 6 
 python3 "$S/tensile-connections/scripts/steel_joint_checks.py" anchor --n1 2 --n2 2 --s1 200 --s2 200 --c1 400 \
         --c2 400 --hef 250 --d 24 --N 60 --code US | tail -4
 
+python3 "$S/steel-supports/scripts/frame2d.py" arch --L 20 --f 4 --n 20 --section CHS:219.1x8 --q 3.5 --check \
+        --Lz 5 --code SA | sed -n '/member checks/,$p'
+python3 "$S/tensile-connections/scripts/steel_joint_checks.py" baseplate --col CHS --D 168.3 --tc 8 --B 350 --H 350 \
+        --tp 25 --Nc 300 --Nt 60 --V 25 --anchors 4 --anchor-d 20 --edge 55 --code SA | tail -7
+python3 "$S/tensile-connections/scripts/fatigue_check.py" --code US --aisc-cat E --spectrum 40:1e6 --spectrum 25:5e6
+
 echo; echo "== 9. Calculation report =="
 python3 "$S/tensile-structures/scripts/report.py" --title "Demo sail" --model sail.json --cases sail_cases_envelope.json \
         --material PVC-III --method partial --cables sail_cables.csv --patterns sail_patterns.csv --out sail_report
