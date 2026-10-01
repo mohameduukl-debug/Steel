@@ -55,7 +55,15 @@ def build(a):
     sens = []          # (check, factor key, factors.sensitivity result)
 
     # 1 design basis
+    code = CF.code(getattr(a, "code", None))
+    cs = CF.get(f"codes.{code}")
     md += ["## 1. Design basis and code factors", "",
+           f"**Code system: {CF.code_label(code)}** [{CF.status('codes.' + code)}] — loads: {cs['loads']}; steel: "
+           f"{cs['steel']}; membrane: {cs['membrane']}; cables: {cs['cables']}; anchors: {cs['anchors']}.", ""]
+    if code == "SA":
+        md += ["> SBC values are taken from the 2018 edition (official Arabic text). The SBC 2024 edition is mandatory "
+               "since 1 July 2025 and its changes are not checked: confirm every SBC value before issue.", ""]
+    md += [
            "Every value below comes from the factor register. **V** = confirmed from a named source, "
            "**C** = code recommended value (National Annex may differ), **U** = unverified, must be confirmed before "
            "issue.", ""]
@@ -119,8 +127,9 @@ def build(a):
         rows_m = []
         for r, dur, nw_, nf_, uf, us in MCK.envelope_utils(env, mat["fw"], mat["ff"], a.method, mat["family"], seam):
             case, combo = MCK.env_case(r)
-            aw, basis = MCK.allowable(mat["fw"], a.method, case, mat["family"], fm_combo=combo)
-            af, _ = MCK.allowable(mat["ff"], a.method, case, mat["family"], fm_combo=combo)
+            ct = r.get("combo_type") if a.method == "asce55" else None
+            aw, basis = MCK.allowable(mat["fw"], a.method, case, mat["family"], fm_combo=combo, combo_type=ct)
+            af, _ = MCK.allowable(mat["ff"], a.method, case, mat["family"], fm_combo=combo, combo_type=ct)
             rows_m.append((r["case"], r.get("warp_max"), r.get("weft_max"), aw, af, us, basis))
         worst = max((x[5] for x in rows_m), default=0.0)
         keys = sorted({MCK.factor_key(a.method, MCK.env_case(r)[0]) for r in env["summary"]} - {None})
@@ -245,7 +254,9 @@ def main(argv=None):
     ap.add_argument("--model")
     ap.add_argument("--cases")
     ap.add_argument("--material")
-    ap.add_argument("--method", default="factor", choices=["factor", "fm", "japan", "partial"])
+    ap.add_argument("--method", default=None, choices=["factor", "fm", "japan", "partial", "asce55"],
+                    help="membrane design basis (default: factor for EU, asce55 for US/SA)")
+    ap.add_argument("--code", default=None, choices=CF.CODES, help="code system EU | US | SA")
     ap.add_argument("--cables")
     ap.add_argument("--patterns")
     ap.add_argument("--nest")
@@ -253,6 +264,8 @@ def main(argv=None):
     ap.add_argument("--factors", default=None)
     ap.add_argument("--out", default="report")
     a = ap.parse_args(argv)
+    if a.method is None:
+        a.method = "factor" if CF.code(a.code) == "EU" else "asce55"
     if a.factors:
         os.environ["TENSILE_FACTORS"] = a.factors
     md, gov = build(a)

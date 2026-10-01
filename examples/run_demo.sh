@@ -91,6 +91,19 @@ python3 "$S/fabrication-drawings/scripts/cutting_pattern.py" multibay.json --sea
         --auto-split --notch 1000 --sheets --project "Demo market roof" --out multibay_patterns | tail -4
 python3 "$S/fabrication-drawings/scripts/nest_panels.py" multibay_patterns.json --gap 20 --out multibay_nest
 
+echo; echo "== 8b. Code systems: US (ASCE 7 / AISC 360 / ASCE 55 / ACI 318) and Saudi (SBC) =="
+python3 "$S/tensile-structures/scripts/loads.py" combos --code SA --set uls
+python3 "$S/tensile-structures/scripts/loads.py" wind --code SA --V 50 --exposure C --z 4
+python3 "$S/tensile-structures/scripts/loads.py" wind --code US --V 50 --exposure C --z 4
+python3 "$S/membrane-fabric/scripts/membrane_check.py" --material PVC-III --nw 7.4 --nf 7.4 --case wind --code SA | tail -3
+python3 "$S/steel-supports/scripts/member_check.py" --section CHS:168.3x8 --L 6 --N 260 --My 6 --code SA --sensitivity \
+        | sed -n '/check/,/sensitivity/p'
+# ASD uses service-level (unfactored) forces
+python3 "$S/steel-supports/scripts/member_check.py" --section CHS:168.3x8 --L 6 --N 175 --My 4 --code US --method ASD \
+        | grep -E "interaction|Governing"
+python3 "$S/tensile-connections/scripts/steel_joint_checks.py" anchor --n1 2 --n2 2 --s1 200 --s2 200 --c1 400 \
+        --c2 400 --hef 250 --d 24 --N 60 --code US | tail -4
+
 echo; echo "== 9. Calculation report =="
 python3 "$S/tensile-structures/scripts/report.py" --title "Demo sail" --model sail.json --cases sail_cases_envelope.json \
         --material PVC-III --method partial --cables sail_cables.csv --patterns sail_patterns.csv --out sail_report

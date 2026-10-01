@@ -338,6 +338,90 @@
       "value": 16.0,
       "status": "V",
       "source": "AISC 360 D5 b_eff = 2t + 0.63 in"
+    },
+    "phi_c": {
+      "value": 0.9,
+      "status": "V",
+      "source": "AISC 360-22 E1 (spec text)"
+    },
+    "Omega_c": {
+      "value": 1.67,
+      "status": "V",
+      "source": "AISC 360-22 E1"
+    },
+    "phi_b": {
+      "value": 0.9,
+      "status": "V",
+      "source": "AISC 360-22 F1"
+    },
+    "Omega_b": {
+      "value": 1.67,
+      "status": "V",
+      "source": "AISC 360-22 F1"
+    },
+    "phi_t_rupture": {
+      "value": 0.75,
+      "status": "V",
+      "source": "AISC 360-22 D2"
+    },
+    "Omega_t": {
+      "value": 1.67,
+      "status": "V",
+      "source": "AISC 360-22 D2 yield"
+    },
+    "phi_v": {
+      "value": 0.9,
+      "status": "V",
+      "source": "AISC 360-22 G1 (1.0/Ω 1.50 for rolled I webs h/tw ≤ 2.24√(E/Fy))"
+    },
+    "Omega_v": {
+      "value": 1.67,
+      "status": "V",
+      "source": "AISC 360-22 G1"
+    },
+    "phi_bolt": {
+      "value": 0.75,
+      "status": "V",
+      "source": "AISC 360-22 J3.7/J3.11 bolts, bearing"
+    },
+    "Omega_bolt": {
+      "value": 2.0,
+      "status": "V",
+      "source": "AISC 360-22 J3"
+    },
+    "phi_weld": {
+      "value": 0.75,
+      "status": "V",
+      "source": "AISC 360-22 Table J2.5 fillet weld metal"
+    },
+    "Omega_weld": {
+      "value": 2.0,
+      "status": "V",
+      "source": "AISC 360-22 Table J2.5"
+    },
+    "E": {
+      "value": 200000,
+      "status": "V",
+      "source": "AISC 360 E = 29 000 ksi (200 000 MPa)"
+    },
+    "bolt_F": {
+      "status": "C",
+      "source": "AISC 360 Table J3.2 nominal stresses [MPa]: Fnt; Fnv threads included (N) / excluded (X)",
+      "A325": {
+        "Fnt": 620,
+        "Fnv_N": 372,
+        "Fnv_X": 469
+      },
+      "A490": {
+        "Fnt": 780,
+        "Fnv_N": 469,
+        "Fnv_X": 579
+      }
+    },
+    "FEXX_E70": {
+      "value": 482,
+      "status": "C",
+      "source": "E70XX electrode 70 ksi = 482 MPa"
     }
   },
   "geotech": {
@@ -385,6 +469,16 @@
         2.5
       ],
       "range_source": "allowable-load FS"
+    },
+    "phi_sliding_US": {
+      "value": 0.8,
+      "status": "U",
+      "source": "no single US/SBC value for block sliding: AASHTO LRFD φ_τ = 0.8 (cast-in-place on sand); ASD FS 1.5 (IBC 1807.2.3) ≈ 0.67",
+      "range": [
+        0.67,
+        0.9
+      ],
+      "range_source": "IBC FS 1.5 equivalent … AASHTO 0.9 (cohesionless, precast)"
     }
   },
   "anchor_EN1992_4": {
@@ -552,6 +646,409 @@
         5.0
       ],
       "range_source": "rope S-N slope spread (FLC research m1 = 4)"
+    }
+  },
+  "codes": {
+    "_readme": "Design code systems. Select with --code EU|US|SA or env TENSILE_CODE (project file key '_code'). Default EU.",
+    "EU": {
+      "status": "C",
+      "source": "EN 1990/1991/1993/1997, EN 1993-1-11, EN 1992-4, CEN/TS 19102:2023 (membranes)",
+      "loads": "EN 1990 + EN 1991-1-3/1-4",
+      "steel": "EN 1993-1-1/1-8",
+      "membrane": "CEN/TS 19102 or stress factors",
+      "cables": "EN 1993-1-11",
+      "anchors": "EN 1992-4"
+    },
+    "US": {
+      "status": "C",
+      "source": "ASCE 7-22, AISC 360-22, ASCE 55 (membranes), ASCE 19 (cables), ACI 318-19 Ch.17 (anchors), IBC 2024",
+      "loads": "ASCE 7-22",
+      "steel": "AISC 360-22 (LRFD or ASD)",
+      "membrane": "ASCE 55 (β·Lt method; 55-10 values)",
+      "cables": "ASCE 19",
+      "anchors": "ACI 318-19 Ch.17"
+    },
+    "SA": {
+      "status": "U",
+      "source": "Saudi Building Code: values from the 2018 edition (official Arabic text): SBC 301 (ASCE 7-10 based), SBC 306 (AISC 360-10 based, LRFD only), SBC 304 (ACI 318-14), SBC 201 §3102 (ASCE 55 + NFPA 701). The 2024 edition is mandatory since 2025-07; its changes are NOT checked — confirm every SBC value against the edition in force",
+      "loads": "SBC 301",
+      "steel": "SBC 306 (LRFD only)",
+      "membrane": "ASCE 55 via SBC 201 §3102.1.1",
+      "cables": "ASCE 19 / EN 1993-1-11 (not in SBC)",
+      "anchors": "SBC 304 Ch.17 (ACI 318-14)",
+      "info": true
+    }
+  },
+  "en1990": {
+    "gamma_G_sup": {
+      "value": 1.35,
+      "status": "C",
+      "source": "EN 1990 Table A1.2(B) STR, unfavourable permanent"
+    },
+    "gamma_G_inf": {
+      "value": 1.0,
+      "status": "C",
+      "source": "EN 1990 Table A1.2(B), favourable permanent"
+    },
+    "gamma_Q": {
+      "value": 1.5,
+      "status": "C",
+      "source": "EN 1990 Table A1.2(B), leading/accompanying variable"
+    },
+    "gamma_P": {
+      "value": 1.0,
+      "status": "C",
+      "source": "membrane prestress taken as permanent, γP = 1.0 (Eng. Struct. 214 (2020) calibration; CEN/TS 19102 practice)"
+    },
+    "psi0_snow": {
+      "value": 0.5,
+      "status": "C",
+      "source": "EN 1990 Table A1.1 snow, sites H ≤ 1000 m (Finland etc. 0.7)"
+    },
+    "psi0_wind": {
+      "value": 0.6,
+      "status": "C",
+      "source": "EN 1990 Table A1.1 wind"
+    },
+    "psi0_roof_live": {
+      "value": 0.0,
+      "status": "C",
+      "source": "EN 1990 Table A1.1 category H roofs"
+    },
+    "psi0_temp": {
+      "value": 0.6,
+      "status": "C",
+      "source": "EN 1990 Table A1.1 temperature (non-fire)"
+    }
+  },
+  "en1991_1_4": {
+    "terrain": {
+      "status": "C",
+      "source": "EN 1991-1-4 Table 4.1: z0 / zmin [m] (NA may differ)",
+      "0": [
+        0.003,
+        1.0
+      ],
+      "I": [
+        0.01,
+        1.0
+      ],
+      "II": [
+        0.05,
+        2.0
+      ],
+      "III": [
+        0.3,
+        5.0
+      ],
+      "IV": [
+        1.0,
+        10.0
+      ]
+    },
+    "z0_II": {
+      "value": 0.05,
+      "status": "C",
+      "source": "EN 1991-1-4 4.3.2 k_r = 0.19·(z0/z0,II)^0.07"
+    },
+    "kr_coeff": {
+      "value": 0.19,
+      "status": "C",
+      "source": "EN 1991-1-4 Eq. 4.5"
+    },
+    "kI": {
+      "value": 1.0,
+      "status": "C",
+      "source": "EN 1991-1-4 4.4 turbulence factor (recommended)"
+    },
+    "peak_factor": {
+      "value": 7.0,
+      "status": "C",
+      "source": "EN 1991-1-4 Eq. 4.8 q_p = [1 + 7·I_v]·½ρv_m²"
+    },
+    "rho_air": {
+      "value": 1.25,
+      "status": "C",
+      "source": "EN 1991-1-4 4.5 Note 2"
+    }
+  },
+  "asce7": {
+    "combos_lrfd_22": {
+      "status": "V",
+      "source": "ASCE 7-22 §2.3.1 — ICC 'Demystifying Loads' 2024 IBC/ASCE 7-22 slides; ASCE Collaborate; Structure mag. (≥2 sources)",
+      "list": [
+        {
+          "name": "1.4D",
+          "D": 1.4
+        },
+        {
+          "name": "1.2D+1.6L+0.3S",
+          "D": 1.2,
+          "L": 1.6,
+          "S": 0.3
+        },
+        {
+          "name": "1.2D+1.0S+0.5W",
+          "D": 1.2,
+          "S": 1.0,
+          "W": 0.5
+        },
+        {
+          "name": "1.2D+1.6Lr+0.5W",
+          "D": 1.2,
+          "Lr": 1.6,
+          "W": 0.5
+        },
+        {
+          "name": "1.2D+1.0W+0.3S",
+          "D": 1.2,
+          "W": 1.0,
+          "S": 0.3
+        },
+        {
+          "name": "1.2D+1.0W+0.5Lr",
+          "D": 1.2,
+          "W": 1.0,
+          "Lr": 0.5
+        },
+        {
+          "name": "0.9D+1.0W",
+          "D": 0.9,
+          "W": 1.0
+        }
+      ]
+    },
+    "combos_asd_22": {
+      "status": "V",
+      "source": "ASCE 7-22 §2.4.1 — ICC 'Demystifying Loads' 2024 IBC/ASCE 7-22 slides; ASCE Collaborate; Structure mag. (≥2 sources)",
+      "list": [
+        {
+          "name": "D",
+          "D": 1.0
+        },
+        {
+          "name": "D+0.7S",
+          "D": 1.0,
+          "S": 0.7
+        },
+        {
+          "name": "D+Lr",
+          "D": 1.0,
+          "Lr": 1.0
+        },
+        {
+          "name": "D+0.6W",
+          "D": 1.0,
+          "W": 0.6
+        },
+        {
+          "name": "D+0.75(0.6W)+0.75(0.7S)",
+          "D": 1.0,
+          "W": 0.45,
+          "S": 0.525
+        },
+        {
+          "name": "0.6D+0.6W",
+          "D": 0.6,
+          "W": 0.6
+        }
+      ]
+    },
+    "kz_22": {
+      "status": "V",
+      "source": "ASCE 7-22 Table 26.11-1: K_z = 2.41(z/z_g)^(2/α), z ≥ 4.6 m (windload.solutions; ICC slides reproduce Table 26.10-1)",
+      "coef": 2.41,
+      "B": [
+        7.5,
+        1000.0
+      ],
+      "C": [
+        9.8,
+        750.0
+      ],
+      "D": [
+        11.5,
+        590.0
+      ]
+    },
+    "kz_10_16": {
+      "status": "V",
+      "source": "ASCE 7-10/7-16 Table 26.9-1 / 26.11-1: K_z = 2.01(z/z_g)^(2/α), z ≥ 4.6 m (thestructuralworld; steelcalculator)",
+      "coef": 2.01,
+      "B": [
+        7.0,
+        365.76
+      ],
+      "C": [
+        9.5,
+        274.32
+      ],
+      "D": [
+        11.5,
+        213.36
+      ]
+    },
+    "kz_zmin": {
+      "value": 4.6,
+      "status": "V",
+      "source": "ASCE 7: K_z evaluated at z ≥ 15 ft (4.6 m)"
+    },
+    "Kd_building": {
+      "value": 0.85,
+      "status": "V",
+      "source": "ASCE 7 Table 26.6-1 MWFRS/C&C of buildings (7-22: K_d applied in the pressure equation, not in q_z)"
+    },
+    "q_coef_SI": {
+      "value": 0.613,
+      "status": "V",
+      "source": "ASCE 7: q = 0.613·K_z·K_zt·(K_d)·K_e·V² N/m², V in m/s"
+    }
+  },
+  "asce55": {
+    "beta": {
+      "status": "V",
+      "source": "ASCE 55-10 Table 4-2 (read in full text); ASCE 55-16 values NOT verified. β calibrated with service-level (ASCE 7-98) wind -> use with ASD combinations (0.6W for ASCE 7-10+ strength-level wind)",
+      "P+D": 0.17,
+      "P+D+S": 0.27,
+      "P+D+W": 0.33,
+      "P+D+T": 0.27
+    },
+    "Lt_permanent": {
+      "value": 0.75,
+      "status": "V",
+      "source": "ASCE 55-10 §4.4.2.1 life-cycle factor, permanent structure, ≥ 75 % strength retention"
+    },
+    "Lt_handled": {
+      "value": 0.6,
+      "status": "V",
+      "source": "ASCE 55-10 §4.4.2.1: ≤ 0.6 for repeated handling (temporary/demountable)"
+    },
+    "biaxial": {
+      "value": 0.8,
+      "status": "V",
+      "source": "ASCE 55-10 §4.6.1: 0.8·β·Lt·(T_sw + T_sf) ≥ T_fw + T_ff"
+    },
+    "seam_Lt_factor": {
+      "status": "V",
+      "source": "ASCE 55-10 Table 4-1 (fraction of base-fabric Lt)",
+      "heat": 1.0,
+      "adhesive": 0.5,
+      "sewn": 0.6,
+      "sewn-protected": 0.9
+    }
+  },
+  "aci318": {
+    "kc_cast": {
+      "value": 10.0,
+      "status": "C",
+      "source": "ACI 318-19 17.6.2.2.1 k_c = 24 (in-lb, spec text) -> 10 SI (unit conversion; confirm with 318M)"
+    },
+    "kc_post": {
+      "value": 7.0,
+      "status": "C",
+      "source": "ACI 318-19 k_c = 17 (in-lb) -> 7 SI (conversion)"
+    },
+    "kc_deep": {
+      "value": 3.9,
+      "status": "C",
+      "source": "ACI 318-19 17.6.2.2.3 N_b = 16·λ√f'c·h_ef^(5/3) (in-lb), 280 ≤ h_ef ≤ 635 mm -> 3.9 SI (conversion)"
+    },
+    "phi_steel_tension": {
+      "value": 0.75,
+      "status": "V",
+      "source": "ACI 318-19 Table 17.5.3 ductile steel, tension"
+    },
+    "phi_breakout_cast": {
+      "value": 0.7,
+      "status": "V",
+      "source": "ACI 318-19 Table 17.5.3 cast-in, no supplementary reinforcement (0.75 with)"
+    },
+    "phi_pullout_cast": {
+      "value": 0.7,
+      "status": "V",
+      "source": "ACI 318-19 Table 17.5.3 cast-in pullout/pryout"
+    },
+    "psi_cN_uncracked_cast": {
+      "value": 1.25,
+      "status": "V",
+      "source": "ACI 318-19 17.6.2.5 cast-in, uncracked"
+    },
+    "psi_cP_uncracked": {
+      "value": 1.4,
+      "status": "V",
+      "source": "ACI 318-19 17.6.3.3 pullout, uncracked"
+    },
+    "pullout_coef": {
+      "value": 8.0,
+      "status": "V",
+      "source": "ACI 318-19 17.6.3.2.2 N_p = 8·A_brg·f'c (headed)"
+    }
+  },
+  "sbc": {
+    "edition_note": {
+      "status": "U",
+      "source": "Values from SBC 2018 (official Arabic text, NCBC 2019 print). SBC 2024 mandatory since 2025-07-01: changes not checked. The English CR text governs over AR.",
+      "info": true
+    },
+    "phi_c_306": {
+      "value": 0.85,
+      "status": "U",
+      "source": "SBC 306-18 (AR text §E): φc = 0.85 'in all cases' (AISC 360: 0.90); confirm in SBC 306-CR and the 2024 edition",
+      "range": [
+        0.85,
+        0.9
+      ],
+      "range_source": "SBC 306-18 AR 0.85 … AISC 360 0.90"
+    },
+    "phi_v_306": {
+      "value": 0.9,
+      "status": "U",
+      "source": "SBC 306-18 (AR text): φv = 0.90 'in all cases' (AISC: 1.0 for rolled I webs); confirm",
+      "range": [
+        0.9,
+        1.0
+      ],
+      "range_source": "SBC 0.90 … AISC 1.00"
+    },
+    "combos_301": {
+      "status": "V",
+      "source": "SBC 301-18 §2.3.2 (AR text): strength combinations; snow and ice deleted. Combination with L reads 1.4D+1.7L+0.5(Lr or R) in the AR text (possible translation issue; L is rare on membrane roofs)",
+      "list": [
+        {
+          "name": "1.4D",
+          "D": 1.4
+        },
+        {
+          "name": "1.2D+1.6Lr+0.5W",
+          "D": 1.2,
+          "Lr": 1.6,
+          "W": 0.5
+        },
+        {
+          "name": "1.2D+1.0W+0.5Lr",
+          "D": 1.2,
+          "W": 1.0,
+          "Lr": 0.5
+        },
+        {
+          "name": "0.9D+1.0W",
+          "D": 0.9,
+          "W": 1.0
+        }
+      ]
+    },
+    "wind_basis": {
+      "status": "V",
+      "source": "SBC 301-18: ASCE 7-10 wind chapters, q = 0.613·K_z·K_zt·K_d·V² (no K_e); V = ultimate 3-s gust at 10 m, exposure C (Fig. 26.5-1A/B/C, RC II 700 y), ~40–56 m/s across KSA (Riyadh ≈ 50, Jeddah ≈ 46–48 RC II, read from maps)"
+    },
+    "asd_note": {
+      "status": "U",
+      "source": "SBC 306-18 is LRFD only (no ASD/Ω). ASCE 55 β method uses ASD-level loads: 0.6W assumed for SBC 301 ultimate wind (inference)",
+      "info": true
+    },
+    "membrane_fire": {
+      "status": "V",
+      "source": "SBC 201-18 §3102.3.1: membrane noncombustible (§703.5) or NFPA 701 Test Method 1/2; §3102.1.1 design to ASCE 55; §3102.7.1 membrane not to be used as lateral restraint of frame members"
     }
   }
 }

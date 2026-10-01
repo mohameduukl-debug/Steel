@@ -12,6 +12,8 @@ fabric + steel cables + structural steel**, covering analysis, modelling, connec
 - Code factors live only in `tensile-structures/reference/code_factors.json` (read via `tensile-structures/scripts/factors.py`).
   Never hard-code a code value in a tool; add it to the register with a V/C/U status and a source.
 - Keep the shared JSON model schema (`tensile-structures/reference/model-schema.md`) backward compatible when editing tools.
+- Code systems: EU (default), US, SA via `--code` or `TENSILE_CODE`. Saudi (SBC) values are from the 2018 edition:
+  always remind the user to confirm them against the edition in force (SBC 2024 has been mandatory since July 2025).
 - Units: kN, m for analysis; mm for fabrication and DXF; kN/m for membrane stress; °C.
 
 ## Tests

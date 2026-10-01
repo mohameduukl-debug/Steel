@@ -1,6 +1,6 @@
 ---
 name: tensile-structures
-description: Hub skill for tensile fabric (membrane) structures built from membrane fabric, steel cables and structural steel. Use it first for any question about how fabric, cables and steel work together — load path, design workflow, which specialist skill or tool to use. It covers concept, form finding, analysis, connection design, patterning and fabrication/shop drawings for canopies, sails, hypars, cones, arch-supported tunnels, multi-bay ridge/valley roofs, cable nets, masts and stadium roofs. Routes to membrane-fabric, cable-tension-members, steel-supports, tensile-connections, tensile-analysis and fabrication-drawings.
+description: Hub skill for tensile fabric (membrane) structures built from membrane fabric, steel cables and structural steel, designed to Eurocodes (EU), US codes (ASCE 7, AISC 360, ASCE 55, ASCE 19, ACI 318) or the Saudi Building Code (SBC 301/306/304/201). Use it first for any question about how fabric, cables and steel work together — load path, design workflow, which specialist skill or tool to use. It covers concept, form finding, analysis, connection design, patterning and fabrication/shop drawings for canopies, sails, hypars, cones, arch-supported tunnels, multi-bay ridge/valley roofs, cable nets, masts and stadium roofs. Routes to membrane-fabric, cable-tension-members, steel-supports, tensile-connections, tensile-analysis and fabrication-drawings.
 ---
 
 # Tensile Structures — system hub
@@ -58,6 +58,7 @@ Key couplings:
 | 8 | Connections | pins/lugs, corner plates, welds, bolts, base plates, EN 1992-4 anchors, aluminium clamps, fatigue | `tensile-connections` → `pin_connection.py`, `corner_plate.py`, `steel_joint_checks.py`, `fatigue_check.py` |
 | 9 | Patterning | geodesic seams, compensation/decompensation, auto-split, notches, panel sheets, nesting | `fabrication-drawings` → `cutting_pattern.py`, `nest_panels.py` |
 | 10 | Drawings | GA/setting-out DXF, steel part drawings with weld symbols | `fabrication-drawings` → `export_dxf.py`, `steel_part_dxf.py`, `dxf_writer.py` |
+| 0 | **Code system and loads** | EU / US / SA selection, load combinations, wind reference pressure, factored load cases | this skill → `scripts/loads.py` |
 | 11 | **Calculation report** | Markdown + HTML report with factors (V/C/U), results, governing utilisations, limitations | this skill → `scripts/report.py` |
 
 Loop back as needed. Connection geometry changes the cable lengths (node-to-pin deductions); steel stiffness
@@ -103,6 +104,32 @@ python3 $S/tensile-structures/scripts/report.py --model sail.json --cases sail_c
 * `reference/design-workflow-checklist.md`: stage-by-stage checklist with deliverables and hold points.
 * `reference/model-schema.md`: JSON model format shared by all tools.
 * `reference/standards-map.md`: which standard covers what (EU/US/JP), with verification status.
+* `reference/codes-eu-us-saudi.md`: EU / US / Saudi code systems: combinations, wind, resistance factors, SBC caveats.
+
+## Code systems: EU, US, Saudi
+Choose the design code system once per project:
+```bash
+export TENSILE_CODE=SA        # or US, EU (default); or --code on a single tool run
+python3 .claude/skills/tensile-structures/scripts/loads.py combos --code US --set uls        # ASCE 7-22 LRFD
+python3 .claude/skills/tensile-structures/scripts/loads.py combos --code SA --set membrane   # ASCE 55 via SBC 201
+python3 .claude/skills/tensile-structures/scripts/loads.py wind --code SA --V 50 --exposure C --z 6
+python3 .claude/skills/tensile-structures/scripts/loads.py make-cases loads.json --code EU --set uls --out uls_cases.json
+```
+| Tool | EU | US | SA |
+|---|---|---|---|
+| `loads.py` | EN 1990, EN 1991-1-4 | ASCE 7-22 (7-16 option) | SBC 301-18 (no snow, ASCE 7-10 wind) |
+| `membrane_check.py` | stress factor / CEN/TS 19102 | `asce55` (β·L_t, biaxial 0.8 rule, seam types) | `asce55` |
+| `member_check.py` | EN 1993-1-1 | AISC 360-22 LRFD/ASD (`aisc_member.py`) | SBC 306: φc 0.85, φv 0.90, LRFD only [U] |
+| `steel_joint_checks.py` weld / bolts / anchor | EN 1993-1-8, EN 1992-4 | AISC J2/J3, ACI 318-19 Ch. 17 | same as US (SBC 306/304) |
+| `pin_connection.py` | EN 1993-1-8 | AISC D5/J7 govern the lug | same as US, LRFD |
+| `cable_calc.py resist` | EN 1993-1-11 governs | ASCE 19 governs | ASCE 19 |
+| `foundation_check.py block` | EN 1997 EQU/GEO | 0.9D + 1.0W, sliding φ [U] | same, plus SBC 303 soils note |
+| `report.py` | code system, editions and caveats in the design basis | | SBC 2024 caveat |
+
+`make-cases` turns characteristic loads (D, S, W…, Lr) into factored cases for `run_cases.py`, one per combination
+and wind case. Use `--set uls` for steel, cables and foundations, and `--set membrane` for the membrane check.
+**SBC values are from the 2018 edition. SBC 2024 has been mandatory since July 2025, so confirm the values.**
+See `reference/codes-eu-us-saudi.md`.
 
 ## Code-factor register (one place for every code value)
 All tools read partial factors, stress factors, γR, k_e, SLS limits, ASCE factors and more from

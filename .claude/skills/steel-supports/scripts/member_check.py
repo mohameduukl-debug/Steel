@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Steel member check to EN 1993-1-1 for CHS, RHS/SHS and I/H sections.
+"""Steel member check to EN 1993-1-1 (--code EU, default), AISC 360-22 (--code US, LRFD or ASD) or
+SBC 306 (--code SA: AISC based, LRFD only, φc = 0.85 / φv = 0.90 per the 2018 AR text [U])
+for CHS, RHS/SHS and I/H sections (AISC/SBC checks in aisc_member.py).
 
 For masts, struts, booms, arch segments (as straight members), edge beams and
 frames of tensile structures.
@@ -28,6 +30,9 @@ Examples
   python3 member_check.py --section SHS:150x8 --L 6 --N 300 --My 25 --Mz 10 --cold
   python3 member_check.py --section IPE300 --L 6 --N 50 --My 80 --Vz 60 --kLT 1.0 --psi-LT 0
   python3 member_check.py --section HEB200 --L 5 --N 600 --My 30 --ky 1 --kz 1
+  python3 member_check.py --section CHS:219.1x8 --L 7.5 --N 420 --My 12 --code US            # AISC 360 LRFD
+  python3 member_check.py --section I:356:368:11.2:18:15 --L 4.572 --N 3000 --code US --method ASD
+  python3 member_check.py --section CHS:219.1x8 --L 7.5 --N 420 --My 12 --code SA --sensitivity   # SBC 306
   python3 member_check.py --list
 """
 from __future__ import annotations
@@ -449,6 +454,12 @@ def main(argv=None):
     ap.add_argument("--psi-z", type=float, default=0.0)
     ap.add_argument("--psi-LT", type=float, default=0.0, help="end-moment ratio for C1 / CmLT")
     ap.add_argument("--factors", default=None)
+    ap.add_argument("--code", choices=CF.CODES, default=None, help="EU (EN 1993-1-1) | US (AISC 360-22) | SA (SBC 306)")
+    ap.add_argument("--method", choices=["LRFD", "ASD"], default="LRFD", help="US: LRFD or ASD (SA: LRFD only)")
+    ap.add_argument("--Lb", type=float, default=None, help="US/SA: unbraced length for LTB [m] (default kz·L)")
+    ap.add_argument("--Cb", type=float, default=None, help="US/SA: C_b (default from --psi-LT, F1-1)")
+    ap.add_argument("--second-order", action="store_true", help="US/SA: moments are already second-order (B1 = 1)")
+    ap.add_argument("--sensitivity", action="store_true", help="SA: re-check over the φc / φv ranges [U]")
     a = ap.parse_args(argv)
     if a.factors:
         os.environ["TENSILE_FACTORS"] = a.factors
@@ -465,6 +476,9 @@ def main(argv=None):
           f"Iy={sec.Iy / 1e4:.1f} Iz={sec.Iz / 1e4:.1f} cm⁴  Wpl,y={sec.Wpl_y / 1e3:.1f} Wpl,z={sec.Wpl_z / 1e3:.1f} cm³  "
           f"It={sec.It / 1e4:.2f} cm⁴" + (f"  Iw={sec.Iw / 1e6:.2f}e3 cm⁶" if sec.Iw else "") +
           f"  mass={sec.mass:.1f} kg/m")
+    code = CF.code(a.code)
+    if code in ("US", "SA"):
+        return main_aisc(a, sec, code)
     print(f"Partial factors: {CF.tag('steel.gM0')}, {CF.tag('steel.gM1')};  fy={a.fy:g} MPa, L={a.L} m")
     rows, res = check(sec, a.fy, a.L, a.N, a.My, a.Mz, a.Vy, a.Vz, a.ky, a.kz, a.kLT, a.psi_y, a.psi_z, a.psi_LT)
     print(f"Class {res['class']}  ({res['class_info']})")
@@ -484,6 +498,31 @@ def main(argv=None):
     ok = worst <= 1 and ("warning" not in res)
     print(f"Governing utilisation {worst:.2f} -> {'OK' if ok else 'NOT OK'}")
     return worst, res
+
+
+def main_aisc(a, sec, code):
+    import aisc_member as AM
+    kw = dict(Kx=a.ky, Ky=a.kz, Lb=a.Lb if a.Lb is not None else (a.kLT or a.kz) * a.L, Cb=a.Cb,
+              psi_x=a.psi_y, psi_y=a.psi_z, psi_LT=a.psi_LT, code=code, method=a.method, second_order=a.second_order)
+    # EN naming -> AISC: strong axis y -> x, weak z -> y; V_z (strong-axis shear) -> V_y
+    rows, info = AM.check(sec, a.fy, a.L, a.N, a.My, a.Mz, a.Vy, a.Vz, **kw)
+    f = info["factors"]
+    std = "SBC 306 (AISC 360 based; 2018 AR values)" if code == "SA" else "AISC 360-22"
+    print(f"{std} {f['label']}: φc/Ωc→{f['c']:.3f}, φb→{f['b']:.3f}, φv→{f['v']:.3f}; "
+          f"E = {CF.get('aisc.E'):g} MPa; Fy = {a.fy:g} MPa, L = {a.L} m")
+    w = AM.report(rows, "")
+    if code == "SA":
+        print("SBC 306-18: LRFD only; φc = 0.85, φv = 0.90 'in all cases' from the Arabic text [U] — confirm in the "
+              "English CR and the SBC 2024 edition.")
+    if code == "SA" and a.sensitivity:
+        gov = lambda **k: max(d / c for _, d, c, _ in AM.check(sec, a.fy, a.L, a.N, a.My, a.Mz, a.Vy, a.Vz,  # noqa
+                                                                **kw, **k)[0])
+        print(CF.sens_line("φc (SBC 306)", CF.sensitivity(lambda v: gov(phi_c=v), "sbc.phi_c_306")))
+        if a.Vy or a.Vz:
+            print(CF.sens_line("φv (SBC 306)", CF.sensitivity(lambda v: gov(phi_v=v), "sbc.phi_v_306")))
+    print("Notes: effective-length method with B1 (App. 8) unless --second-order; for the direct analysis method use "
+          "second-order moments with EI* = 0.8τbEI. Net-section rupture, connections and local effects separately.")
+    return w, info
 
 
 if __name__ == "__main__":

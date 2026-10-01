@@ -149,6 +149,7 @@ def run(model_path, cases_path, out=None, verbose=False):
                      "warp_max": round(max(warp), 2) if warp else None,
                      "weft_max": round(max(weft), 2) if weft else None,
                      "duration": case.get("duration") or ("short" if case["name"].upper().startswith("W") else "long"),
+                     "combo_type": case.get("combo_type"),
                      "stress_min": round(min(mem), 2) if mem else None,
                      "cable_max": round(max(e["force"] for e in cab), 1) if cab else None,
                      "cable_min": round(min(e["force"] for e in cab), 2) if cab else None,

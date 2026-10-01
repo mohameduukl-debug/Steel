@@ -50,6 +50,8 @@ cut = load("fabrication-drawings", "cutting_pattern")
 dxfw = load("fabrication-drawings", "dxf_writer")
 nestm = load("fabrication-drawings", "nest_panels")
 msel = load("membrane-fabric", "material_select")
+loads = load("tensile-structures", "loads")
+aisc = load("steel-supports", "aisc_member")
 CF = load("tensile-structures", "factors")
 
 
@@ -494,7 +496,7 @@ class TestSensitivity(unittest.TestCase):
 
     def test_every_unverified_factor_has_a_range(self):
         for path, e in CF.iter_entries():
-            if e["status"] == "U":
+            if e["status"] == "U" and not e.get("info"):            # info = edition notes, not a numeric factor
                 self.assertIsNotNone(CF.frange(path), path)
                 lo, hi = CF.frange(path)
                 self.assertLessEqual(lo, hi, path)
@@ -648,6 +650,93 @@ class TestMembraneExtras2(unittest.TestCase):
         self.assertNotIn("Chukoh-FGT-800", [k for k, _ in ok])
         ok, _ = msel.select({"translucency": 80})
         self.assertEqual({v["family"] for _, v in ok}, {"ETFE"})
+
+
+class TestCodeSystems(unittest.TestCase):
+    """EU / US / Saudi code systems: combinations, wind, AISC 360 / SBC 306, ACI 318, ASCE 55."""
+
+    def test_combinations(self):
+        us = {c["name"]: c for c in loads.combos("US", "uls")}
+        self.assertEqual(us["0.9D+1.0W"]["D"], 0.9)
+        self.assertEqual(us["1.2D+1.0S+0.5W"]["S"], 1.0)             # ASCE 7-22: strength-level snow
+        sa = loads.combos("SA", "uls")
+        self.assertTrue(all("S" not in c for c in sa))                # SBC 301-18: no snow
+        eu = {c["name"]: c for c in loads.combos("EU", "uls")}
+        self.assertAlmostEqual(eu["1.35G+1.5S+0.9W"]["W"], 1.5 * 0.6)
+        mem = {c["name"]: c for c in loads.combos("US", "membrane")}
+        self.assertEqual(mem["P+D+0.6W"]["beta"], 0.33)
+        self.assertEqual(mem["P+D"]["beta"], 0.17)
+
+    def test_make_cases(self):
+        spec = {"loads": {"D": {"snow": 0.02}, "S": {"snow": 0.5}, "W_up": {"pressure": 0.6},
+                          "W_down": {"pressure": -0.3}}}
+        out = loads.make_cases(spec, "EU", "uls")
+        c = {x["name"]: x for x in out["cases"]}["1.35G+1.5S+0.9W[W_up]"]
+        self.assertAlmostEqual(c["snow"], 1.35 * 0.02 + 1.5 * 0.5)
+        self.assertAlmostEqual(c["pressure"], 0.9 * 0.6)
+        self.assertEqual(c["duration"], "short")
+
+    def test_wind_en_and_asce(self):
+        # EN 1991-1-4, terrain II, z = 10 m: c_e(z) = 2.35 (Figure 4.2)
+        r = loads.qp_en(25.0, 10.0, "II")
+        self.assertAlmostEqual(r["ce"], 2.35, delta=0.01)
+        self.assertAlmostEqual(r["qp"], 2.35 * 0.5 * 1.25 * 25 ** 2 / 1e3, delta=0.005)
+        # ASCE 7-22 Table 26.10-1: exposure B at 100 ft -> K_z = 0.95; ASCE 7-10/16 Table: C at 20 ft -> 0.90
+        self.assertAlmostEqual(loads.kz_asce(30.48, "B", "22"), 0.95, delta=0.01)
+        self.assertAlmostEqual(loads.kz_asce(6.096, "C", "16"), 0.90, delta=0.01)
+        self.assertAlmostEqual(loads.kz_asce(10.0, "C", "16"), 1.00, delta=0.01)
+        q = loads.q_asce(50.0, 10.0, "C", "16")
+        self.assertAlmostEqual(q["q"], 0.613 * q["Kz"] * 0.85 * 2500 / 1e3)
+
+    def W14x90(self):
+        return memb.Section("I:355.6:368.3:11.18:18.03:15.2")
+
+    def test_aisc_w14x90_manual_values(self):
+        # AISC Manual Table 4-1a: W14x90, Lc = 15 ft, Fy = 50 ksi -> φcPn = 1000 kips (4448 kN)
+        rows, info = aisc.check(self.W14x90(), 345, 4.572, 100.0)
+        self.assertAlmostEqual(info["Pc"] / 4448.2, 1.0, delta=0.015)
+        # W14x90 noncompact flange (F3): φbMn = 574 kip-ft (778.2 kNm) for short Lb
+        rows, info = aisc.check(self.W14x90(), 345, 1.0, 10.0, Mx=100.0)
+        self.assertAlmostEqual(info["Mcx"] / 778.2, 1.0, delta=0.015)
+
+    def test_sbc306_and_asd_factors(self):
+        sec = memb.Section("CHS:219.1x8")
+        _, us = aisc.check(sec, 355, 7.5, 420.0)
+        _, sa = aisc.check(sec, 355, 7.5, 420.0, code="SA")
+        _, asd = aisc.check(sec, 355, 7.5, 420.0, method="ASD")
+        self.assertAlmostEqual(sa["Pc"] / us["Pc"], 0.85 / 0.90)       # SBC 306-18: φc = 0.85
+        self.assertAlmostEqual(asd["Pc"] / us["Pc"], (1 / 1.67) / 0.90)
+        with self.assertRaises(SystemExit):
+            aisc.check(sec, 355, 7.5, 420.0, code="SA", method="ASD")  # SBC 306: LRFD only
+
+    def test_aisc_slender_chs_and_cb(self):
+        sec = memb.Section("CHS:600x5")
+        Ae, _ = aisc.effective_area(sec, 355, 300, 200000)
+        self.assertAlmostEqual(Ae / sec.A, 0.038 * 200000 / (355 * 120) + 2 / 3)   # E7-6
+        self.assertAlmostEqual(aisc.cb_linear(0.0), 12.5 / 7.5)                 # 1.67
+        self.assertAlmostEqual(aisc.cb_linear(-1.0), 12.5 / 5.5)                # 2.27
+
+    def test_aci_anchor_bolts_welds(self):
+        rows, info = joint.anchor_group_aci(2, 2, 200, 200, 400, 400, 250, 24, 45.6, "8.8", 30, 60)
+        self.assertAlmostEqual(info["Nb"], 10 * math.sqrt(30) * 250 ** 1.5 / 1e3)
+        self.assertAlmostEqual(info["Ncbg"], (375 + 200 + 375) ** 2 / (9 * 250 ** 2) * info["Nb"])   # c capped at 1.5h_ef
+        rows, _ = joint.bolts_aisc([(0, 0)], 0, 50, 0, 0, 20, "A325", 15, 490, 45, 0, True)
+        self.assertAlmostEqual(rows[0][2], 0.75 * 372 * math.pi * 100 / 1e3)
+        rows, _ = joint.weld_aisc(100, 90, 200, 6, 0, 0, 482, 2)
+        self.assertAlmostEqual(rows[0][2], 0.75 * 0.6 * 482 * 1.5 * 6)          # θ = 90°: 1.5 × strength
+
+    def test_asce55_membrane(self):
+        al, _ = mem.allowable(112, "asce55", "wind", "PES/PVC")
+        self.assertAlmostEqual(al, 112 * 0.33 * 0.75)
+        al, _ = mem.allowable(112, "asce55", "snow", "PES/PVC", seam="sewn")
+        self.assertAlmostEqual(al, 112 * 0.27 * 0.75 * 0.6)
+        rows = mem.point_utils(8.0, 7.0, 112, 108, "asce55", "wind", "PES/PVC", 0.8)
+        bi = [r for r in rows if r[0].startswith("biaxial")][0]
+        self.assertAlmostEqual(bi[2], 0.8 * 0.33 * 0.75 * 220)
+
+    def test_foundation_us_stability(self):
+        rows, info = found.block(2.5, 2.5, 1.5, 60, 45, 0.3, 0.45, 200, code="SA")
+        self.assertAlmostEqual(rows[0][2], 0.9 * info["W_kN"])                   # 0.9D + 1.0W
 
 
 class TestJoints(unittest.TestCase):

@@ -20,6 +20,7 @@ python3 cable_calc.py rod    --d 30 --fy 460 --fu 610 --FEd 180 --fitting-Rd 250
 python3 cable_calc.py freq-tension --L 15 --m 3.4 --EA 20000 --f 1:2.75 --f 2:5.52 --f 3:8.30   # force from frequencies
 python3 cable_calc.py stress-turns --L 10 --EA 14000 --F1 5 --F2 20 --pitch 3.5 --w 0.02   # turnbuckle turns
 python3 cable_calc.py resist --Fmin 367 --termination ferrule --FEd 125 --Fser 85 --sensitivity
+python3 cable_calc.py resist --Fmin 367 --FEd 125 --T-asce 85 --code SA    # ASCE 19 governs (US, Saudi)
 python3 ../../tensile-connections/scripts/fatigue_check.py --cable spiral_socket --spectrum 60:2e6   # fatigue
 ```
 - `rod`: EN 1993-1-11 group A bars are designed to EN 1993-1-1/1-8. N_t,Rd = min(A_g·f_y/γM0, k2·f_u·A_s/γM2),

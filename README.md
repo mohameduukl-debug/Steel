@@ -52,6 +52,16 @@ python3 $S/tensile-connections/scripts/pin_connection.py --F 250 --Fser 170 --d 
 python3 $S/fabrication-drawings/scripts/cutting_pattern.py cone.json --strip 2 --comp-warp 0.5 --comp-weft 2 --out cone_patterns
 ```
 
+## Code systems: EU, US, Saudi
+Every tool that applies a code takes `--code EU|US|SA` (or `TENSILE_CODE`):
+- **EU:** Eurocodes and CEN/TS 19102.
+- **US:** ASCE 7-22, AISC 360-22 (LRFD/ASD), ASCE 55, ASCE 19 and ACI 318-19 Chapter 17.
+- **SA:** Saudi Building Code SBC 301/306/304/201. Values are from the 2018 edition; the 2024 edition is now
+  mandatory, so confirm them.
+
+`tensile-structures/scripts/loads.py` gives load combinations, wind reference pressure and factored cases for
+`run_cases.py`. See `.claude/skills/tensile-structures/reference/codes-eu-us-saudi.md`.
+
 ## Code factors
 Every code value (partial factors, stress factors, γR, k_e, SLS limits …) sits in one register,
 `.claude/skills/tensile-structures/reference/code_factors.json`, tagged V/C/U. Override it per project with
@@ -81,6 +91,8 @@ Claude loads `tensile-structures` first and then the specialist skills and tools
   from the Timoshenko & Gere table, so arch design uses the lower of the two α_cr values.
 * Cable force from frequencies recovers T and EI exactly. The Irvine correction recovers T when λ² ≈ 190 (the string
   model is 3.5× off) and reproduces Irvine's crossover ω̄ = 2π at λ² = 4π². ISO 898-1 stress areas match.
+* AISC 360 member checks reproduce AISC Manual values for a W14×90 (φcPn = 1000 kips at L_c = 15 ft; φbMn =
+  574 kip-ft). EN 1991-1-4 q_p matches c_e = 2.35 (terrain II, 10 m). ASCE 7 K_z matches the 7-22 and 7-16 tables.
 * The panel frequency reduces to the classical rectangular-membrane result when the added mass is zero.
 
 ## Important limitations

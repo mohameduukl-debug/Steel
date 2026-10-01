@@ -11,6 +11,11 @@ Methods
            (these assume ≥75 % strength retention, i.e. ASCE 55 L_t = 0.75)
   japan    MLIT Notification 666 style: 1/8 of strength long-term, 1/4 short-term
            (value reported in literature — verify before use)
+  asce55   ASCE 55 (US; Saudi via SBC 201 §3102.1.1): T_r = β·L_t·T_s ≥ T_f per direction and
+           0.8·β·L_t·(T_sw + T_sf) ≥ T_fw + T_ff; β = 0.17 (P+D), 0.27 (P+D+S/Lr), 0.33 (P+D+W),
+           0.27 (P+D+T) [ASCE 55-10 Table 4-2]; L_t = 0.75 permanent, 0.6 handled; seams by type
+           (heat-sealed 1.0, adhesive 0.5, sewn 0.6, sewn protected 0.9 of L_t). Stresses at ASD
+           load level (loads.py combos --set membrane). Default method for --code US and SA.
   partial  limit-state format of CEN/TS 19102:2023 / German "A-factor" practice:
               n_Rd = f_k / (γ_M · k1 · k2 · k3 · k4)
            with the k (A) factors for biaxial/size, load duration, ageing,
@@ -67,14 +72,30 @@ def load_lib():
         return json.load(fh)
 
 
+ASCE55_OPTS = {"handled": False, "seam": "heat"}     # set from the CLI (--handled, --seam-type)
+ASCE55_COMBO = {"prestress": "P+D", "dead": "P+D", "snow": "P+D+S", "live": "P+D+S", "wind": "P+D+W",
+                "temperature": "P+D+T", "installation": "P+D+W"}
+
+
 def factor_key(method, case):
     """register key of the factor that governs allowable() for this method/case."""
     dur = CASES[case]
-    return {"factor": f"membrane.stress_factor_{dur}", "fm": None,
+    return {"factor": f"membrane.stress_factor_{dur}", "fm": None, "asce55": None,
             "japan": f"membrane.japan_{dur}_divisor", "partial": "membrane.partial"}[method]
 
 
-def allowable(f, method, case, family, sf_short=None, sf_long=None, fm_combo="P+D+W", override=None):
+def asce55_factor(case, handled=False, seam=None, combo_type=None):
+    """β·L_t (× seam fraction) and its description for the ASCE 55 method."""
+    ct = combo_type or ASCE55_COMBO[case]
+    beta = F.get("asce55.beta")[ct]
+    Lt = F.get("asce55.Lt_handled" if handled else "asce55.Lt_permanent")
+    k = F.get("asce55.seam_Lt_factor")[seam] if seam else 1.0
+    return beta * Lt * k, (f"β {beta} ({ct}) × L_t {Lt}" + (f" × seam {seam} {k}" if seam else "")
+                           + f" = {beta * Lt * k:.3f} [{F.status('asce55.beta')}, ASCE 55-10]")
+
+
+def allowable(f, method, case, family, sf_short=None, sf_long=None, fm_combo="P+D+W", override=None,
+              handled=False, seam=None, combo_type=None):
     """allowable membrane stress; factors not given explicitly come from the factor register.
 
     override = {register key: value} replaces a register value (used by --sensitivity; for the
@@ -95,6 +116,9 @@ def allowable(f, method, case, family, sf_short=None, sf_long=None, fm_combo="P+
         key = "membrane.japan_long_divisor" if dur == "long" else "membrane.japan_short_divisor"
         k = ov.get(key, F.get(key))
         return f / k, f"1/{k:g} of strength ({dur}-term) [{F.status(key)}]"
+    if method == "asce55":
+        k, txt = asce55_factor(case, handled or ASCE55_OPTS["handled"], seam, combo_type)
+        return f * k, txt
     if method == "partial":
         tab = F.get("membrane.partial")
         p = tab.get(family, tab["other"])
@@ -119,16 +143,35 @@ def env_case(r):
     return case, ("P+D" if case == "prestress" else ("P+D+W" if case == "wind" else "P+D+S"))
 
 
+def _seam_kw(method):
+    return {"seam": ASCE55_OPTS["seam"]} if method == "asce55" else {}
+
+
+def biaxial_util(nw, nf, fw, ff, case, combo_type=None):
+    """ASCE 55 biaxial rule: (T_fw + T_ff) / (0.8·β·L_t·(T_sw + T_sf))."""
+    k, _ = asce55_factor(case, ASCE55_OPTS["handled"], None, combo_type)
+    return (nw + nf) / (F.get("asce55.biaxial") * k * (fw + ff))
+
+
 def envelope_utils(env, fw, ff, method, family, seam_eff, sf_short=None, sf_long=None, override=None):
     """[(row, dur, nw, nf, u_fabric, u_seam)] for every case of a run_cases.py envelope."""
     out = []
     for r in env["summary"]:
         case, combo = env_case(r)
+        ct = r.get("combo_type") if method == "asce55" else None
         nw_, nf_ = r.get("warp_max") or 0.0, r.get("weft_max") or 0.0
-        aw, _ = allowable(fw, method, case, family, sf_short, sf_long, combo, override)
-        af, _ = allowable(ff, method, case, family, sf_short, sf_long, combo, override)
+        aw, _ = allowable(fw, method, case, family, sf_short, sf_long, combo, override, combo_type=ct)
+        af, _ = allowable(ff, method, case, family, sf_short, sf_long, combo, override, combo_type=ct)
         uf = max(nw_ / aw, nf_ / af)
-        out.append((r, r.get("duration", "short"), nw_, nf_, uf, uf / seam_eff))
+        aws, _ = allowable(fw * seam_eff, method, case, family, sf_short, sf_long, combo, override, combo_type=ct,
+                           **_seam_kw(method))
+        afs, _ = allowable(ff * seam_eff, method, case, family, sf_short, sf_long, combo, override, combo_type=ct,
+                           **_seam_kw(method))
+        us = max(nw_ / aws, nf_ / afs)
+        if method == "asce55":
+            ub = biaxial_util(nw_, nf_, fw, ff, case, ct)
+            uf, us = max(uf, ub), max(us, ub)
+        out.append((r, r.get("duration", "short"), nw_, nf_, uf, us))
     return out
 
 
@@ -142,8 +185,13 @@ def point_utils(nw, nf, fw, ff, method, case, family, seam_eff, seam_dir="both",
         al, basis = allowable(f, method, case, family, sf_short, sf_long, fm_combo, override)
         rows.append((f"fabric {name}", n, al, basis))
         if seam_dir in (name, "both"):
-            al_s, _ = allowable(f * seam_eff, method, case, family, sf_short, sf_long, fm_combo, override)
-            rows.append((f"seam (stress {name}, eff {seam_eff:g})", n, al_s, basis))
+            al_s, bs = allowable(f * seam_eff, method, case, family, sf_short, sf_long, fm_combo, override,
+                                 **_seam_kw(method))
+            rows.append((f"seam (stress {name}, eff {seam_eff:g})", n, al_s, bs if method == "asce55" else basis))
+    if method == "asce55" and nw is not None and nf is not None:
+        k, _ = asce55_factor(case, ASCE55_OPTS["handled"])
+        rows.append(("biaxial 0.8·β·L_t·(T_sw+T_sf)", nw + nf, F.get("asce55.biaxial") * k * (fw + ff),
+                     f"ASCE 55-10 §4.6.1 [{F.status('asce55.biaxial')}]"))
     return rows
 
 
@@ -201,7 +249,12 @@ def main(argv=None):
     ap.add_argument("--nf", type=float, help="max weft stress from analysis [kN/m]")
     ap.add_argument("--nmin", type=float, default=None, help="min principal stress (slack check) [kN/m]")
     ap.add_argument("--case", choices=list(CASES), default="wind")
-    ap.add_argument("--method", choices=["factor", "fm", "japan", "partial"], default="factor")
+    ap.add_argument("--method", choices=["factor", "fm", "japan", "partial", "asce55"], default=None,
+                    help="design basis (default: factor for --code EU, asce55 for US and SA)")
+    ap.add_argument("--code", choices=F.CODES, default=None, help="code system EU | US | SA (env TENSILE_CODE)")
+    ap.add_argument("--seam-type", choices=["heat", "adhesive", "sewn", "sewn-protected"], default="heat",
+                    help="ASCE 55 seam type (L_t fraction, Table 4-1)")
+    ap.add_argument("--handled", action="store_true", help="ASCE 55: repeatedly handled / demountable (L_t ≤ 0.6)")
     ap.add_argument("--sf-short", type=float, default=None, help="override short-term stress factor")
     ap.add_argument("--sf-long", type=float, default=None, help="override long-term stress factor")
     ap.add_argument("--factors", default=None, help="project code-factor file (overrides register)")
@@ -233,6 +286,15 @@ def main(argv=None):
         os.environ["TENSILE_FACTORS"] = a.factors
     if a.seam_eff is None:
         a.seam_eff = F.get("membrane.seam_efficiency")
+    a.code = F.code(a.code)
+    if a.method is None:
+        a.method = "factor" if a.code == "EU" else "asce55"
+    ASCE55_OPTS.update(handled=a.handled, seam=a.seam_type)
+    if a.code == "SA":
+        print("Code: SBC 201-18 §3102.1.1 -> ASCE 55; membrane noncombustible or NFPA 701 (§3102.3.1); "
+              "2018 values, confirm against SBC 2024 [U].")
+    elif a.code == "US":
+        print("Code: ASCE 55 (β·L_t method; values from ASCE 55-10 — 55-16 not verified).")
 
     lib = load_lib()
     if a.list:
@@ -314,7 +376,7 @@ def main(argv=None):
                 print(F.sens_line(f"{key.split('.')[-1]} (envelope, seams)", res))
             if not keys:
                 print("  sensitivity: no unverified factor in this method (all [V]/[C] or user values)")
-        if a.method != "partial" and any(abs(r.get("factor", 1.0) - 1.0) > 1e-9 for r in env["summary"]):
+        if a.method not in ("partial",) and any(abs(r.get("factor", 1.0) - 1.0) > 1e-9 for r in env["summary"]):
             print("WARNING: some cases were run with load factors ≠ 1, but global stress-factor methods "
                   "(factor/fm/japan) expect CHARACTERISTIC loads -> safety counted twice (conservative). "
                   "Run characteristic cases for these methods, or use --method partial with factored cases.")

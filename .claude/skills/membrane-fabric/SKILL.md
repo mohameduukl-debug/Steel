@@ -1,6 +1,6 @@
 ---
 name: membrane-fabric
-description: Membrane fabric materials and membrane design for tensile structures — PVC-coated polyester (Types I–V), PTFE-coated glass, silicone-coated glass, ETFE foil, ePTFE (Tenara), mesh and shade cloth. Use to choose a fabric, get strength/stiffness/compensation data, set prestress, check membrane and seam stresses (stress-factor, FM DS 1-59, Japanese, CEN/TS 19102 partial-factor format), define seams and reinforcements, and handle load cases, ponding, wrinkling, fire and durability.
+description: Membrane fabric materials and membrane design for tensile structures — PVC-coated polyester (Types I–V), PTFE-coated glass, silicone-coated glass, ETFE foil, ePTFE (Tenara), mesh and shade cloth. Use to choose a fabric, get strength/stiffness/compensation data, set prestress, check membrane and seam stresses (stress-factor, FM DS 1-59, Japanese, CEN/TS 19102 partial-factor format, ASCE 55 for US and Saudi SBC 201), define seams and reinforcements, and handle load cases, ponding, wrinkling, fire and durability.
 ---
 
 # Membrane fabric design
@@ -23,6 +23,14 @@ python3 membrane_check.py --material PVC-II --prestress 2.0 2.0                 
 - `--method factor` (default): allowable = f/SF. SF = 4 short-term (wind), 5 long-term (snow, prestress); both editable.
 - `--method fm`: FM Global DS 1-59 factors on new-fabric strength (8 for P+D, 5 with S/W/T/L/R).
 - `--method japan`: 1/8 long-term, 1/4 short-term (reported; verify).
+- `--method asce55` (US; Saudi via SBC 201 §3102.1.1; the default for `--code US|SA`): T_r = β·L_t·T_s per
+  direction, plus the biaxial rule 0.8·β·L_t·(T_sw + T_sf) ≥ T_fw + T_ff.
+  - β = 0.17 (P+D), 0.27 (P+D+S/Lr), 0.33 (P+D+W), 0.27 (P+D+T).
+  - L_t = 0.75 for a permanent structure, ≤ 0.6 with `--handled`.
+  - `--seam-type heat|adhesive|sewn|sewn-protected` multiplies L_t by 1.0 / 0.5 / 0.6 / 0.9.
+  - Values from ASCE 55-10 (read in full); 55-16 is not verified.
+  - Feed stresses from ASD-level runs: `loads.py make-cases --set membrane`.
+  - SBC also requires the membrane to be noncombustible or pass NFPA 701.
 - `--method partial`: n_Rd = f_k/(γM·A0·A1·A2·A3). The defaults are **German A-factor practice** values: fabric γM 1.4,
   A0 1.0–1.2, A1 1.6–1.7, A2 1.1–1.2, A3 1.1–1.25 (Bautechnik; Knippers' *Construction Manual*). They are not
   CEN/TS 19102 values. Replace them with CEN/TS 19102 Annex C, National Annex or project values, and feed in design

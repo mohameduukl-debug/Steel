@@ -1,6 +1,6 @@
 ---
 name: steel-supports
-description: Structural steel supports of tensile fabric structures — masts (pinned, guyed, flying, tapered), struts, booms, arches, compression/tension rings, edge beams, frames, base hinges, base plates and foundations/ground anchors. Use to size and check steel members carrying membrane and cable forces (EN 1993-1-1 / AISC 360), choose base fixity, handle second-order effects, execution class (EN 1090-2) and pass reactions between membrane model and steel design.
+description: Structural steel supports of tensile fabric structures (EN 1993 / AISC 360 / SBC 306) — masts (pinned, guyed, flying, tapered), struts, booms, arches, compression/tension rings, edge beams, frames, base hinges, base plates and foundations/ground anchors. Use to size and check steel members carrying membrane and cable forces (EN 1993-1-1 / AISC 360), choose base fixity, handle second-order effects, execution class (EN 1090-2) and pass reactions between membrane model and steel design.
 ---
 
 # Steel supports for tensile structures
@@ -21,6 +21,26 @@ python3 member_check.py --section I:500:250:10:20:12:welded --L 8 --N 200 --My 3
 - **Class 4** I/RHS: effective section to EN 1993-1-5 §4.4 (ρ for internal and outstand parts, web in bending
   ψ = −1; neutral-axis shift neglected). Class 4 CHS stops with a warning (EN 1993-1-6 shell buckling).
 - **Shear–moment interaction** 6.2.8: for V > 0.5 V_pl, the bending resistance is reduced with ρ = (2V/V_pl − 1)².
+
+## US (AISC 360-22) and Saudi (SBC 306) member checks: `scripts/aisc_member.py` via `member_check.py --code`
+```bash
+python3 member_check.py --section CHS:219.1x8 --L 7.5 --N 420 --My 12 --code US                # LRFD
+python3 member_check.py --section CHS:219.1x8 --L 7.5 --N 420 --My 12 --code US --method ASD
+python3 member_check.py --section SHS:150x8 --L 6 --N 300 --My 25 --code SA --sensitivity       # SBC 306
+python3 member_check.py --section IPE300 --L 6 --N 50 --My 80 --Vz 60 --code US --Lb 3 --psi-LT 0
+```
+- E3 flexural buckling, E4 torsional buckling (I sections), E7 slender elements: round HSS A_e formula, and
+  effective widths for RHS walls and I flanges and webs.
+- F2/F3 (I: yielding, LTB with C_b, flange local buckling), F6 (minor axis), F7 (RHS flange/web local buckling,
+  LTB), F8 (round HSS).
+- G2.1/G4/G5/G6 shear.
+- H1-1 interaction with B1 = C_m/(1 − αP_r/P_e1) (Appendix 8) unless `--second-order`.
+- Validation: AISC Manual W14×90, L_c = 15 ft: φcPn = 1000 kips, reproduced within 0.1 %; noncompact-flange
+  φbMn = 574 kip-ft, within 0.6 %.
+- **SBC 306-18 (Arabic text):** LRFD only, φc = 0.85 and φv = 0.90 "in all cases" [U]. `--sensitivity`
+  re-checks with the AISC values. Confirm against the English CR and the SBC 2024 edition.
+- Foundations: `foundation_check.py block --code US|SA` uses 0.9D + 1.0W (strength-level wind) and a sliding
+  φ = 0.8 [U]. `helical` is code-independent (manufacturer correlation plus a proof test).
 
 ## Tool: `scripts/frame2d.py` (arches, tapered/guyed masts, frames: stability + 2nd order)
 ```bash

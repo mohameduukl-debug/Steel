@@ -38,6 +38,23 @@ python3 steel_joint_checks.py baseplate --col CHS --D 219.1 --tc 8 --B 400 --H 4
 - clampbar: bolt force = n × peak factor × spacing; warns above ~200 mm spacing. The aluminium plate goes to EN 1999 separately.
 - baseplate: compression with the equivalent T-stub (c = t√(f_y/3f_jd)), uplift with T-stub modes 1, 2, 1-2 (no prying) and 3 per anchor, shear by friction plus anchors (α_bc). Anchor embedment and concrete breakout (EN 1992-4) are not included.
 
+### US / Saudi checks (`--code US|SA` on weld, bolts, anchor; `pin_connection.py --code`)
+```bash
+python3 steel_joint_checks.py weld --F 210 --angle 70 --L 180 --a 8 --e 110 --code US          # AISC J2.4
+python3 steel_joint_checks.py bolts --n-rows 2 --n-cols 2 --p1 80 --p2 80 --Vy 120 --d 20 --grade A325 \
+        --t 15 --e1 45 --N 40 --code US --method ASD                                            # AISC J3
+python3 steel_joint_checks.py anchor --n1 2 --n2 2 --hef 250 --d 24 --N 60 --code SA          # ACI 318 Ch.17
+python3 pin_connection.py --F 210 --d 36 --d0 37 --t 25 --a-lug 50 --c-lug 35 --code SA        # AISC D5/J7
+```
+- Weld: 0.6·F_EXX·(1 + 0.5·sin^1.5θ)·throat with φ 0.75 / Ω 2.00 (E70 = 482 MPa).
+- Bolts: F_nt and F_nv from Table J3.2 (A325, A490; EN grades via 0.75F_u and 0.45/0.563F_u), the J3-3a
+  combination, and bearing 2.4dtF_u or tearout 1.2l_c·t·F_u.
+- Anchors: N_sa = A_se·f_uta; N_b = k_c√f'c·h_ef^1.5 (k_c = 10 SI); A_Nc/A_Nco with 1.5h_ef; ψ_ed and
+  ψ_c,N (1.25 uncracked); pullout ψ_c,P·8A_brg·f'c; φ 0.75 (steel) and 0.70 (cast-in breakout and pullout).
+- SBC 304 uses ACI 318-14 Chapter 17, with the same equations. SBC 306 is LRFD only.
+- Pins: with `--code US|SA` the AISC D5/J7 lug checks govern the plate. The EN pin shear, bending and SLS rows
+  stay as the pin design method, because AISC has no pin-bending rule.
+
 ### EN 1992-4 anchors, aluminium clamp plates, fatigue
 ```bash
 python3 steel_joint_checks.py anchor --n1 2 --n2 2 --s1 200 --s2 200 --c1 400 --c2 400 --hef 250 --d 24 --N 150
