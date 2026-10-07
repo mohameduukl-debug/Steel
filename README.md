@@ -79,6 +79,15 @@ Open this repo in Claude Code and ask naturally, e.g.:
 
 Claude loads `tensile-structures` first and then the specialist skills and tools.
 
+### Optional: text-to-cad plugin (3D CAD models)
+`.claude/settings.json` enables the [text-to-cad](https://github.com/earthtojake/text-to-cad) plugin (MIT, from the
+`earthtojake` marketplace, `latest` branch). Claude Code asks to install it the first time you trust this folder. It adds CAD skills
+(STEP/GLB/STL/3MF models, DXF, engineering drawings, DFM checks) and a local `cad` MCP server. It needs
+[uv](https://docs.astral.sh/uv/), and the first run downloads the `cadgen` runtime from PyPI. It is a general CAD tool, not part of
+the tensile design checks: use it for 3D geometry of steel parts (corner plates, mast heads, base plates) once this repo's
+tools have sized them. To install it by hand: `claude plugin marketplace add earthtojake/text-to-cad#latest`, then
+`claude plugin install text-to-cad@earthtojake`.
+
 ## Validation
 * Pin checks reproduce an independent EN 1993-1-8 worked example exactly (shear 483 kN, bearing 426 kN, M_Ed 1.81 kNm, a ≥ 44.9 mm …).
 * FDM: symmetric reactions, zero resultant without load, geometry invariant to q-scaling.
