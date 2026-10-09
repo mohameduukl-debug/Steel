@@ -635,7 +635,7 @@
     "k_cr_N": {
       "value": 8.9,
       "status": "V",
-      "source": "EN 1992-4 7.2.1.4 cast-in headed fasteners, cracked"
+      "source": "EN 1992-4 7.2.1.4 cast-in headed fasteners, cracked. IDEA StatiCa https://www.ideastatica.com/support-center/support-center-knowledge-base/check-of-anchors-according-to-eurocode: 'for cast-in anchors (with washer plates) k1 = 8.9 for cracked concrete and k1 = 12.7 for non-cracked concrete'; Hilti PROFIS cast-in headed report https://files-ask.hilti.com/original/cf/cfip8ziqve.pdf 'k1 8.900'"
     },
     "s_cr_N_per_hef": {
       "value": 3.0,
@@ -664,8 +664,93 @@
     },
     "gamma_Ms_steel": {
       "value": "1.2*fuk/fyk>=1.4",
+      "status": "V",
+      "source": "EN 1992-4 Table 4.1: γMs = 1.2·f_uk/f_yk ≥ 1.4 (computed per anchor grade). IDEA StatiCa, https://www.ideastatica.com/support-center/support-center-knowledge-base/check-of-anchors-according-to-eurocode: 'Tension (EN 1992-4, Table 4.1): γMs = 1.2 ∙ f_uk / f_yk ≥ 1.4'"
+    },
+    "gamma_Ms_shear": {
+      "value": "1.0*fuk/fyk>=1.25 (fuk<=800, fyk/fuk<=0.8) else 1.5",
+      "status": "V",
+      "source": "EN 1992-4 Table 4.1, quoted by IDEA StatiCa (URL as gamma_Ms_steel): 'Shear (EN 1992-4, Table 4.1): γMs = 1.0 ∙ f_uk / f_yk ≥ 1.25 for f_uk ≤ 800 MPa and f_yk / f_uk ≤ 0.8; otherwise γMs = 1.5'. Hilti PROFIS report https://files-ask.hilti.com/original/x0/x0w2kzspbz.pdf uses gM,s = 1.250 for 8.8"
+    },
+    "k6_fuk_le_500": {
+      "value": 0.6,
+      "status": "V",
+      "source": "EN 1992-4 7.2.2.3.1 V0_Rk,s = k6·A_s·f_uk. IDEA StatiCa (URL as gamma_Ms_steel): 'k6 = 0.6 for anchors with f_uk ≤ 500 MPa; k6 = 0.5 otherwise'"
+    },
+    "k6_fuk_gt_500": {
+      "value": 0.5,
+      "status": "V",
+      "source": "as k6_fuk_le_500; Hilti PROFIS headed-fastener report https://files-ask.hilti.com/original/cf/cfip8ziqve.pdf: V0_Rk,s = 52.276 kN = 0.5 × 201 mm² × 520 MPa"
+    },
+    "k7_ductile": {
+      "value": 1.0,
       "status": "C",
-      "source": "EN 1992-4 Table 4.1: γMs = 1.2·f_uk/f_yk ≥ 1.4 (computed per anchor grade)"
+      "source": "EN 1992-4 Eq. (7.35) V_Rk,s = k7·V0_Rk,s; k7 = 1.0 ductile steel (rupture elongation A5 > 8 %), 0.8 otherwise. Hilti PROFIS reports show k7 = 1.000 (headed stud, cfip8ziqve.pdf) and 0.800 (screw anchor, 62zrajuzqr.pdf); the elongation limit itself is recalled, not quoted"
+    },
+    "k7_brittle": {
+      "value": 0.8,
+      "status": "C",
+      "source": "as k7_ductile"
+    },
+    "k8_hef_lt_60": {
+      "value": 1.0,
+      "status": "V",
+      "source": "EN 1992-4 7.2.2.4 V_Rk,cp = k8·N_Rk,c. IDEA StatiCa (URL as gamma_Ms_steel): 'k8 = 1 for h_ef < 60 mm; k8 = 2 for h_ef ≥ 60 mm'"
+    },
+    "k8_hef_ge_60": {
+      "value": 2.0,
+      "status": "V",
+      "source": "as k8_hef_lt_60; Hilti PROFIS cast-in headed report https://files-ask.hilti.com/original/cf/cfip8ziqve.pdf: 'k8 2.000' (h_ef = 120 mm)"
+    },
+    "k9_cracked": {
+      "value": 1.7,
+      "status": "V",
+      "source": "EN 1992-4:2018 Eq. (7.41), extract hosted by Hilti https://files-ask.hilti.com/original/29/29oep37chq.pdf: 'k9 = 1,7 for cracked concrete = 2,4 for uncracked concrete'"
+    },
+    "k9_uncracked": {
+      "value": 2.4,
+      "status": "V",
+      "source": "as k9_cracked"
+    },
+    "A0cV_per_c1sq": {
+      "value": 4.5,
+      "status": "V",
+      "source": "EN 1992-4:2018 Eq. (7.44), extract https://files-ask.hilti.com/original/29/29oep37chq.pdf: 'A0c,V ... = 4,5 c1²'; projected area limited by s ≤ 3c1, c2 ≤ 1.5c1, h < 1.5c1"
+    },
+    "psi_re_V_edge_reinf": {
+      "value": 1.4,
+      "status": "V",
+      "source": "EN 1992-4:2018 7.2.2.5(13), extract above: 'ψre,V = 1,0 fastening in uncracked concrete and fastening in cracked concrete without edge reinforcement or stirrups; ψre,V = 1,4 fastening in cracked concrete with edge reinforcement ... a ≤ 100 mm and a ≤ 2c1'"
+    },
+    "M0_Rks_factor": {
+      "value": 1.2,
+      "status": "V",
+      "source": "EN 1992-4 7.2.2.3.2 M0_Rk,s = 1.2·W_el·f_uk (IDEA StatiCa, URL as gamma_Ms_steel: 'M_Rk,s0 = 1.2 ∙ W_el ∙ f_ub'); reproduces Hilti x0w2kzspbz.pdf M0_Rk,s = 0.519 kNm for M20 8.8 with W_el from A_s"
+    },
+    "a3_per_dnom": {
+      "value": 0.5,
+      "status": "V",
+      "source": "EN 1992-4 Eq. (6.2) l_a = a3 + e1, a3 = 0.5 d_nom. IDEA StatiCa: 'l_a = 0.5 ∙ d_nom + t_mortar + 0.5 ∙ t_bp'; Hilti x0w2kzspbz.pdf: l = 34.0 mm = 16 + 16/2 + 0.5×20"
+    },
+    "alpha_M_restrained": {
+      "value": 2.0,
+      "status": "V",
+      "source": "EN 1992-4 Eq. (7.37) V_Rk,s,M = αM·M_Rk,s/l_a. IDEA StatiCa: 'α_M = 2 (\"full restraint is assumed\")'; Hilti x0w2kzspbz.pdf 'aM 2.00'. Free rotation αM = 1.0 (recalled, use when the fixture can rotate)"
+    },
+    "interaction_exp_steel": {
+      "value": 2.0,
+      "status": "V",
+      "source": "EN 1992-4 Table 7.3 Eq. (7.54), IDEA StatiCa: '(N_Ed / N_Rd,s)² + (V_Ed / V_Rd,s)² ≤ 1.0'; Hilti PROFIS 'Steel failure ... a 2.000'"
+    },
+    "interaction_exp_concrete": {
+      "value": 1.5,
+      "status": "V",
+      "source": "EN 1992-4 Table 7.3 Eq. (7.55), IDEA StatiCa: '(N_Ed / N_Rd,i)^1.5 + (V_Ed / V_Rd,i)^1.5 ≤ 1.0. The largest ratio across failure modes governs'; Hilti PROFIS 'Concrete failure ... a 1.500'"
+    },
+    "splitting_psi_h_max": {
+      "value": 2.0,
+      "status": "V",
+      "source": "EN 1992-4 Eq. (7.24) as printed in Hilti PROFIS https://files-ask.hilti.com/original/jh/jhtmzriaax.pdf: 'ψh,sp = (h/hmin)^2/3 ≤ max{1; ((hef+1.5·c1)/hmin)^2/3} ≤ 2.00'; c_cr,sp and h_min come from the ETA / product specification"
     }
   },
   "aluminium": {
@@ -700,30 +785,45 @@
       "source": "6082-T6 extrusions 5 < t ≤ 15(25) mm f_u"
     },
     "bearing_formula": {
-      "status": "U",
-      "source": "EN 1999-1-1 Table 8.5 F_b,Rd = k1·αb·f_u·d·t/γM2 (EN 1993-1-8 form; EN 1999 table not quoted verbatim)"
+      "status": "V",
+      "source": "EN 1999-1-1:2007+A1:2009 Table 8.5 Eq. (8.11)-(8.16): 'Fb,Rd = k1 αb fu d t / γM2', 'αb is the smallest of αd or fub/fu or 1,0', 'for end bolts: αd = e1/(3d0); for inner bolts: αd = p1/(3d0) - 1/4', 'for edge bolts: k1 is the smallest of 2,8 e2/d0 - 1,7 or 2,5', 'for inner bolts: k1 is the smallest of 1,4 p2/d0 - 1,7 or 2,5' (same form as EN 1993-1-8 Table 3.4)"
+    },
+    "alpha_v_stainless_bolt": {
+      "value": 0.5,
+      "status": "V",
+      "source": "EN 1999-1-1:2007+A1:2009 Table 8.5 (same table): 'for steel bolts with classes 4.8, 5.8, 6.8 and 10.9, stainless steel bolts and aluminium bolts: αv = 0,5' (shear plane through the thread)"
     }
   },
   "fatigue_EN1993_1_9": {
     "m1": {
       "value": 3.0,
       "status": "V",
-      "source": "EN 1993-1-9 7.1: m = 3 for N ≤ 5e6"
+      "source": "EN 1993-1-9:2005 7.1(3): 'Δσ_R^m N_R = Δσ_C^m 2x10^6 with m = 3 for N ≤ 5x10^6'"
     },
     "m2": {
       "value": 5.0,
       "status": "V",
-      "source": "EN 1993-1-9: m = 5 for 5e6 < N ≤ 1e8"
+      "source": "EN 1993-1-9:2005 7.1(3): 'Δσ_R^m N_R = Δσ_D^m 5x10^6 with m = 5 for 5x10^6 ≤ N ≤ 10^8'"
     },
     "D_over_C": {
       "value": 0.737,
       "status": "V",
-      "source": "Δσ_D = 0.737 Δσ_C at 5e6"
+      "source": "EN 1993-1-9 Eq. (7.1) Δσ_D = (2/5)^(1/3) Δσ_C = 0.737 Δσ_C at 5e6. IDEA StatiCa https://www.ideastatica.com/support-center/fatigue-analysis-according-to-en-1993-1-9: 'Knee point: ΔσD = (2/5)^(1/3) · Δσc'"
     },
     "L_over_C": {
       "value": 0.405,
       "status": "V",
-      "source": "Δσ_L = 0.549 Δσ_D = 0.405 Δσ_C at 1e8"
+      "source": "EN 1993-1-9:2005: 'ΔσL = (5/100)^(1/5) ΔσD = 0,549 ΔσD is the cut off limit' -> 0.549 × 0.737 = 0.405 Δσ_C at 1e8"
+    },
+    "m_shear": {
+      "value": 5.0,
+      "status": "V",
+      "source": "EN 1993-1-9:2005 7.1(2) shear curve Δτ_R^m N_R = Δτ_C^m 2x10^6 with m = 5 for N ≤ 10^8. IDEA StatiCa (URL as D_over_C): 'Shear stress ... (m = 5): NR = Δτc^m · 2·10^6 / Δτ^m'"
+    },
+    "tauL_over_C": {
+      "value": 0.457,
+      "status": "V",
+      "source": "EN 1993-1-9:2005: 'ΔτL = 0,457 ΔτC is the cut off limit'; IDEA StatiCa: 'ΔτL = (2/100)^(1/5) · Δτc'"
     },
     "gMf_safe_life_high": {
       "value": 1.35,
@@ -743,7 +843,7 @@
     "gMf_damage_tol_low": {
       "value": 1.0,
       "status": "V",
-      "source": "EN 1993-1-9 Table 3.1 damage tolerant, low consequence"
+      "source": "EN 1993-1-9:2005 Table 3.1: 'Damage tolerant 1,00 [low] 1,15 [high]; Safe life 1,15 [low] 1,35 [high]' (recommended; NA may differ)"
     }
   },
   "fatigue_cables": {
@@ -829,6 +929,48 @@
       "value": 7850,
       "status": "C",
       "source": "EN 1993-1-1:2005 3.2.6(1) unit mass of steel rho = 7850 kg/m3 (EN 1991-1-1 Table A.4: 77.0-78.5 kN/m3)"
+    }
+  },
+  "connections": {
+    "beta_j": {
+      "value": 0.6667,
+      "status": "V",
+      "source": "EN 1993-1-8:2005 6.2.5(7): 'βj is the foundation joint material coefficient, which may be taken as 2/3 provided that the characteristic strength of the grout is not less than 0,2 times ... the concrete foundation and the thickness of the grout is not greater than 0,2 times the smallest width of the steel base plate'"
+    },
+    "Cfd_sand_cement": {
+      "value": 0.2,
+      "status": "V",
+      "source": "EN 1993-1-8:2005 6.2.2(6): 'coefficient of friction between base plate and grout layer ... for sand-cement mortar 0,20'; friction credited only with compression (NOTE: tensile column force -> F_f,Rd = 0)"
+    },
+    "Lb_star_coeff": {
+      "value": 8.8,
+      "status": "C",
+      "source": "EN 1993-1-8:2005 Table 6.2: prying may develop if L_b ≤ L_b* = 8.8 m³ A_s n_b / (Σl_eff,1 t_f³) (text partly illegible in the scanned copy; Wald, JRC Eurocodes workshop 2014, https://eurocodes.jrc.ec.europa.eu/sites/default/files/2022-06/06_Eurocodes_Steel_Workshop_WALD.pdf: 'Lb,lim = 8,82 m³ As / (Leff t³)')"
+    },
+    "whitmore_angle_deg": {
+      "value": 30.0,
+      "status": "V",
+      "source": "Dowswell, AISC Engineering Journal 2019 Q3, https://ej.aisc.org/index.php/engj/article/download/1153/1152: 'Gusset plates subjected to compression loads are currently modeled as rectangular columns with an effective cross section defined by a 30° stress trajectory known as the Whitmore section'"
+    },
+    "K_thornton": {
+      "value": 0.65,
+      "status": "C",
+      "source": "Thornton (1984) equivalent-column factor for corner gussets, as used in Dowswell EJ 2019 (URL as whitmore_angle_deg): 'For the Thornton (1984) method, L = lavg = 4.71 in. and K = 0.65'. Practice value, not a code clause"
+    },
+    "aisc_J44_slenderness_limit": {
+      "value": 25.0,
+      "status": "V",
+      "source": "AISC 360-16 J4.4, quoted in Dowswell EJ 2019 (URL as whitmore_angle_deg): 'the critical stress is equal to the specified minimum yield strength when the slenderness ratio is equal to or less than 25'"
+    },
+    "alpha_curve_c": {
+      "value": 0.49,
+      "status": "V",
+      "source": "EN 1993-1-1 Table 6.1 imperfection factor of buckling curve c (solid sections), SBE Part 4 worked example A.5, https://www.steelconstruction.info/images/0/01/SBE_MS4.pdf: 'Buckling curve c, imperfection factor α = 0,49'"
+    },
+    "gM_u_tying": {
+      "value": 1.1,
+      "status": "C",
+      "source": "SCI/SBE practice for tying resistance γMu = 1.1 (SBE Part 5, https://www.steelconstruction.info/images/5/53/SBE_MS5.pdf: 'In this publication γMu has been used. A value of γMu = 1,1 is recommended'); not an EN 1993-1-8 factor"
     }
   }
 }

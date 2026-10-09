@@ -34,7 +34,7 @@ a hand calculation, or the file-format specification. Lengths in mm unless noted
 | offset_polygon | L-shape reflex corner | exact line intersection | (1050, 1050) | same | < 1e-9 | 1e-9 |
 | main | flat 4 × 6 m model, 2 panels, cw 1.5 %, cf 0.8 %, seam 50, edge 80 | hand calc | 6070 × 2114, net 11.725 m², cut 12.832 m² | same | rounding | 1 mm / 0.001 m² |
 
-## 3. DXF correctness (`dxf_reader.py` + round trips of every writer)
+## 3. DXF correctness (`dxf_reader.py` + round trips of every writer built on `dxf_writer.py`)
 | Tool | Case | Reference + source | Expected | Obtained | Error | Tolerance |
 |---|---|---|---|---|---|---|
 | dxf_reader | group-code value types, sections, tables, POLYLINE/VERTEX/SEQEND | Autodesk AutoCAD DXF Reference: Group Code Value Types (help.autodesk.com/cloudhelp/2020/ENU/AutoCAD-DXF, GUID-2553CF98…), HEADER variables ($ACADVER group 1 AC1009 = R11/R12; $INSUNITS group 70, 4 = Millimeters; GUID-A85E8E67…) | 10 malformed files rejected, valid parsed | 10/10 rejected, valid parsed | — | exact |

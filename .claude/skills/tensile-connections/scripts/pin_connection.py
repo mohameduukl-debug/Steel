@@ -78,7 +78,7 @@ def en1993(F, Fser, d, d0, t, a_lug, c_lug, fy, fu, fyp, fup, fork_t, gap,
     out.append(("Pin shear + bending interaction [-]", inter, 1.0, inter, "T3.10"))
     # net section of lug (tension across the hole) — plain EN 1993-1-1 check
     b_net = 2 * c_lug  # material both sides of hole
-    NuRd = 0.9 * b_net * t * fu / gM2
+    NuRd = CF.get("steel.k_net_EN1993_1_1") * b_net * t * fu / gM2
     out.append(("Lug net section across hole [kN]", F / 1e3, NuRd / 1e3, F / NuRd, "EN1993-1-1 6.2.3"))
     return out
 
@@ -91,17 +91,18 @@ def aisc(F_kN, d, d0, t, a_lug, w_lug, fy, fu, method="LRFD"):
     beff = min(2 * t + CF.get("aisc.beff_add_mm"), (w_lug - d0) / 2)
     # D5.1(a) tensile rupture on net effective area
     Pn = fu * 2 * t * beff
-    out.append(("D5.1a tensile rupture net effective area [kN]", Pn, 0.75 if lrfd else 1 / 2.00))
+    phi_p, phi_y = CF.get("aisc.phi_pin"), CF.get("aisc.phi_yield")
+    out.append(("D5.1a tensile rupture net effective area [kN]", Pn, phi_p if lrfd else 1 / 2.00))
     # D5.1(b) shear rupture on effective area
     Asf = 2 * t * (a_lug + d / 2)
     Pn = 0.6 * fu * Asf
-    out.append(("D5.1b shear rupture [kN]", Pn, 0.75 if lrfd else 1 / 2.00))
+    out.append(("D5.1b shear rupture [kN]", Pn, phi_p if lrfd else 1 / 2.00))
     # J7 bearing on projected area
     Pn = 1.8 * fy * d * t
-    out.append(("J7 bearing on projected area [kN]", Pn, 0.75 if lrfd else 1 / 2.00))
+    out.append(("J7 bearing on projected area [kN]", Pn, phi_p if lrfd else 1 / 2.00))
     # D2 yielding on gross section
     Pn = fy * w_lug * t
-    out.append(("D2 gross section yielding [kN]", Pn, 0.90 if lrfd else 1 / 1.67))
+    out.append(("D2 gross section yielding [kN]", Pn, phi_y if lrfd else 1 / 1.67))
     res = [(n, F / 1e3, p * phi / 1e3, F / (p * phi), "AISC") for n, p, phi in out]
     # D5.2 dimensional requirements
     res.append(("D5.2 a >= 1.33 beff [mm]", 1.33 * beff, a_lug, 1.33 * beff / a_lug, "AISC D5.2"))
@@ -152,6 +153,10 @@ def main(argv=None):
     rows = en1993(a.F, Fser, a.d, a.d0, a.t, a.a_lug, a.c_lug, a.fy, a.fu, a.pin_fy, a.pin_fu,
                   fork_t, a.gap, a.replaceable)
     print(f"Partial factors: {CF.tag('steel.gM0')}, {CF.tag('steel.gM2')}, {CF.tag('steel.gM6ser')}")
+    print(f"Assumptions: double-shear fork (2 planes), F_Ed,ser = {Fser:.1f} kN"
+          f"{' (default F/1.4)' if a.Fser is None else ''}, fork cheek {fork_t:.1f} mm"
+          f"{' (default 0.6 t)' if a.fork_t is None else ''}, pin moment F(b+4c+2a)/8 (EN 1993-1-8 Fig. 3.11), "
+          "bearing f_y = lower of plate and pin, lug net section 2c·t; lug in the cable plane (no out-of-plane load).")
     w = report(rows, f"EN 1993-1-8 pin connection  F_Ed={a.F} kN  F_Ed,ser={Fser:.1f} kN  "
                      f"pin d={a.d} hole d0={a.d0} lug t={a.t} fork cheeks {fork_t:.1f} mm")
     if a.aisc:

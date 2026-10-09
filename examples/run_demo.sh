@@ -75,7 +75,8 @@ python3 "$S/steel-supports/scripts/frame3d.py" mast --H 6 --section CHS:219.1x10
         --tie=-6,1,0:60000:10 --tie=1,-6,0:60000:10 --reactions sail_snow.json --node 0 --check | tail -15
 python3 "$S/steel-supports/scripts/frame2d.py" arch --L 20 --f 4 --n 20 --section CHS:219.1x8 --q 3.5 --check --Lz 5
 python3 "$S/tensile-connections/scripts/steel_joint_checks.py" anchor --n1 2 --n2 2 --s1 200 --s2 200 --c1 400 \
-        --c2 400 --hef 250 --d 24 --N 60
+        --c2 400 --hef 250 --d 24 --N 60 --V 25 --h 600
+python3 "$S/tensile-connections/scripts/steel_joint_checks.py" gusset --help | head -3
 python3 "$S/steel-supports/scripts/foundation_check.py" block --B 2.5 --L 2.5 --D 1.5 --V 60 --H 45 --ha 0.3 --mu 0.45 --qRd 200
 
 echo; echo "== 7. Patterns, GA DXF and steel part drawings =="

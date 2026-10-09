@@ -17,7 +17,8 @@ the fabric, the cables and the structural steel, and how the three connect.
 │   └── scripts/member_check.py, frame2d.py, frame3d.py, foundation_check.py, mast_check.py
 ├── connection-precedents/  FIRST step for any connection: Pinterest precedent search, image review, board, gate
 │   └── scripts/precedent_search.py, pinterest_fetch.py
-├── tensile-connections/    fabric↔cable, fabric↔steel, cable↔steel; pins/lugs; corner plates; mast heads
+├── tensile-connections/    fabric↔cable, fabric↔steel, cable↔steel; pins/lugs; corner plates; mast heads;
+│                           gussets (block tearing, Whitmore), EN 1992-4 anchors (tension, shear, interaction), fatigue
 │   └── scripts/pin_connection.py, corner_plate.py, steel_joint_checks.py, fatigue_check.py
 ├── tensile-analysis/       form finding (FDM, DR, URS), non-linear load analysis, software guide
 │   └── scripts/form_find_fdm.py, membrane_dr.py, dynamic_relaxation.py, run_cases.py
