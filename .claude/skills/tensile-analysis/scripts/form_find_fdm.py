@@ -16,6 +16,9 @@ Built-in generators
   sail4   4-point hypar sail with free (cable) edges, 2 high + 2 low corners
   hypar   hypar with rigid (fully fixed) boundary, e.g. a frame-supported panel
   cone    conic tent: top ring (mast head) + outer anchors with edge cables
+  arch    arch-supported tunnel (rigid parabolic arches, ground rails, free ends)
+  multibay  ridge-and-valley roof (ridge/valley cables, scalloped edges)
+  rings   membrane between two coaxial rigid rings (hourglass/catenoid, cone on a ring beam)
   --input model.json  your own nodes/edges (see reference/model-schema.md in
                       the tensile-structures skill)
 
@@ -31,6 +34,14 @@ Examples
   python3 form_find_fdm.py cone --R 8 --r 0.6 --H 5 --anchors 6 --nr 12 --nc 36 \
       --prestress 2.5 --out cone --obj
   python3 form_find_fdm.py --input mymodel.json --prestress 1.5 --out result
+  python3 form_find_fdm.py rings --R 5 --r 5 --H 3 --nr 12 --nc 48 --prestress 2 \
+      --uniform-stress --out hourglass      # isotropic uniform stress (catenoid)
+
+Linear FDM (default) gives the equilibrium for the q RATIOS: membrane stress is only
+uniform where the grid is "isotropic" (w/L equal in both directions). --uniform-stress
+iterates q = sigma*w/L so the stress is uniform and isotropic (soap-film-like); it
+converges to the catenoid between two rings (validated, O(h^2), see
+reference/validation.md).
 
 Limitations: FDM is a *form-finding* tool (equilibrium shape for a prestress
 state). It is not a load analysis. Use the geometry as the starting point for
@@ -248,6 +259,34 @@ def gen_multibay(n_bays: int, bay: float, B: float, h_hi: float, h_lo: float, m:
             "grid": {"nu": nu, "nv": nv, "periodic_u": False}, "nodes": nodes, "edges": edges, "faces": faces}
 
 
+def gen_rings(R: float, r: float, H: float, nr: int, nc: int, qm: float):
+    """Membrane between two coaxial rigid rings: bottom ring radius R at z = 0, top ring radius r at z = H
+    (hourglass / catenoid when R = r; conic tent on a ring beam when r < R). Grid i = hoop (periodic, nc),
+    j = meridian 0 (bottom ring) .. nr (top ring). Both rings fixed (support groups RING-B, RING-T)."""
+    idx = lambda i, j: j * nc + (i % nc)
+    nodes = []
+    for j in range(nr + 1):
+        t = j / nr
+        rad = R + (r - R) * t
+        for i in range(nc):
+            a = 2 * math.pi * i / nc
+            nd = {"id": idx(i, j), "xyz": [rad * math.cos(a), rad * math.sin(a), H * t],
+                  "fixed": j in (0, nr), "grid": [i, j]}
+            if j in (0, nr):
+                nd["support_group"] = "RING-B" if j == 0 else "RING-T"
+            nodes.append(nd)
+    edges = []
+    for j in range(1, nr):
+        for i in range(nc):
+            edges.append({"id": len(edges), "n": [idx(i, j), idx(i + 1, j)], "q": qm, "kind": "membrane"})
+    for j in range(nr):
+        for i in range(nc):
+            edges.append({"id": len(edges), "n": [idx(i, j), idx(i, j + 1)], "q": qm, "kind": "membrane"})
+    faces = [[idx(i, j), idx(i + 1, j), idx(i + 1, j + 1), idx(i, j + 1)] for j in range(nr) for i in range(nc)]
+    return {"units": {"length": "m", "force": "kN"}, "type": "rings",
+            "grid": {"nu": nc, "nv": nr, "periodic_u": True}, "nodes": nodes, "edges": edges, "faces": faces}
+
+
 # ---------------------------------------------------------------- solver
 def solve_fdm(model: dict, loads: dict[int, Vec] | None = None, tol: float = 1e-10, maxit: int = 20000):
     nodes, edges = model["nodes"], model["edges"]
@@ -282,32 +321,60 @@ def solve_fdm(model: dict, loads: dict[int, Vec] | None = None, tol: float = 1e-
     if any(d == 0 for d in diag):
         raise ValueError("a free node has no connected edges")
 
-    def matvec(x):
-        return [diag[k] * x[k] - sum(q * x[m] for m, q in off[k]) for k in range(len(x))]
+    # free-free couplings once per edge (matrix-free, O(edges) per product); the three coordinate
+    # systems share the matrix, so the three Jacobi-PCG solves run in lockstep over one edge loop
+    pairs = [(k, m, q) for k in range(len(free)) for m, q in off[k] if m > k]
+    nf = len(free)
 
+    def matvec3(px, py, pz):
+        yx = [d * v for d, v in zip(diag, px)]
+        yy = [d * v for d, v in zip(diag, py)]
+        yz = [d * v for d, v in zip(diag, pz)]
+        for k, m, q in pairs:
+            yx[k] -= q * px[m]; yx[m] -= q * px[k]
+            yy[k] -= q * py[m]; yy[m] -= q * py[k]
+            yz[k] -= q * pz[m]; yz[m] -= q * pz[k]
+        return yx, yy, yz
+
+    def dotp(u, v):
+        return sum(a_ * b_ for a_, b_ in zip(u, v))
+
+    B = [[r[c] for r in rhs] for c in range(3)]
+    Xs = [[X[g][c] for g in free] for c in range(3)]   # warm start from the initial geometry
+    A0 = matvec3(*Xs)
+    R = [[bi - ai for bi, ai in zip(B[c], A0[c])] for c in range(3)]
+    Z = [[ri / d for ri, d in zip(R[c], diag)] for c in range(3)]
+    P = [z[:] for z in Z]
+    RZ = [dotp(R[c], Z[c]) for c in range(3)]
+    BN = [math.sqrt(dotp(B[c], B[c])) or 1.0 for c in range(3)]
+    done = [False] * 3
     iters = 0
+    for it in range(maxit):
+        for c in range(3):
+            if not done[c] and math.sqrt(dotp(R[c], R[c])) / BN[c] < tol:
+                done[c] = True
+        if all(done) or nf == 0:
+            break
+        AP = matvec3(*P)
+        for c in range(3):
+            if done[c]:
+                continue
+            pap = dotp(P[c], AP[c])
+            if pap <= 0:
+                done[c] = True
+                continue
+            alpha = RZ[c] / pap
+            Xs[c] = [xi + alpha * pi for xi, pi in zip(Xs[c], P[c])]
+            R[c] = [ri - alpha * api for ri, api in zip(R[c], AP[c])]
+            Z[c] = [ri / d for ri, d in zip(R[c], diag)]
+            rz_new = dotp(R[c], Z[c])
+            beta = rz_new / RZ[c] if RZ[c] else 0.0
+            P[c] = [zi + beta * pi for zi, pi in zip(Z[c], P[c])]
+            RZ[c] = rz_new
+        iters = it + 1
     for c in range(3):
-        b = [r[c] for r in rhs]
-        x = [X[g][c] for g in free]  # warm start from initial geometry
-        r = [bi - ai for bi, ai in zip(b, matvec(x))]
-        z = [ri / d for ri, d in zip(r, diag)]
-        p = z[:]
-        rz = sum(ri * zi for ri, zi in zip(r, z))
-        bn = math.sqrt(sum(bi * bi for bi in b)) or 1.0
-        for it in range(maxit):
-            if math.sqrt(sum(ri * ri for ri in r)) / bn < tol:
-                break
-            Ap = matvec(p)
-            alpha = rz / sum(pi * api for pi, api in zip(p, Ap))
-            x = [xi + alpha * pi for xi, pi in zip(x, p)]
-            r = [ri - alpha * api for ri, api in zip(r, Ap)]
-            z = [ri / d for ri, d in zip(r, diag)]
-            rz_new = sum(ri * zi for ri, zi in zip(r, z))
-            p = [zi + (rz_new / rz) * pi for zi, pi in zip(z, p)]
-            rz = rz_new
-        iters = max(iters, it)
         for k, g in enumerate(free):
-            X[g][c] = x[k]
+            X[g][c] = Xs[c][k]
     for g in range(n):
         nodes[g]["xyz"] = X[g]
     return iters
@@ -349,6 +416,98 @@ def tributary_widths(model: dict) -> dict[int, float]:
         else:
             w[e["id"]] = 0.5 * (half_span(ia, ja, 1, 0) + half_span(ib, jb, 1, 0))
     return w
+
+
+def vertex_normals(model: dict) -> list:
+    """Unit vertex normals from the faces (area-weighted; quads use the diagonal cross product)."""
+    X = [nd["xyz"] for nd in model["nodes"]]
+    N = [[0.0, 0.0, 0.0] for _ in X]
+    for f in model.get("faces", []):
+        if len(f) == 4:
+            nf = cross(sub(X[f[2]], X[f[0]]), sub(X[f[3]], X[f[1]]))
+        else:
+            nf = cross(sub(X[f[1]], X[f[0]]), sub(X[f[2]], X[f[0]]))
+        for v in f:
+            for c in range(3):
+                N[v][c] += nf[c]
+    out = []
+    for v in N:
+        L = norm(v)
+        out.append([c / L for c in v] if L > 0 else [0.0, 0.0, 0.0])
+    return out
+
+
+def form_find_uniform_stress(model: dict, sigma: float = 1.0, loads=None, maxiter: int = 100, tol: float = 1e-6):
+    """Non-linear FDM for a UNIFORM ISOTROPIC membrane stress (soap-film-like surface).
+
+    Each iteration sets every grid membrane link to q = sigma * w / L (w = tributary width, L = length,
+    both from the current geometry), so the link force equals sigma times its width, and re-solves the
+    linear FDM. Cable/edge links keep their force density, rescaled once so that the cable-to-membrane
+    q ratio given to the generator is kept (q_cable * sigma / mean membrane q). This is the force-density
+    form of the non-linear FDM "iterate q <- F_target / L" (Linkwitz & Schek); on an orthogonal grid it
+    targets the same equilibrium as the Updated Reference Strategy with an isotropic Cauchy prestress
+    (Bletzinger & Ramm 1999).
+
+    Convergence is judged on the NORMAL component of the node moves: a uniform isotropic stress does not
+    fix the mesh in the tangent plane, so nodes keep sliding slowly along the surface (the "swimming" that
+    URS stabilises) while the shape no longer changes. Stops when max |Δx·n| < tol * model size.
+    If the stress uniformity gets worse for 8 iterations in a row (mesh swimming, degenerate corner cells,
+    typical of free cable-edged sails on fine meshes) the iteration stops and the most uniform equilibrium
+    state found is kept (status "diverging"). Needs a structured grid (model["grid"]). Returns a dict with
+    iterations, status, normal and total moves and the link-stress deviation max|F/(w·sigma) - 1|."""
+    if not model.get("grid"):
+        raise ValueError("--uniform-stress needs a grid model (built-in generator or 'grid' + node 'grid' indices)")
+    mem = [e for e in model["edges"] if e["kind"] == "membrane"]
+    qmean = sum(float(e["q"]) for e in mem) / len(mem)
+    for e in model["edges"]:
+        if e["kind"] != "membrane":
+            e["q"] = float(e["q"]) * sigma / qmean
+    X = [nd["xyz"] for nd in model["nodes"]]
+    size = max(max(p[c] for p in X) - min(p[c] for p in X) for c in range(3)) or 1.0
+    solve_fdm(model, loads)
+    info = {"iterations": 0, "normal_move": math.inf, "move": math.inf, "stress_dev": math.inf, "converged": False,
+            "status": "max iterations reached"}
+    best = None          # (stress deviation, coordinates, q) of the most uniform equilibrium state seen
+    worse = 0
+    for k in range(1, maxiter + 1):
+        widths = tributary_widths(model)
+        X = [nd["xyz"] for nd in model["nodes"]]
+        dev = 0.0
+        newq = {}
+        for e in mem:
+            w = widths.get(e["id"])
+            if w:
+                L = norm(sub(X[e["n"][1]], X[e["n"][0]]))
+                dev = max(dev, abs(float(e["q"]) * L / (w * sigma) - 1.0))
+                newq[e["id"]] = sigma * w / L
+        if best is None or dev < best[0]:
+            best = (dev, [list(p) for p in X], [float(e["q"]) for e in model["edges"]])
+            worse = 0
+        else:
+            worse += 1
+            if worse >= 8:   # stress uniformity keeps getting worse: mesh swimming / degenerate corners
+                info["status"] = "diverging (mesh swimming): most uniform state kept"
+                break
+        for e in mem:
+            if e["id"] in newq:
+                e["q"] = newq[e["id"]]
+        old = [list(p) for p in X]
+        nrm = vertex_normals(model)
+        solve_fdm(model, loads)
+        d = [sub(nd["xyz"], o) for nd, o in zip(model["nodes"], old)]
+        info.update(iterations=k, stress_dev=dev, move=max(norm(v) for v in d),
+                    normal_move=max(abs(v[0] * n[0] + v[1] * n[1] + v[2] * n[2]) for v, n in zip(d, nrm)))
+        if info["normal_move"] < tol * size:
+            info["converged"] = True
+            info["status"] = "converged"
+            break
+    if not info["converged"] and best is not None:
+        for nd, p in zip(model["nodes"], best[1]):
+            nd["xyz"] = p
+        for e, q in zip(model["edges"], best[2]):
+            e["q"] = q
+        info["stress_dev"] = best[0]
+    return info
 
 
 def compute_results(model: dict, prestress: float | None):
@@ -453,16 +612,34 @@ def write_obj(model: dict, path: str) -> None:
                 fh.write(f"l {e['n'][0] + 1} {e['n'][1] + 1}\n")
 
 
-def main(argv=None):
+def print_assumptions(a, us=None):
+    print("Assumptions: linear FDM (Schek 1974) — equilibrium shape for the force-density ratios, NOT a load "
+          "analysis; links are straight bars, the membrane is represented by a grid net;")
+    print("  membrane stress = link force / tributary width (grid estimate, exact only for an orthogonal grid);"
+          f" forces scaled so the mean membrane stress = {a.prestress if a.prestress else 'unscaled (no --prestress)'} kN/m;")
+    print("  built-in --qc is a force-density RATIO per link: edge-cable force ~ qc x segment length, so the same "
+          "--qc on a finer mesh gives a smaller cable force and a larger sag (use mesh_convergence.py).")
+    if us:
+        print(f"  --uniform-stress: q = sigma*w/L iterated {us['iterations']} times, max normal move "
+              f"{us['normal_move']:.1e} m, link-stress deviation {us['stress_dev'] * 100:.3f} %"
+              + ("" if us["converged"] else f"  ** NOT CONVERGED ({us['status']}) **"))
+        if us["stress_dev"] > 0.05:
+            print("  WARNING: membrane stress not uniform within 5 % (typical at the corners of free cable-edged "
+                  "sails); use linear FDM or a URS/FE package for this shape.")
+    print()
+
+
+def build_parser():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("shape", nargs="?", choices=["sail4", "hypar", "cone", "arch", "multibay"], help="built-in generator")
+    ap.add_argument("shape", nargs="?", choices=["sail4", "hypar", "cone", "arch", "multibay", "rings"],
+                    help="built-in generator")
     ap.add_argument("--input", help="custom model JSON")
     ap.add_argument("--size", type=float, default=10.0, help="sail/hypar plan side [m]")
     ap.add_argument("--high", type=float, default=3.0, help="height of high corners [m]")
     ap.add_argument("--n", type=int, default=16, help="mesh divisions per side")
-    ap.add_argument("--R", type=float, default=8.0, help="cone outer radius [m]")
-    ap.add_argument("--r", type=float, default=0.6, help="cone top ring radius [m]")
-    ap.add_argument("--H", type=float, default=5.0, help="cone height [m]")
+    ap.add_argument("--R", type=float, default=8.0, help="cone outer radius / rings: bottom ring radius [m]")
+    ap.add_argument("--r", type=float, default=0.6, help="cone / rings: top ring radius [m]")
+    ap.add_argument("--H", type=float, default=5.0, help="cone height / rings: distance between rings [m]")
     ap.add_argument("--anchors", type=int, default=6)
     ap.add_argument("--nr", type=int, default=12)
     ap.add_argument("--nc", type=int, default=36)
@@ -481,10 +658,19 @@ def main(argv=None):
     ap.add_argument("--qc", type=float, default=10.0, help="edge-cable force density (relative)")
     ap.add_argument("--prestress", type=float, default=None,
                     help="target mean membrane prestress [kN/m]; scales all forces")
+    ap.add_argument("--uniform-stress", action="store_true",
+                    help="non-linear FDM: iterate membrane q = sigma*w/L until the membrane stress is uniform and "
+                         "isotropic (soap-film-like; sigma = --prestress or 1). Needs a grid model")
+    ap.add_argument("--ff-maxiter", type=int, default=100, help="--uniform-stress: max iterations")
+    ap.add_argument("--ff-tol", type=float, default=1e-6,
+                    help="--uniform-stress: stop when the max NORMAL node move < tol x model size")
     ap.add_argument("--out", default="formfound")
     ap.add_argument("--obj", action="store_true", help="also write an OBJ mesh")
-    a = ap.parse_args(argv)
+    return ap
 
+
+def form_find(a):
+    """Build the model from parsed arguments and form-find it (no file output). Returns (model, us_info)."""
     if a.input:
         with open(a.input) as fh:
             model = json.load(fh)
@@ -498,20 +684,40 @@ def main(argv=None):
         model = gen_arch(a.L, a.B, a.H, a.arches, a.nu, a.nv, a.qm, a.qc)
     elif a.shape == "multibay":
         model = gen_multibay(a.bays, a.bay, a.B, a.h_hi, a.h_lo, a.m, a.nv, a.qm, a.qr, a.qc)
+    elif a.shape == "rings":
+        model = gen_rings(a.R, a.r, a.H, a.nr, a.nc, a.qm)
     else:
-        ap.error("give a shape or --input")
+        raise SystemExit("give a shape or --input")
 
     loads = {int(k): v for k, v in model.get("loads", {}).items()} if model.get("loads") else None
-    iters = solve_fdm(model, loads)
+    us = None
+    if a.uniform_stress:
+        us = form_find_uniform_stress(model, a.prestress or 1.0, loads, a.ff_maxiter, a.ff_tol)
+        iters = None
+    else:
+        iters = solve_fdm(model, loads)
     scale = compute_results(model, a.prestress)
     model["surface_area_m2"] = surface_area(model)
-    model["solver"] = {"method": "FDM (Schek 1974), Jacobi-PCG", "cg_iterations": iters, "q_scale": scale}
+    model["solver"] = {"method": "FDM (Schek 1974), Jacobi-PCG" + (", uniform-stress iteration" if us else ""),
+                       "cg_iterations": iters, "q_scale": scale}
+    if us:
+        model["solver"]["uniform_stress"] = us
+    return model, us
+
+
+def main(argv=None):
+    ap = build_parser()
+    a = ap.parse_args(argv)
+    if not a.input and not a.shape:
+        ap.error("give a shape or --input")
+    model, us = form_find(a)
 
     with open(a.out + ".json", "w") as fh:
         json.dump(model, fh, indent=1)
     if a.obj:
         write_obj(model, a.out + ".obj")
 
+    print_assumptions(a, us)
     print(f"Form found: {model.get('type', 'custom')}  nodes={len(model['nodes'])} "
           f"edges={len(model['edges'])}  surface area={model['surface_area_m2']:.2f} m2")
     if "membrane_stress" in model:

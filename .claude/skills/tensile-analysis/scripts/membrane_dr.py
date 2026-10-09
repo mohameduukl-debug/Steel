@@ -7,8 +7,10 @@ Replaces the cable-net analogy of dynamic_relaxation.py with a continuum membran
     internal forces f_k = A0 · F S ∇N_k  (large displacements, exact kinematics)
   * orthotropic plane-stress material per unit width, axes = warp (grid u) / weft (grid v)
     projected on each triangle: E_w·t, E_f·t, ν_wf (ν_fw by reciprocity), G·t
-  * tension-field WRINKLING: if the minor principal stress becomes compressive the element
-    carries only its major principal stress (uniaxial); both compressive -> slack
+  * tension-field WRINKLING (Roddeman et al. 1987, mixed criterion): taut if the minor principal stress
+    >= 0; slack if the major principal elastic strain <= 0; otherwise wrinkled: uniaxial stress sigma n(x)n
+    with n and sigma = eps_nn / C_nn(n) solved so that the rest of the strain is pure wrinkling contraction
+    (exact for linear orthotropy; isotropic: n = major principal strain direction, sigma = E t eps_1)
   * initial stress S0 from the form-finding (per quad: u/v edge stresses of the net) or uniform
     --prestress; the prestress state is first relaxed to equilibrium (no load) and reported
   * cables (edge/ridge/valley) as tension-only links with EA; supports from the model
@@ -17,6 +19,10 @@ Replaces the cable-net analogy of dynamic_relaxation.py with a continuum membran
 Examples
   python3 membrane_dr.py sail.json --Ew 800 --Ef 600 --nu 0.35 --G 30 --EA-cable 14000 --pressure 0.9 --out up
   python3 membrane_dr.py sail.json --snow 0.75 --out snow
+Triangle faces take the warp direction from the model's optional "warp_dir" (default global x) projected on
+each element; quads take it from their grid u direction.
+Validation (reference/validation.md): Hencky/Fichter clamped circular membrane, prestressed square under
+pressure (Poisson equation), tension-field uniaxial/off-axis/shear-panel cases.
 Outputs per element: warp/weft/shear stress, principal n1, n2, wrinkled flag; cable forces; reactions.
 """
 from __future__ import annotations
@@ -58,7 +64,13 @@ class Membrane:
         self.fixed = [bool(nd.get("fixed")) for nd in nodes]
         nu_fw = nu_wf * Ef / Ew
         den = 1 - nu_wf * nu_fw
+        if den <= 0 or Ew <= 0 or Ef <= 0 or G <= 0:
+            raise ValueError("material not positive definite: need E_w·t, E_f·t, G·t > 0 and ν_wf·ν_fw < 1")
         self.D = (Ew / den, Ef / den, nu_fw * Ew / den, G)     # D11, D22, D12, D33 [kN/m]
+        # compliance (per unit width): e11 = C11 S11 + C12 S22, e22 = C12 S11 + C22 S22, gamma12 = C66 S12
+        self.C = (1.0 / Ew, 1.0 / Ef, -nu_wf / Ew, 1.0 / G)
+        # isotropic in the plane -> wrinkle direction = principal strain direction (no search needed)
+        self.iso = (abs(Ew - Ef) <= 1e-9 * Ew and abs(G - Ew / (2 * (1 + nu_wf))) <= 1e-6 * G)
         self.wrinkling = wrinkling
         # warp/weft stress per quad from the net (u / v edges)
         edge_stress = {}
@@ -66,6 +78,7 @@ class Membrane:
             if e["kind"] == "membrane" and "stress_kN_m" in e:
                 a, b = e["n"]
                 edge_stress[(min(a, b), max(a, b))] = e["stress_kN_m"]
+        warp_global = model.get("warp_dir", [1.0, 0.0, 0.0])
         self.tris = []
         for f in model["faces"]:
             quad = f if len(f) == 4 else None
@@ -80,7 +93,12 @@ class Membrane:
                       prestress[1] if prestress else (sum(sv) / len(sv) if sv else 2.0))
                 tri_list = [(i0, i1, i2), (i0, i2, i3)]
             else:
-                warp = unit(sub(self.X0[f[1]], self.X0[f[0]]))
+                # triangle faces: warp = model "warp_dir" (default global x) projected on the element
+                nrm = unit(cross(sub(self.X0[f[1]], self.X0[f[0]]), sub(self.X0[f[2]], self.X0[f[0]])))
+                if abs(dot(unit(warp_global), nrm)) < 0.95:
+                    warp = list(warp_global)
+                else:
+                    warp = sub(self.X0[f[1]], self.X0[f[0]])
                 s0 = prestress or (2.0, 2.0)
                 tri_list = [tuple(f)]
             for t in tri_list:
@@ -107,7 +125,104 @@ class Membrane:
         A0 = abs(A2) / 2
         # ∇N_k = (dN/dX, dN/dY)
         dN = [((y2 - y3) / A2, (x3 - x2) / A2), ((y3 - y1) / A2, (x1 - x3) / A2), ((y1 - y2) / A2, (x2 - x1) / A2)]
-        return {"n": t, "A0": A0, "dN": dN, "S0": (s0[0], s0[1], 0.0)}
+        return {"n": t, "A0": A0, "dN": dN, "S0": (s0[0], s0[1], 0.0), "th": None}
+
+    # ------------------------------------------------------------ wrinkling
+    def _uniaxial_dir(self, e11, e22, e12, th0):
+        """Tension-field state for an orthotropic sheet (Roddeman et al. 1987): find the direction n(θ)
+        such that a uniaxial stress σ·n⊗n plus a wrinkling strain β·m⊗m (m ⟂ n, β ≥ 0) reproduces the
+        elastic strain (e11, e22, tensor e12). Conditions: σ = ε_nn / C_nn(θ) and ε_nm = σ·C_nm(θ).
+        Returns (θ, σ) or None."""
+        C11, C22, C12, C66 = self.C
+        em, ed = 0.5 * (e11 + e22), 0.5 * (e11 - e22)
+
+        def fun(th):
+            c, s = math.cos(th), math.sin(th)
+            c2, s2, cs = c * c, s * s, c * s
+            cnn = C11 * c2 * c2 + (2 * C12 + C66) * c2 * s2 + C22 * s2 * s2
+            cnm = ((C12 - C11) * c2 + (C22 - C12) * s2) * cs + 0.5 * C66 * cs * (c2 - s2)
+            cmm = (C11 + C22 - C66) * c2 * s2 + C12 * (c2 * c2 + s2 * s2)
+            enn = em + ed * (c2 - s2) + 2 * e12 * cs
+            enm = -2 * ed * cs + e12 * (c2 - s2)
+            emm = em - ed * (c2 - s2) - 2 * e12 * cs
+            sig = enn / cnn
+            return enm - sig * cnm, sig, sig * cmm - emm      # residual, σ, wrinkling strain β
+
+        def ok(th):
+            r, sig, beta = fun(th)
+            return sig > 0 and beta >= -1e-12
+
+        th = th0
+        for _ in range(30):                        # Newton (numerical slope) from the cached direction
+            r, sig, _b = fun(th)
+            if abs(r) < 1e-13 * max(abs(e11), abs(e22), abs(e12), 1e-15):
+                break
+            h = 1e-7
+            dr = (fun(th + h)[0] - fun(th - h)[0]) / (2 * h)
+            if dr == 0:
+                break
+            step = -r / dr
+            if abs(step) > 0.3:
+                step = math.copysign(0.3, step)
+            th += step
+            if abs(step) < 1e-12:
+                break
+        scale = max(abs(e11), abs(e22), abs(e12), 1e-15)
+        if abs(fun(th)[0]) < 1e-9 * scale and ok(th):
+            return th, fun(th)[1]
+        # robust fallback: scan [0, π) for sign changes, bisect, keep the valid root with the largest σ
+        best = None
+        N = 72
+        ths = [k * math.pi / N for k in range(N + 1)]
+        vals = [fun(t)[0] for t in ths]
+        for k in range(N):
+            if vals[k] == 0 or vals[k] * vals[k + 1] < 0:
+                lo, hi, flo = ths[k], ths[k + 1], vals[k]
+                for _ in range(60):
+                    mid = 0.5 * (lo + hi)
+                    fm = fun(mid)[0]
+                    if flo * fm <= 0:
+                        hi = mid
+                    else:
+                        lo, flo = mid, fm
+                t = 0.5 * (lo + hi)
+                if ok(t) and (best is None or fun(t)[1] > best[1]):
+                    best = (t, fun(t)[1])
+        return best
+
+    def wrinkle(self, S11, S22, S12, tri=None):
+        """Apply the tension-field model to the linear stress (PK2, material axes).
+        Mixed criterion: taut if the minor principal stress ≥ 0; slack if the major principal ELASTIC strain
+        ≤ 0; otherwise wrinkled -> uniaxial stress σ·n⊗n with σ = ε_nn/C_nn (exact for linear orthotropy).
+        Returns (S11, S22, S12, flag) with flag 0 taut, 1 wrinkled, 2 slack."""
+        m_ = 0.5 * (S11 + S22)
+        r = math.sqrt(0.25 * (S11 - S22) ** 2 + S12 * S12)
+        if m_ - r >= 0:
+            return S11, S22, S12, 0
+        C11, C22, C12, C66 = self.C
+        e11 = C11 * S11 + C12 * S22                 # elastic strain (incl. the prestress pre-strain)
+        e22 = C12 * S11 + C22 * S22
+        e12 = 0.5 * C66 * S12                       # tensor shear strain
+        e1 = 0.5 * (e11 + e22) + math.sqrt(0.25 * (e11 - e22) ** 2 + e12 * e12)
+        if e1 <= 0:
+            return 0.0, 0.0, 0.0, 2
+        th_e = 0.5 * math.atan2(2 * e12, e11 - e22)  # major principal strain direction
+        if self.iso:
+            th, sig = th_e, e1 / C11
+        else:
+            th0 = tri["th"] if (tri is not None and tri.get("th") is not None) else th_e
+            res = self._uniaxial_dir(e11, e22, e12, th0)
+            if res is None:                         # no admissible uniaxial state: keep the stress projection
+                if m_ + r <= 0:
+                    return 0.0, 0.0, 0.0, 2
+                th = 0.5 * math.atan2(2 * S12, S11 - S22)
+                sig = m_ + r
+            else:
+                th, sig = res
+            if tri is not None:
+                tri["th"] = th
+        c, s = math.cos(th), math.sin(th)
+        return sig * c * c, sig * s * s, sig * c * s, 1
 
     # ---------------------------------------------------------------- core
     def element_state(self, tri, X):
@@ -126,88 +241,141 @@ class Membrane:
         S12 = tri["S0"][2] + D33 * G12
         wr = 0
         if self.wrinkling:
-            m_ = 0.5 * (S11 + S22)
-            r = math.sqrt(0.25 * (S11 - S22) ** 2 + S12 ** 2)
-            s1, s2 = m_ + r, m_ - r
-            if s1 <= 0:
-                S11 = S22 = S12 = 0.0
-                wr = 2
-            elif s2 < 0:
-                th = 0.5 * math.atan2(2 * S12, S11 - S22)
-                cth, sth = math.cos(th), math.sin(th)
-                S11, S22, S12 = s1 * cth * cth, s1 * sth * sth, s1 * cth * sth
-                wr = 1
+            S11, S22, S12, wr = self.wrinkle(S11, S22, S12, tri)
         return f1, f2, (S11, S22, S12), wr
+
+    def _pack(self):
+        """Flat per-element tuples for the inner loop (built once)."""
+        if getattr(self, "_tdata", None) is None:
+            self._tdata = []
+            for tri in self.tris:
+                (a, b, c), dN, A0 = tri["n"], tri["dN"], tri["A0"]
+                kk = tuple(A0 * (g[0] * g[0] + g[1] * g[1]) for g in dN)
+                self._tdata.append((a, b, c, dN[0][0], dN[0][1], dN[1][0], dN[1][1], dN[2][0], dN[2][1], A0,
+                                    tri["S0"][0], tri["S0"][1], tri["S0"][2], kk[0], kk[1], kk[2], tri))
+            self._cdata = [(cb["n"][0], cb["n"][1], cb["EA"], cb["L0"], cb["EA"] / cb["L0"], cb)
+                           for cb in self.cables]
+        return self._tdata, self._cdata
+
+    def _internal(self, x, y, z, Rx, Ry, Rz, K):
+        """Add element and cable forces to R and the DR stiffness estimate to K (flat arrays)."""
+        D11, D22, D12, D33 = self.D
+        Dmax = max(D11, D22) + D33
+        wrink = self.wrinkling
+        sqrt = math.sqrt
+        tdata, cdata = self._pack()
+        for (a, b, c, gax, gay, gbx, gby, gcx, gcy, A0, s0x, s0y, s0xy, ka, kb, kc, tri) in tdata:
+            xa, xb, xc, ya, yb, yc, za, zb, zc = x[a], x[b], x[c], y[a], y[b], y[c], z[a], z[b], z[c]
+            f1x = xa * gax + xb * gbx + xc * gcx
+            f1y = ya * gax + yb * gbx + yc * gcx
+            f1z = za * gax + zb * gbx + zc * gcx
+            f2x = xa * gay + xb * gby + xc * gcy
+            f2y = ya * gay + yb * gby + yc * gcy
+            f2z = za * gay + zb * gby + zc * gcy
+            E11 = 0.5 * (f1x * f1x + f1y * f1y + f1z * f1z - 1.0)
+            E22 = 0.5 * (f2x * f2x + f2y * f2y + f2z * f2z - 1.0)
+            S11 = s0x + D11 * E11 + D12 * E22
+            S22 = s0y + D12 * E11 + D22 * E22
+            S12 = s0xy + D33 * (f1x * f2x + f1y * f2y + f1z * f2z)
+            if wrink:
+                h = S11 - S22
+                if 0.5 * (S11 + S22) < sqrt(0.25 * h * h + S12 * S12):   # minor principal stress < 0
+                    S11, S22, S12, _ = self.wrinkle(S11, S22, S12, tri)
+            p1x, p1y, p1z = S11 * f1x + S12 * f2x, S11 * f1y + S12 * f2y, S11 * f1z + S12 * f2z
+            p2x, p2y, p2z = S12 * f1x + S22 * f2x, S12 * f1y + S22 * f2y, S12 * f1z + S22 * f2z
+            Rx[a] -= A0 * (p1x * gax + p2x * gay)
+            Ry[a] -= A0 * (p1y * gax + p2y * gay)
+            Rz[a] -= A0 * (p1z * gax + p2z * gay)
+            Rx[b] -= A0 * (p1x * gbx + p2x * gby)
+            Ry[b] -= A0 * (p1y * gbx + p2y * gby)
+            Rz[b] -= A0 * (p1z * gbx + p2z * gby)
+            Rx[c] -= A0 * (p1x * gcx + p2x * gcy)
+            Ry[c] -= A0 * (p1y * gcx + p2y * gcy)
+            Rz[c] -= A0 * (p1z * gcx + p2z * gcy)
+            kf = Dmax + abs(S11) + abs(S22) + abs(S12)
+            K[a] += kf * ka
+            K[b] += kf * kb
+            K[c] += kf * kc
+        for a, b, ea, l0, k0, cb in cdata:
+            dx, dy, dz = x[b] - x[a], y[b] - y[a], z[b] - z[a]
+            L = sqrt(dx * dx + dy * dy + dz * dz)
+            T = ea * (L - l0) / l0
+            if T < 0.0:
+                T = 0.0
+            cb["_T"] = T
+            t = T / L
+            Rx[a] += t * dx; Ry[a] += t * dy; Rz[a] += t * dz
+            Rx[b] -= t * dx; Ry[b] -= t * dy; Rz[b] -= t * dz
+            K[a] += k0 + t
+            K[b] += k0 + t
 
     def forces(self, X, P=None):
         n = len(X)
-        R = [list(P.get(i, [0.0, 0.0, 0.0])) if P else [0.0, 0.0, 0.0] for i in range(n)]
+        x, y, z = [p[0] for p in X], [p[1] for p in X], [p[2] for p in X]
+        Rx, Ry, Rz = [0.0] * n, [0.0] * n, [0.0] * n
+        if P:
+            for i, f in P.items():
+                Rx[i] += f[0]
+                Ry[i] += f[1]
+                Rz[i] += f[2]
         K = [0.0] * n
-        D11, D22, D12, D33 = self.D
-        Dmax = max(D11, D22) + D33
-        for tri in self.tris:
-            f1, f2, (S11, S22, S12), _ = self.element_state(tri, X)
-            A0 = tri["A0"]
-            # P1 = F S : columns p1 = S11 f1 + S12 f2, p2 = S12 f1 + S22 f2
-            p1 = [S11 * f1[i] + S12 * f2[i] for i in range(3)]
-            p2 = [S12 * f1[i] + S22 * f2[i] for i in range(3)]
-            smax = abs(S11) + abs(S22) + abs(S12)
-            for k, node in enumerate(tri["n"]):
-                gx, gy = tri["dN"][k]
-                for i in range(3):
-                    R[node][i] -= A0 * (p1[i] * gx + p2[i] * gy)
-                K[node] += A0 * (Dmax + smax) * (gx * gx + gy * gy)
-        for cb in self.cables:
-            a, b = cb["n"]
-            d = sub(X[b], X[a])
-            L = math.sqrt(dot(d, d))
-            T = max(cb["EA"] * (L - cb["L0"]) / cb["L0"], 0.0)
-            cb["_T"] = T
-            for i in range(3):
-                R[a][i] += T * d[i] / L
-                R[b][i] -= T * d[i] / L
-            k = cb["EA"] / cb["L0"] + T / L
-            K[a] += k
-            K[b] += k
-        return R, K
+        self._internal(x, y, z, Rx, Ry, Rz, K)
+        return [[Rx[i], Ry[i], Rz[i]] for i in range(n)], K
 
     def relax(self, X, pressure=0.0, snow=0.0, pfun=None, tol=1e-4, maxit=100000, mass_factor=2.0, verbose=False,
               extra=None):
+        """Kinetic-damping DR (dt = 1, M_i = mass_factor·K_i). X is updated in place and returned."""
         n = len(X)
-        V = [[0.0, 0.0, 0.0] for _ in range(n)]
-        KE_prev = 0.0
+        x, y, z = [p[0] for p in X], [p[1] for p in X], [p[2] for p in X]
+        free = [i for i in range(n) if not self.fixed[i]]
+        tris = DRN._tri_list(self.m)
         loaded = bool(pressure or snow or pfun)
+        P0x, P0y, P0z = [0.0] * n, [0.0] * n, [0.0] * n
+        if extra:
+            for i, f in extra.items():
+                P0x[i] += f[0]
+                P0y[i] += f[1]
+                P0z[i] += f[2]
+        vx, vy, vz = [0.0] * n, [0.0] * n, [0.0] * n
+        KE_prev = 0.0
         Rmax = math.inf
         it = 0
+        tol2 = tol * tol
         for it in range(maxit):
-            P = DRN.external_loads(self.m, X, pressure, snow, pfun) if loaded else None
-            if extra:
-                P = P if P is not None else defaultdict(lambda: [0.0, 0.0, 0.0])
-                for i, f in extra.items():
-                    for c in range(3):
-                        P[i][c] += f[c]
-            R, K = self.forces(X, P)
-            Rmax = max((math.sqrt(dot(R[i], R[i])) for i in range(n) if not self.fixed[i]), default=0.0)
-            if Rmax < tol:
+            Rx, Ry, Rz = P0x[:], P0y[:], P0z[:]
+            if loaded:
+                DRN.add_face_loads(tris, x, y, z, pressure, snow, pfun, Rx, Ry, Rz)
+            K = [0.0] * n
+            self._internal(x, y, z, Rx, Ry, Rz, K)
+            r2 = 0.0
+            for i in free:
+                q = Rx[i] * Rx[i] + Ry[i] * Ry[i] + Rz[i] * Rz[i]
+                if q > r2:
+                    r2 = q
+            Rmax = math.sqrt(r2)
+            if r2 < tol2:
                 break
             KE = 0.0
-            for i in range(n):
-                if self.fixed[i]:
-                    continue
-                m = mass_factor * max(K[i], 1e-9)
-                for c in range(3):
-                    V[i][c] += R[i][c] / m
-                KE += m * dot(V[i], V[i])
+            for i in free:
+                m = mass_factor * K[i]
+                if m < 1e-9:
+                    m = 1e-9
+                a_, b_, c_ = vx[i] + Rx[i] / m, vy[i] + Ry[i] / m, vz[i] + Rz[i] / m
+                vx[i], vy[i], vz[i] = a_, b_, c_
+                KE += m * (a_ * a_ + b_ * b_ + c_ * c_)
             if KE < KE_prev:
-                V = [[0.0, 0.0, 0.0] for _ in range(n)]
+                for i in free:
+                    vx[i] = vy[i] = vz[i] = 0.0
                 KE = 0.0
             KE_prev = KE
-            for i in range(n):
-                if not self.fixed[i]:
-                    for c in range(3):
-                        X[i][c] += V[i][c]
+            for i in free:
+                x[i] += vx[i]
+                y[i] += vy[i]
+                z[i] += vz[i]
             if verbose and it % 1000 == 0:
                 print(f"  it {it:6d} residual {Rmax:.3e}", file=sys.stderr)
+        for i in range(n):
+            X[i][0], X[i][1], X[i][2] = x[i], y[i], z[i]
         return X, it, Rmax
 
     def results(self, X, pressure=0.0, snow=0.0, pfun=None):
@@ -289,8 +457,21 @@ def analyse(base, Ew=800.0, Ef=600.0, nu=0.3, G=30.0, EA_cable=14000.0, pressure
         "iterations": it1, "max_residual_kN": r1, "converged": r1 < tol,
         "max_displacement_m": disp[imax], "max_disp_node": imax,
         "wrinkled_elements": sum(1 for w in wr if w == 1), "slack_elements": sum(1 for w in wr if w == 2),
-        "n_elements": len(els), "ponding": pond}
+        "n_elements": len(els), "ponding": pond, "tol": tol}
     return model
+
+
+def print_assumptions(an, wrinkling=True):
+    print("Assumptions: membrane = constant-strain triangles (each quad split in two), Total-Lagrangian (Green strain, "
+          "PK2 stress per unit reference width), linear-orthotropic plane stress in warp (grid u) / weft (grid v) axes;")
+    print("  " + ("tension-field wrinkling (mixed criterion; uniaxial stress σ·n⊗n with σ = ε_nn/C_nn, exact for linear "
+                  "orthotropy)" if wrinkling else "NO wrinkling model: compressive stresses are kept (--no-wrinkling)")
+          + "; cables = tension-only links; follower pressure (+ = uplift), snow per plan area;")
+    print("  initial stress from the form finding (per quad) or --prestress, relaxed to equilibrium first; "
+          f"kinetic-damping DR to max residual < {an.get('tol', 1e-4):.0e} kN. Not modelled: non-linear/hysteretic fabric,")
+    print("  creep, crimp interchange beyond the constant ν, bending, dynamic wind. Screening/verification aid, not a "
+          "replacement for a validated membrane FE package.")
+    print()
 
 
 def summary(model):
@@ -346,6 +527,7 @@ def main(argv=None):
         base = json.load(fh)
     m = analyse(base, a.Ew, a.Ef, a.nu, a.G, a.EA_cable, a.pressure, a.snow, None, a.prestress, a.tol, a.maxit,
                 a.verbose, not a.no_wrinkling, a.ponding)
+    print_assumptions(m["analysis"], not a.no_wrinkling)
     summary(m)
     if a.out:
         with open(a.out + ".json", "w") as fh:

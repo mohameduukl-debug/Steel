@@ -11,10 +11,19 @@ Cᵀ Q C x = p_x − Cᵀ Q C_f x_f          (same for y, z)
 D = CᵀQC (n×n, SPD if all q > 0 and every free node connects to a support)
 branch forces after solving: s_j = q_j·l_j
 ```
-* Linear: one sparse solve per coordinate. Our implementation uses Jacobi-preconditioned conjugate gradients (pure Python).
+* Linear: one sparse solve per coordinate. Our implementation uses matrix-free Jacobi-preconditioned conjugate gradients
+  (pure Python), the three coordinate systems solved in lockstep over one edge loop (961 nodes 0.1 s, 10 201 nodes 3.7 s).
 * **Scaling property:** multiplying every q by k leaves the geometry unchanged and multiplies the forces by k, so pick the
   q *ratios* for shape, then scale to the target prestress (`--prestress`).
 * **Non-linear FDM:** iterate q_j ← F_target,j / l_j (target forces), or target lengths or unstressed lengths (Easy, ixForten).
+  `form_find_fdm.py --uniform-stress` iterates q_j = σ·w_j/l_j (w = tributary width) for a uniform isotropic membrane
+  stress. Its convergence is judged on the NORMAL node moves: an isotropic uniform stress leaves the mesh free to slide
+  tangentially (the indeterminacy URS stabilises). Validated against the catenoid (O(h²), `validation.md`).
+* **Mesh dependence of q:** a link force is q·l, so for the same physical cable force the edge-cable q must scale with
+  1/segment length: refining the mesh n → 2n at fixed `--qc` halves the cable force and enlarges the sag
+  (sail4, qc 12: sag/chord 0.067 → 0.112 → 0.170 at n = 8, 16, 32) [C: tool output].
+* **Plain linear FDM with uniform q is not a minimal surface**: on a fixed grid it gives the discrete harmonic map, whose
+  shape depends on the grid aspect ratio (catenoid test: neck radius −17 %) [C].
 * Membranes as nets: fine grid of bars (Easy, WinTess) or surface-stress-density on triangles.
 * Edge cables: a higher q gives a flatter cable (smaller sag, bigger force). With p = 0, the edge satisfies T = n·R.
 * On cable nets, FDM is identical to URS (Bletzinger).
@@ -42,8 +51,11 @@ x_i(t+Δt)   = x_i(t) + Δt·v_i(t+Δt/2)
 stability: Δt ≤ √(2M_i/S_i),  S_i = Σ(EA/L0 + T/L)  →  choose Δt = 1, M_i = λ·S_i·Δt²/2, λ ≥ 1
 ```
 **Kinetic damping** (c = 0): track KE = Σ ½ M v². When KE drops, reset all v = 0 (optionally step back to the peak:
-x* = x − 1.5Δt·v + (Δt²/2M)·R [textbook, not checked against Barnes]). Stop when max|R| < tolerance (e.g. 10⁻⁴ kN).
-Our `dynamic_relaxation.py` uses Δt = 1, M = S (λ = 2), tension-only links and follower pressure.
+x* = x − 1.5Δt·v + (Δt²/2M)·R [U: formula from secondary literature, not checked against Barnes; not used by our tools]).
+Stop when max|R| < tolerance (default 10⁻⁴ kN in the tools [C: tool default]; use a tolerance ~10⁻⁶ of the nodal load
+for benchmark accuracy). Our `dynamic_relaxation.py` uses Δt = 1, M = S (λ = 2), tension-only links and follower pressure;
+`membrane_dr.py` uses M = 2·K with K = A₀(D_max + Σ|S|)·|∇N|² per element (M = K saved ~20 % of the iterations but M = 0.8·K did
+not converge on a 30×30 sail, so the factor 2 is kept for robustness). Iterations grow about linearly with the number of nodes along a side (explicit method, lowest mode).
 Used in GSA, Kangaroo (goal solver related), Tensyl and inTENS.
 
 ## 3. Updated Reference Strategy (Bletzinger and Ramm 1999, *IJSS* 14(2))
@@ -58,14 +70,17 @@ Used by RFEM 6 (inspired by), ixForten, research codes. Works with anisotropic p
 ## 4. Soap film, anisotropy and seams
 * Soap film: isotropic constant stress, 1/R₁ + 1/R₂ = 0 (minimal surface); GSA "pseudo soap-film".
 * Warp/fill ratios 1:1, 2:1, 1:2 tune the curvature; strongly anisotropic targets need URS or accepting deviation.
-* Typical design prestress: PVC 1–4 kN/m; PTFE heavy 6–8, light 4–6, liners 1–2 kN/m.
+* Typical design prestress: PVC 1–4 kN/m; PTFE heavy 6–8, light 4–6, liners 1–2 kN/m [U: practice ranges, consistent
+  with `membrane-fabric` family defaults (PES/PVC 1.0–4.0, glass/PTFE 2.0–8.0 kN/m); the minimum-prestress rule there
+  is [V]].
 * Seam lines: surface **geodesics** (minimum waste, no seam-induced stress); Easy and WinTess generate geodesics between
   boundary points. Strip-based cutting pattern tradition: Linkwitz–Schek, Gründig, Ströbel.
 * In our tools, grid lines act as seam lines: generate the mesh so its v-lines run in the intended seam and warp direction.
 
 ## 5. Practical form-finding checklist
 1. Define the fixed points and boundaries (rigid or cable), and the heights.
-2. Choose q ratios: membrane 1, edge cables about 5–20 (tune for 8–12 % sag), ridge/valley cables as needed.
+2. Choose q ratios: membrane 1, edge cables about 5–20 at n ≈ 16 [C: tool behaviour; scale with n] (tune for 8–12 % sag
+   [U: practice]), ridge/valley cables as needed.
 3. Solve and inspect: no flat zones; curvature ratio at the centre; edge sags; drainage fall; clearances.
 4. Scale to the target prestress. Report the edge-cable forces and support pulls.
 5. Iterate the geometry (heights, sags) with the architect until approved, then move to load analysis.

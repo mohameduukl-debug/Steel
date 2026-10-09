@@ -185,7 +185,10 @@ def run(model_path, cases_path, out=None, verbose=False):
                      "|---|---|---|---|---|\n")
             for n, v in sorted(renv.items(), key=lambda kv: int(kv[0])):
                 fh.write(f"| {n} | {v['magnitude']:.1f} | {v['case']} | {v['Fz_min']:.1f} | {v['Fz_max']:.1f} |\n")
-            fh.write("\nNon-linear analysis per case (no superposition). Cable-net analogy: preliminary results.\n")
+            fh.write("\nNon-linear analysis per case (no superposition). "
+                     + ("Orthotropic CST membrane with tension-field wrinkling (membrane_dr.py)"
+                        if spec.get("solver", "net") == "cst" else "Cable-net analogy (dynamic_relaxation.py)")
+                     + ": screening / verification results, confirm with a validated membrane FE package for final design.\n")
     return env
 
 
@@ -196,6 +199,14 @@ def main(argv=None):
     ap.add_argument("--out", default="cases")
     ap.add_argument("-v", "--verbose", action="store_true")
     a = ap.parse_args(argv)
+    with open(a.cases) as fh:
+        solver = json.load(fh).get("solver", "net")
+    print("Assumptions: each case solved separately and non-linearly (no superposition), loads x case 'factor';"
+          f" solver {solver} ("
+          + ("membrane_dr.py: linear-orthotropic CST + tension-field wrinkling" if solver == "cst"
+             else "dynamic_relaxation.py: cable-net analogy, no fabric shear/Poisson") + ");")
+    print("  pressure zones / gradients are user input: Cp must come from tunnel data, TensiNet guidance or "
+          "conservative code canopy values (EN 1991-1-4 has none for hypars/cones).\n")
     env = run(a.model, a.cases, a.out, a.verbose)
     rows = env["summary"]
     print(f"{'case':<12}{'f':>5}{'disp mm':>9}{'n_max':>8}{'n_min':>8}{'cab max':>9}{'cab min':>9}{'slack':>7}"

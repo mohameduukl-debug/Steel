@@ -23,6 +23,7 @@ python3 "$S/tensile-analysis/scripts/membrane_dr.py" sail.json --Ew 800 --Ef 600
 
 echo; echo "== 2b. Load-case set (wind directions, zones, snow + ponding) and envelope =="
 python3 "$S/tensile-analysis/scripts/run_cases.py" sail.json "$HERE/load_cases_example.json" --out sail_cases
+python3 "$S/tensile-analysis/scripts/benchmarks.py" --quick --case square cable_point wrinkling | tail -6
 
 echo; echo "== 3. Membrane: material choice, checks, panel frequency, corner, sensitivity =="
 python3 "$S/membrane-fabric/scripts/material_select.py" --n-design 8.6 --case wind --fire B --life 15 | sed -n 1,8p

@@ -49,9 +49,9 @@ Key couplings:
 | # | Stage | Output | Skill → tool |
 |---|-------|--------|--------------|
 | 1 | Concept: shape, supports, material family, prestress level | sketch, plan, heights | this skill + `membrane-fabric` |
-| 2 | **Form finding** (sail, hypar, cone, arch tunnel, multi-bay ridge/valley, custom) | equilibrium surface, cable sags, support/arch loads | `tensile-analysis` → `form_find_fdm.py` |
+| 2 | **Form finding** (sail, hypar, cone, arch tunnel, multi-bay ridge/valley, custom) | equilibrium surface, cable sags, support/arch loads | `tensile-analysis` → `form_find_fdm.py` (incl. `rings`, `--uniform-stress`) |
 | 3 | Material data | E·t, ν, compensation from biaxial tests | `membrane-fabric` → `biaxial_fit.py` |
-| 4 | **Load analysis**: prestress, wind (directions, zones), snow, ponding | stresses (warp/weft/principal), wrinkling, deflection, envelopes | `tensile-analysis` → `membrane_dr.py` (orthotropic CST), `dynamic_relaxation.py` (net, fast), `run_cases.py` |
+| 4 | **Load analysis**: prestress, wind (directions, zones), snow, ponding | stresses (warp/weft/principal), wrinkling, deflection, envelopes | `tensile-analysis` → `membrane_dr.py` (orthotropic CST), `dynamic_relaxation.py` (net, fast), `run_cases.py`, `mesh_convergence.py` |
 | 5 | Membrane checks | material choice, fabric/seam utilisation per case (factor / fm / japan / partial / ts19102 / french), tear, corners (published n_eff), panel modes with computed added mass, ETFE (JRC Outlook 44) | `membrane-fabric` → `material_select.py`, `membrane_check.py --envelope --sensitivity` |
 | 6 | Cables | F_Rd, SLS, rods, clamps (EN 6.4), saddles (EN 6.3: radius 30d/400δ, slip, clamping pressure), fatigue, schedule with unstressed lengths (∫ds/(1+T/EA)), stressing turns, force from frequencies; 112-product library with sources | `cable-tension-members` → `cable_calc.py`, `cable_schedule.py --envelope` |
 | 7 | Steel supports | members (CHS/RHS/I, LTB, class 4), arch/mast stability (α_cr, 2nd order), foundations | `steel-supports` → `frame3d.py` (mast + tie-backs + cables: α_cr, 2nd order, membrane reactions), `frame2d.py` (arches/tapered), `member_check.py`, `foundation_check.py` (`mast_check.py` quick) |
@@ -145,9 +145,9 @@ OK / NOT OK decision does not depend on the factor) or **DEPENDS** (confirm the 
 lets you issue the check while the factor is still being verified. State that in the report.
 
 ## Honesty about code values
-Research for this skill used web search excerpts (primary PDFs were not
-accessible). Values are tagged **[verified-search]**, **[code-knowledge]** or
-**[unverified]** in the references. Before issuing calculations, confirm every
-code factor against the edition and National Annex in force (e.g. EN 1993-1-11:2026
-replaced the 2006 edition; CEN/TS 19102:2023 is a Technical Specification, not yet
-a full EN). Always use the supplier's datasheet or ETA for actual products.
+Values are tagged **[V]** (checked against the clause, a published worked example or an official document; the
+verification logs and validation tables in each skill give the evidence), **[C]** (code recommended value, the National
+Annex may differ) or **[U]** (practice value or not verified, always with a range). Before issuing calculations, confirm
+every code factor against the edition and National Annex in force (second-generation Eurocodes are being published;
+CEN/TS 19102:2023 is a Technical Specification, not yet a full EN). Always use the supplier's datasheet or ETA for
+actual products.

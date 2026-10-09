@@ -16,9 +16,17 @@
 | **LS-DYNA** | user methods | explicit; *MAT_034 FABRIC (no-compression flag, warp/weft curves) | — | deployment, impact |
 | **WinTess3** (UPC) | FDM | loads, deformations, stresses, foundations | DXF with layers (cut, draw, fold) | ES/EU practice |
 | **Tensyl** (Buro Happold, in-house) | DR | yes | yes | Millennium Dome |
-| **inTENS** (Tensys) | DR | yes | yes | 700+ projects |
+| **inTENS** (Tensys) | DR | yes | yes | 700+ projects [U: vendor claim] |
 | **K3-Tent** | yes | yes | yes | commercial suite |
 "Inextensa" could not be found; do not cite it.
+
+**Benchmarking packages.** The TensiNet round robin (Gosling, Bridgens, Albrecht et al., "Analysis and design of
+membrane structures: results of a round robin exercise", *Eng. Struct.* 48 (2013) 313–328,
+doi:10.1016/j.engstruct.2012.10.008) gave four precisely defined structures to several analysts and found "very high
+levels of variability in terms of stresses, displacements, reactions and material design strengths" [V: abstract,
+https://researchportal.bath.ac.uk/en/publications/analysis-and-design-of-membrane-structures-results-of-a-round-rob/].
+No agreed reference values from it are used here; instead the tools are checked against closed-form and published
+series solutions (`validation.md`). Run the same benchmarks in any package before relying on it.
 
 ## Python ecosystem
 | Purpose | Library |
