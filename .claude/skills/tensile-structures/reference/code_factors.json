@@ -548,5 +548,33 @@
       ],
       "range_source": "rope S-N slope spread (FLC research m1 = 4)"
     }
+  },
+  "fabrication": {
+    "_note": "patterning / shop-drawing thresholds used by fabrication-drawings tools (practice values, not code requirements unless status C/V)",
+    "flatten_strain_warn_pct": {
+      "value": 0.5,
+      "status": "U",
+      "source": "practice rule: flattening strain should stay well below the compensation values (0.3-0.5 %); no published numeric limit found (searched Dlubal RF-CUTTING-PATTERN, Warwick/TUM patterning papers) - project / fabricator to confirm",
+      "range": [
+        0.3,
+        1.0
+      ],
+      "range_source": "0.3-0.5 % rule of thumb (fabrication-drawings/reference/patterning.md); 1 % = typical lowest warp compensation of PVC fabrics"
+    },
+    "mating_seam_tol_mm_per_m": {
+      "value": 2.0,
+      "status": "U",
+      "source": "practice rule: compensated lengths of mating seams equal within about 1-2 mm/m (fabrication-drawings/reference/patterning.md); not from a standard",
+      "range": [
+        1.0,
+        2.0
+      ],
+      "range_source": "1-2 mm/m practice rule"
+    },
+    "steel_density_kg_m3": {
+      "value": 7850,
+      "status": "C",
+      "source": "EN 1993-1-1:2005 3.2.6(1) unit mass of steel rho = 7850 kg/m3 (EN 1991-1-1 Table A.4: 77.0-78.5 kN/m3)"
+    }
   }
 }

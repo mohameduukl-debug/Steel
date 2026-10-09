@@ -78,7 +78,7 @@ echo; echo "== 7. Patterns, GA DXF and steel part drawings =="
 python3 "$S/fabrication-drawings/scripts/cutting_pattern.py" sail.json --panels-along v --strip 2 --seams geodesic \
         --comp-warp 0.8 --comp-weft 1.6 --decomp-ends 0 --decomp-length 500 --seam 50 --edge 80 \
         --roll-width 2500 --out sail_patterns
-python3 "$S/fabrication-drawings/scripts/export_dxf.py" sail.json --forces --out sail_GA
+python3 "$S/fabrication-drawings/scripts/export_dxf.py" sail.json --forces --csv --out sail_GA
 python3 "$S/fabrication-drawings/scripts/steel_part_dxf.py" lug --d0 37 --d 36 --t 25 --a 50 --c 35 \
         --base 150 --height 110 --mark LP-01 --qty 4 --project "Demo sail"
 python3 "$S/fabrication-drawings/scripts/steel_part_dxf.py" corner --t 25 --edge 45 --hole A:0:0:52 \
@@ -93,6 +93,8 @@ python3 "$S/tensile-analysis/scripts/dynamic_relaxation.py" multibay.json --snow
 python3 "$S/fabrication-drawings/scripts/cutting_pattern.py" multibay.json --seams geodesic --strip 1 --roll-width 2670 \
         --auto-split --notch 1000 --sheets --project "Demo market roof" --out multibay_patterns | tail -4
 python3 "$S/fabrication-drawings/scripts/nest_panels.py" multibay_patterns.json --gap 20 --out multibay_nest
+echo "-- DXF check of every file written so far (structure, layers, \$INSUNITS = mm) --"
+python3 "$S/fabrication-drawings/scripts/dxf_reader.py" --units-mm *.dxf | tail -3
 
 echo; echo "== 9. Calculation report =="
 python3 "$S/tensile-structures/scripts/report.py" --title "Demo sail" --model sail.json --cases sail_cases_envelope.json \

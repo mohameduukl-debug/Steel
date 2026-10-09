@@ -21,7 +21,7 @@ the fabric, the cables and the structural steel, and how the three connect.
 ├── tensile-analysis/       form finding (FDM, DR, URS), non-linear load analysis, software guide
 │   └── scripts/form_find_fdm.py, membrane_dr.py, dynamic_relaxation.py, run_cases.py
 └── fabrication-drawings/   patterning, cutting DXF, GA DXF, steel part drawings, drawing-set contents
-    └── scripts/cutting_pattern.py, nest_panels.py, export_dxf.py, steel_part_dxf.py, dxf_writer.py
+    └── scripts/cutting_pattern.py, nest_panels.py, export_dxf.py, steel_part_dxf.py, dxf_writer.py, dxf_reader.py
 ```
 
 Each skill has a `SKILL.md` (loaded by Claude Code when relevant) and a `reference/` folder with the
