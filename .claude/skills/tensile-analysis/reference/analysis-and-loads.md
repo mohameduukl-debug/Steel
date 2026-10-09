@@ -2,6 +2,9 @@
 
 ## 1. Formulation
 * Geometrically non-linear (Total or Updated Lagrangian), Newton–Raphson with load steps, or DR. K_T = K_E + K_G.
+  `membrane_dr.py` has both: `--solver dr` (default) and `--solver newton` (consistent K_T of the TL CST, tension-field
+  tangent by central differences, symmetrised follower-pressure stiffness, energy line search, skyline Cholesky, DR
+  fallback); they give the same equilibrium (`validation.md`).
 * **No superposition.** Each factored combination is its own non-linear run. The reference is the prestressed state.
 * Membrane elements: CST or 4–8 node membrane, no bending. Green–Lagrange strain E = ½(FᵀF − I). Material axes follow
   the warp and fill directions from the patterning mesh.

@@ -23,7 +23,15 @@ Cases (references are closed-form or published series, computed here independent
   wrinkling  tension-field theory (Mansfield 1989; Roddeman et al. 1987): uniaxial / off-axis
              orthotropic tension with excess contraction, and Wagner's diagonal-tension shear panel
              -> membrane_dr.py wrinkling model
-  speed      30 x 30 sail: form finding + one DR load case (net) timing
+  airbag     PUBLISHED full-structure benchmark: inflated square airbag (Bauer 1975; Contri & Schrefler 1988;
+             Jarasjarungkiat, Wuechner & Bletzinger 2009; data and values as tabulated by Zhang & Kiendl,
+             arXiv:2504.03400, Tables 1-2): diagonal 1.2 m, t = 0.6 mm, E = 588 MPa, nu = 0.4, 5 kPa follower
+             pressure, quarter model -> membrane_dr.py (CST + wrinkling), Newton
+  sail_us    uniform-stress form finding of a free cable-edged sail (--us-method cst): each edge cable must be
+             an arc of radius T/sigma (exact condition of a soap film with constant-tension edge cables),
+             O(h^2); and the result is an exact CST prestress equilibrium (zero drift in membrane_dr.py)
+  newton     implicit Newton solver of membrane_dr.py = DR solution on Hencky, square and the 10 m sail
+  speed      30 x 30 sail: form finding, net DR, CST Newton (and CST DR unless --quick) timings
 """
 from __future__ import annotations
 
@@ -182,14 +190,14 @@ def cable_model(L, nseg, EA, L0):
 
 
 # ------------------------------------------------------------------ cases
-def run_hencky(nrings, load="snow", a=1.0, Et=1000.0, nu=0.3, q=1e-3, tol=None):
+def run_hencky(nrings, load="snow", a=1.0, Et=1000.0, nu=0.3, q=1e-3, tol=None, solver="dr"):
     """CST on the Hencky problem. Returns dict with w0/a, Nr(0)/Et, Nr(edge)/Et (+ refs at element radius)."""
     m = disk_model(a, nrings)
     p = q * Et / a
     tol = tol or 1e-7 * p * a * a
     G = Et / (2 * (1 + nu))
     kw = {"snow": p} if load == "snow" else {"pressure": p}
-    r = MDR.analyse(m, Et, Et, nu, G, 0.0, prestress=(0.0, 0.0), tol=tol, maxit=400000, **kw)
+    r = MDR.analyse(m, Et, Et, nu, G, 0.0, prestress=(0.0, 0.0), tol=tol, maxit=400000, solver=solver, **kw)
     X = [nd["xyz"] for nd in r["nodes"]]
     w0 = abs(X[0][2]) / a
     els = r["elements"]
@@ -218,13 +226,14 @@ def square_model(a, ndiv, n0):
     return m
 
 
-def run_square(ndiv, solver, a=10.0, n0=2.0, p=0.002, Et=800.0):
+def run_square(ndiv, solver, a=10.0, n0=2.0, p=0.002, Et=800.0, cst_solver="dr"):
     m = square_model(a, ndiv, n0)
     tol = 1e-6 * p * a * a / ndiv ** 2
     if solver == "net":
         r = DR.analyse(m, Et, Et, 1e5, pressure=p, tol=tol, maxit=500000)
     else:
-        r = MDR.analyse(m, Et, Et, 0.3, Et / 2.6, 1e5, pressure=p, prestress=(n0, n0), tol=tol, maxit=500000)
+        r = MDR.analyse(m, Et, Et, 0.3, Et / 2.6, 1e5, pressure=p, prestress=(n0, n0), tol=tol, maxit=500000,
+                        solver=cst_solver)
     w = max(abs(nd["xyz"][2]) for nd in r["nodes"])
     return {"coef": w * n0 / (p * a * a), "converged": r["analysis"]["converged"], "nodes": len(m["nodes"])}
 
@@ -334,7 +343,7 @@ def run_shear_panel(gamma=0.02, Et=800.0, nu=0.3, n=6):
             "residual": R}
 
 
-def run_speed(n=30):
+def run_speed(n=30, cst_dr=True):
     t = time.time()
     m = FDM.gen_sail4(10, 3, n, 1.0, 12.0, False)
     FDM.solve_fdm(m)
@@ -343,8 +352,83 @@ def run_speed(n=30):
     t = time.time()
     r = DR.analyse(m, 800, 600, 14000, pressure=0.9)
     t_dr = time.time() - t
-    return {"nodes": len(m["nodes"]), "t_ff": t_ff, "t_dr": t_dr, "it": r["analysis"]["iterations"],
-            "converged": r["analysis"]["converged"]}
+    out = {"nodes": len(m["nodes"]), "t_ff": t_ff, "t_dr": t_dr, "it": r["analysis"]["iterations"],
+           "converged": r["analysis"]["converged"]}
+    for sv in (("newton", "dr") if cst_dr else ("newton",)):
+        t = time.time()
+        rc = MDR.analyse(m, 800, 600, 0.3, 30, 14000, pressure=0.9, solver=sv)
+        out["t_cst_" + sv] = time.time() - t
+        out["cst_" + sv] = rc
+    return out
+
+
+# ------------------------------------------------------------------ published benchmark: square airbag
+# Inflated square airbag (Bauer 1975; Contri & Schrefler 1988, Commun. Appl. Numer. Methods 4:5-15; Kang & Im
+# 1999, CMAME 173:227-240; Jarasjarungkiat, Wuechner & Bletzinger 2009, CMAME 198:1097-1116), as tabulated by
+# Zhang & Kiendl (2025), "A variationally consistent membrane wrinkling model based on spectral decomposition of
+# the stress tensor", arXiv:2504.03400, section 5.4, Tables 1-2: diagonal AC = 120 cm, t = 0.06 cm, E = 588 MPa,
+# nu = 0.4, follower pressure 5000 Pa, quarter model, symmetry on the inner edges, outer edges held in the
+# mid-plane (uz = 0). Vertical displacement of the centre M [m] and first principal stress at M [MPa]:
+AIRBAG_PUBLISHED = {
+    # mesh: {source: (w_M, u_B, sigma_M)}   (u_B = in-plane displacement of point B; see validation.md)
+    "4x4": {"Contri & Schrefler 1988": (0.2090, 0.1018, 3.4), "Kang & Im 1999": (0.2150, 0.1170, None),
+            "Jarasjarungkiat et al. 2009": (0.2149, 0.1202, 3.2)},
+    "5x5": {"Contri & Schrefler 1988": (0.2170, 0.1103, 3.5), "Kang & Im 1999": (0.2160, 0.1170, None),
+            "Jarasjarungkiat et al. 2009": (0.2159, 0.1215, 3.6)},
+    "8x8": {"Contri & Schrefler 1988": (0.2050, 0.1301, 3.5), "Kang & Im 1999": (0.2140, 0.1190, None),
+            "Jarasjarungkiat et al. 2009": (0.2166, 0.1227, 3.8)},
+    "10x10": {"Jarasjarungkiat et al. 2009": (0.2167, 0.1237, 3.8), "Zhang & Kiendl 2025 (strain)": (0.2167, 0.1228, 3.8),
+              "Zhang & Kiendl 2025 (mixed)": (0.2163, 0.1235, 3.8)},
+}
+AIRBAG_REF = 0.2167      # w_M of the finest published meshes (Jarasjarungkiat et al. 2009 and Zhang & Kiendl, 10x10)
+
+
+def airbag_model(n, diag=1.2):
+    """Quarter of the square airbag, x/y = symmetry axes through the centre M (node 0), n x n quads.
+    Supports per component: x = 0 -> ux = 0, y = 0 -> uy = 0 (symmetry); outer edges -> uz = 0 (seam)."""
+    h = diag / math.sqrt(2) / 2
+    idx = lambda i, j: j * (n + 1) + i      # noqa: E731
+    nodes = [{"id": idx(i, j), "xyz": [h * i / n, h * j / n, 0.0], "fix": [i == 0, j == 0, i == n or j == n],
+              "grid": [i, j]} for j in range(n + 1) for i in range(n + 1)]
+    faces = [[idx(i, j), idx(i + 1, j), idx(i + 1, j + 1), idx(i, j + 1)] for j in range(n) for i in range(n)]
+    return {"units": {"length": "m", "force": "kN"}, "type": "airbag-quarter", "grid": {"nu": n, "nv": n},
+            "nodes": nodes, "edges": [], "faces": faces}, idx, h
+
+
+def run_airbag(n, solver="newton", tol=1e-6, t=0.0006, E=588e3, nu=0.4, p=5.0):
+    """Returns w_M (centre rise), u_B (inward move of the mid-point B of the outer edge on the x axis), r_A (inward
+    move of the corner A along the diagonal), sigma_M (mean n1 of the centre elements / t) [MPa]."""
+    m, idx, h = airbag_model(n)
+    Et = E * t
+    tm = time.time()
+    r = MDR.analyse(m, Et, Et, nu, Et / (2 * (1 + nu)), 1e4, pressure=p, prestress=(0.0, 0.0), tol=tol,
+                    solver=solver, maxit=2000000)
+    X = [nd["xyz"] for nd in r["nodes"]]
+    A = X[idx(n, n)]
+    cen = [e for e in r["elements"] if idx(0, 0) in e["nodes"]]
+    return {"wM": X[idx(0, 0)][2], "uB": h - X[idx(n, 0)][0], "rA": (2 * h - A[0] - A[1]) / math.sqrt(2),
+            "sM": sum(e["n1"] for e in cen) / len(cen) / t / 1000.0, "converged": r["analysis"]["converged"],
+            "wrinkled": r["analysis"]["wrinkled_elements"], "n_el": r["analysis"]["n_elements"],
+            "newton": r["analysis"].get("newton"), "time": time.time() - tm}
+
+
+# ------------------------------------------------------------------ uniform-stress sail (cst method)
+def run_sail_us(n, T=16.0, sigma=2.0, size=10.0, high=3.0):
+    """sail4 form-found with an isotropic uniform stress sigma and constant edge-cable force T (--us-method cst).
+    Returns the curvature radius of the edge cable EC-S at every interior node / (T/sigma) (min, max), the
+    cable sag, the info dict and the model."""
+    m = FDM.gen_sail4(size, high, n, 1.0, 12.0, False)
+    info = FDM.form_find_uniform_stress(m, sigma, None, 300, 1e-6, method="cst", cable_force=T)
+    X = [nd["xyz"] for nd in m["nodes"]]
+    rad = []
+    for i in range(1, n):                     # edge j = 0: nodes 0..n
+        A, B, C = X[i - 1], X[i], X[i + 1]
+        a, b, c = math.dist(B, C), math.dist(A, C), math.dist(A, B)
+        ar = 0.5 * FDM.norm(FDM.cross(FDM.sub(B, A), FDM.sub(C, A)))
+        rad.append(a * b * c / (4 * ar) / (T / sigma))
+    ch = FDM.sub(X[n], X[0])
+    sag = max(FDM.norm(FDM.cross(FDM.sub(X[i], X[0]), ch)) / FDM.norm(ch) for i in range(n + 1))
+    return {"R_ratio": (min(rad), max(rad)), "sag": sag, "info": info, "model": m}
 
 
 # ------------------------------------------------------------------ table
@@ -359,7 +443,8 @@ def row(case, ref, exp, got, tol_pct, contrast=False):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--case", nargs="+", default=["hencky", "fichter", "square", "catenoid", "cable_point",
-                                                   "cable_udl", "cable_catenary", "wrinkling", "speed"])
+                                                   "cable_udl", "cable_catenary", "wrinkling", "airbag", "sail_us",
+                                                   "newton", "speed"])
     ap.add_argument("--quick", action="store_true", help="coarse meshes only")
     a = ap.parse_args(argv)
     print("Assumptions: references are closed-form / published series evaluated in this script, independently of "
@@ -428,10 +513,53 @@ def main(argv=None):
                           f"| 0 | {got[k]:.2g} | abs | 1e-9 | {'PASS' if ok else 'FAIL'} |")
         r = run_shear_panel()
         allok &= row("Wagner shear panel: shear flow S12", "tension field σ1 = Eε1, τ = σ1/2", r["S12_ref"], r["S12"], 0.5)
+    if "catenoid" in a.case:
+        for nr, nc in ([(4, 16), (8, 32)] if a.quick else [(4, 16), (8, 32), (16, 64)]):
+            mm = FDM.gen_rings(1.0, 1.0, 0.8, nr, nc, 1.0)
+            for nd in mm["nodes"]:
+                nd["xyz"][2] -= 0.4
+            FDM.form_find_uniform_stress(mm, 1.0, method="cst", maxiter=300)
+            c = catenoid_c(1.0, 0.4)
+            neck = min(math.hypot(nd["xyz"][0], nd["xyz"][1]) for nd in mm["nodes"])
+            allok &= row(f"Catenoid neck r, uniform-stress --us-method cst {nr}x{nc}", "c from R = c cosh(h/c)", c,
+                         neck, 0.5 if nr == 4 else 0.15)
+    if "airbag" in a.case:
+        for n in ([8] if a.quick else [8, 16]):
+            r = run_airbag(n, tol=1e-6 if n <= 8 else 1e-5)
+            ref = AIRBAG_PUBLISHED["8x8" if n == 8 else "10x10"]["Jarasjarungkiat et al. 2009"]
+            lab = "8x8" if n == 8 else "10x10"
+            allok &= row(f"Airbag w_M, CST Newton {n}x{n} quarter ({r['n_el']} CST)",
+                         f"Jarasjarungkiat et al. 2009 ({lab}) via arXiv:2504.03400", ref[0], r["wM"], 1.0)
+            allok &= row(f"Airbag u_B, CST Newton {n}x{n}", f"Jarasjarungkiat et al. 2009 ({lab})", ref[1], r["uB"], 3.0)
+            allok &= row(f"Airbag sigma_1 at M [MPa], CST Newton {n}x{n}", f"Jarasjarungkiat et al. 2009 ({lab})",
+                         ref[2], r["sM"], 5.0)
+            row(f"Airbag r_A (corner), CST Newton {n}x{n}: published 0.047-0.097, mesh/model dependent",
+                f"Jarasjarungkiat et al. 2009 ({lab})", {8: 0.0738, 16: 0.0692}[n], r["rA"], 0, contrast=True)
+    if "sail_us" in a.case:
+        for n in ([8, 16] if a.quick else [8, 16, 32]):
+            r = run_sail_us(n)
+            lo, hi = r["R_ratio"]
+            worst = lo if abs(lo - 1) > abs(hi - 1) else hi
+            allok &= row(f"Sail4 uniform stress (cst) {n}x{n}: edge-cable radius / (T/sigma), worst node",
+                         "T = sigma R (cable-edged soap film)", 1.0, worst, {8: 0.5, 16: 0.15, 32: 0.06}[n])
+    if "newton" in a.case:
+        for nr in ([6] if a.quick else [8]):
+            rd, rn = (run_hencky(nr, "snow", solver=sv) for sv in ("dr", "newton"))
+            allok &= row(f"Hencky w0/a, CST Newton vs DR, {rn['nodes']} nodes", "same equations (DR result)",
+                         rd["w0_a"], rn["w0_a"], 0.01)
+        for nd in ([8] if a.quick else [8, 16]):
+            rd, rn = (run_square(nd, "cst", cst_solver=sv) for sv in ("dr", "newton"))
+            allok &= row(f"Square w·n/(pa²), CST Newton vs DR, {nd}x{nd}", "same equations (DR result)",
+                         rd["coef"], rn["coef"], 0.01)
     if "speed" in a.case:
-        r = run_speed(20 if a.quick else 30)
+        r = run_speed(20 if a.quick else 30, cst_dr=not a.quick)
         print(f"\nTiming: {r['nodes']}-node sail: form finding {r['t_ff']:.2f} s, DR net pressure case "
-              f"{r['t_dr']:.2f} s ({r['it']} iterations, converged {r['converged']})")
+              f"{r['t_dr']:.2f} s ({r['it']} iterations, converged {r['converged']}); CST Newton "
+              f"{r['t_cst_newton']:.2f} s" + (f", CST DR {r['t_cst_dr']:.2f} s" if "t_cst_dr" in r else ""))
+        if "cst_dr" in r:
+            a_, b_ = r["cst_dr"], r["cst_newton"]
+            allok &= row(f"Sail {r['nodes']} nodes 0.9 kN/m² max displacement, CST Newton vs DR", "DR result",
+                         a_["analysis"]["max_displacement_m"], b_["analysis"]["max_displacement_m"], 0.05)
     print(f"\nAll checks {'PASS' if allok else 'FAIL'}; total {time.time() - t0:.1f} s")
     return allok
 

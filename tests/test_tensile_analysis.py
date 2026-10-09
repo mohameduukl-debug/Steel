@@ -415,5 +415,156 @@ class TestPerformanceAndConvergence(unittest.TestCase):
             self.assertIn("Orthotropic CST", fh.read())
 
 
+class TestNewtonSolver(unittest.TestCase):
+    """membrane_dr.py --solver newton: implicit Newton-Raphson on the SAME residual as the DR solver. Checked
+    against the independent references (Fichter/Hencky series, Navier series) and against DR on a sail."""
+
+    def test_skyline_cholesky_against_dense_solution(self):
+        # random symmetric positive definite variable-band matrix: L L^T x = b solved, residual checked densely
+        import random
+        rnd = random.Random(3)
+        N = 40
+        fc = [max(0, i - rnd.randint(0, 6)) for i in range(N)]
+        A = [[0.0] * N for _ in range(N)]
+        for i in range(N):
+            for j in range(fc[i], i):
+                A[i][j] = A[j][i] = rnd.uniform(-1, 1)
+            A[i][i] = 12.0
+        sky = [[A[i][j] for j in range(fc[i], i + 1)] for i in range(N)]
+        b = [rnd.uniform(-1, 1) for _ in range(N)]
+        self.assertTrue(mdr.skyline_cholesky(sky, fc))
+        x = mdr.skyline_solve(sky, fc, b)
+        self.assertLess(max(abs(sum(A[i][j] * x[j] for j in range(N)) - b[i]) for i in range(N)), 1e-12)
+        bad = [[1.0], [2.0, 1.0]]                         # indefinite: Cholesky must report failure
+        self.assertFalse(mdr.skyline_cholesky(bad, [0, 0]))
+
+    def test_newton_hencky_and_square_references(self):
+        q = 1e-3
+        r = bm.run_hencky(8, "snow", q=q, solver="newton")
+        W, N0 = hencky_ref(q)
+        self.assertTrue(r["converged"])
+        self.assertAlmostEqual(r["w0_a"] / W, 1.0, delta=0.01)          # +0.12 %, identical to DR
+        self.assertAlmostEqual(r["N0"] / N0, 1.0, delta=0.025)
+        rp = bm.run_hencky(8, "pressure", q=0.01, solver="newton")       # follower pressure, Fichter table 0.0207
+        self.assertAlmostEqual(rp["N0"] / FICHTER_TABLE_NR0[("pressure", 0.01)], 1.0, delta=0.04)
+        ref = navier_square()
+        for nd, tol in ((8, 0.015), (16, 0.005)):
+            rs = bm.run_square(nd, "cst", cst_solver="newton")
+            self.assertTrue(rs["converged"])
+            self.assertLess(abs(rs["coef"] / ref - 1), tol)               # -1.27 % / -0.37 % (same as DR)
+
+    def test_newton_equals_dr_on_sail_and_is_faster(self):
+        m = fdm.gen_sail4(10, 3, 16, 1.0, 12.0, False)
+        fdm.solve_fdm(m)
+        fdm.compute_results(m, 2.0)
+        out = {}
+        for sv in ("dr", "newton"):
+            t = time.time()
+            r = mdr.analyse(m, 800, 600, 0.3, 30, 14000, pressure=0.9, solver=sv)
+            out[sv] = (r, time.time() - t)
+        (a, ta), (b, tb) = out["dr"], out["newton"]
+        self.assertTrue(a["analysis"]["converged"] and b["analysis"]["converged"])
+        self.assertFalse(b["analysis"]["newton"]["fallback_dr"])
+        self.assertLess(max(math.dist(p["xyz"], q["xyz"]) for p, q in zip(a["nodes"], b["nodes"])), 1e-4)
+        self.assertAlmostEqual(max(e["n1"] for e in b["elements"]), max(e["n1"] for e in a["elements"]), delta=2e-3)
+        self.assertEqual(a["analysis"]["wrinkled_elements"], b["analysis"]["wrinkled_elements"])
+        for r1, r2 in zip(a["reactions"], b["reactions"]):
+            self.assertLess(max(abs(u - v) for u, v in zip(r1["pull"], r2["pull"])), 5e-3)
+        self.assertLess(tb, ta / 3)                                       # ~10x measured (0.6 s vs 5.6 s)
+
+    def test_fallback_to_dr_when_the_tangent_cannot_be_factorised(self):
+        m = fdm.gen_sail4(10, 3, 6, 1.0, 12.0, False)
+        fdm.solve_fdm(m)
+        fdm.compute_results(m, 2.0)
+        ref = mdr.analyse(m, pressure=0.9)
+        orig = mdr.skyline_cholesky
+        mdr.skyline_cholesky = lambda sky, fc: False                       # every factorisation "fails"
+        try:
+            r = mdr.analyse(m, pressure=0.9, solver="newton")
+        finally:
+            mdr.skyline_cholesky = orig
+        self.assertTrue(r["analysis"]["newton"]["fallback_dr"])
+        self.assertTrue(r["analysis"]["converged"])
+        self.assertAlmostEqual(r["analysis"]["max_displacement_m"], ref["analysis"]["max_displacement_m"], delta=1e-4)
+
+
+class TestPublishedAirbag(unittest.TestCase):
+    """PUBLISHED full-structure benchmark: inflated square airbag (Bauer 1975; Contri & Schrefler 1988; Kang & Im
+    1999; Jarasjarungkiat, Wuechner & Bletzinger 2009, CMAME 198:1097-1116), data and results as tabulated in Zhang
+    & Kiendl, arXiv:2504.03400 (2025), sec. 5.4, Tables 1-2: diagonal 1.2 m, t = 0.6 mm, E = 588 MPa, nu = 0.4,
+    5 kPa follower pressure, quarter model; vertical displacement of the centre w_M = 0.2166 m (8x8) / 0.2167 m
+    (10x10, also Zhang & Kiendl), first principal stress at the centre 3.8 MPa."""
+    PUBLISHED_WM = {"8x8": (0.2050, 0.2140, 0.2166), "10x10": (0.2167, 0.2167, 0.2163)}   # C&S, K&I / JWB, Z&K
+
+    def test_airbag_8x8_newton(self):
+        r = bm.run_airbag(8, solver="newton", tol=1e-6)
+        self.assertTrue(r["converged"])
+        self.assertAlmostEqual(r["wM"] / 0.2166, 1.0, delta=0.01)        # +0.39 % (0.21744 m)
+        self.assertAlmostEqual(r["uB"] / 0.1227, 1.0, delta=0.03)        # +1.6 %
+        self.assertAlmostEqual(r["sM"] / 3.8, 1.0, delta=0.05)           # +3.1 % (centre-element average)
+        lo, hi = min(self.PUBLISHED_WM["8x8"]), max(self.PUBLISHED_WM["10x10"])
+        self.assertTrue(lo <= r["wM"] <= hi * 1.01)                      # inside the published spread
+        self.assertGreater(r["wrinkled"], 0)                             # wrinkles along edges and corners
+        self.assertEqual(bm.AIRBAG_PUBLISHED["8x8"]["Jarasjarungkiat et al. 2009"][0], 0.2166)
+
+
+class TestUniformStressSail(unittest.TestCase):
+    """--uniform-stress --us-method cst on a free cable-edged sail (the case where the tributary-width iteration
+    degenerates at the corners). Independent check: with an isotropic stress sigma and a constant cable force T,
+    equilibrium of a cable element (T kappa = sigma) makes every edge cable a curve of radius R = T/sigma."""
+
+    def test_edge_cable_radius_converges_O_h2(self):
+        errs = []
+        for n in (8, 16):
+            r = bm.run_sail_us(n, T=16.0, sigma=2.0)
+            self.assertTrue(r["info"]["converged"], r["info"]["status"])
+            lo, hi = r["R_ratio"]
+            errs.append(max(abs(lo - 1), abs(hi - 1)))
+            self.assertLess(r["info"]["stress_dev"], 0.02)               # tangential out-of-balance < 2 % of sigma h
+        self.assertLess(errs[0], 0.005)                                  # 0.45 % at 8x8
+        self.assertLess(errs[1], 0.0015)                                 # 0.14 % at 16x16
+        self.assertGreater(errs[0] / errs[1], 2.5)                       # ~3.2 (O(h^2) -> 4)
+
+    def test_cst_prestress_equilibrium_and_cli(self):
+        tmp = tempfile.mkdtemp()
+        p = os.path.join(tmp, "us")
+        m = quiet(fdm.main, ["sail4", "--n", "8", "--prestress", "2", "--uniform-stress", "--cable-force", "16",
+                             "--out", p])
+        us = m["solver"]["uniform_stress"]
+        self.assertEqual(us["method"], "cst")                            # auto -> cst for a model with cables
+        self.assertTrue(us["converged"])
+        for g in m["cable_groups"]:
+            self.assertAlmostEqual(g["force_max"], 16.0, places=6)       # constant cable force
+            self.assertAlmostEqual(g["force_min"], 16.0, places=6)
+        tot = [sum(r["pull"][c] for r in m["reactions"]) for c in range(3)]
+        self.assertLess(max(abs(v) for v in tot), 0.05)                  # self-equilibrated prestress
+        # the form is an equilibrium of the CST elements with isotropic prestress 2 kN/m: no drift in membrane_dr
+        r = mdr.analyse(m, prestress=(2.0, 2.0), solver="newton")
+        pe = r["analysis"]["prestress_equilibrium"]
+        self.assertLess(pe["max_drift_m"], 5e-4)
+        self.assertAlmostEqual(pe["warp_range"][0], 2.0, delta=0.02)
+        self.assertAlmostEqual(pe["warp_range"][1], 2.0, delta=0.02)
+
+    def test_cst_method_on_catenoid(self):
+        # the same algorithm reproduces the catenoid (no cables): O(h^2) radius error
+        errs = []
+        c = TestCatenoid.c_ref(1.0, 0.4)
+        for nr, nc in ((4, 16), (8, 32)):
+            m = fdm.gen_rings(1.0, 1.0, 0.8, nr, nc, 1.0)
+            for nd in m["nodes"]:
+                nd["xyz"][2] -= 0.4
+            info = fdm.form_find_uniform_stress(m, 1.0, method="cst", maxiter=300)
+            self.assertTrue(info["converged"])
+            errs.append(max(abs(math.hypot(nd["xyz"][0], nd["xyz"][1]) - c * math.cosh(nd["xyz"][2] / c))
+                            for nd in m["nodes"]))
+        self.assertLess(errs[1], 1.2e-3)                                 # 3.7e-3 -> 9.1e-4
+        self.assertGreater(errs[0] / errs[1], 3.5)
+
+    def test_width_method_still_available(self):
+        m = fdm.gen_sail4(10, 3, 8, 1.0, 12.0, False)
+        info = fdm.form_find_uniform_stress(m, 2.0, method="width")
+        self.assertEqual(info["method"], "width")
+
+
 if __name__ == "__main__":
     unittest.main()

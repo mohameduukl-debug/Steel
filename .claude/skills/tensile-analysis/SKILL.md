@@ -18,6 +18,7 @@ python3 form_find_fdm.py cone  --R 8 --r 0.6 --H 5 --anchors 6 --nr 12 --nc 36 -
 python3 form_find_fdm.py arch  --L 20 --B 10 --H 4 --arches 3 --nu 24 --nv 12 --prestress 2 --out arch
 python3 form_find_fdm.py multibay --bays 3 --bay 8 --B 10 --h-hi 6 --h-lo 3 --m 4 --nv 12 --qc 3 --prestress 2 --out mb
 python3 form_find_fdm.py rings --R 5 --r 5 --H 3 --nr 12 --nc 48 --prestress 2 --uniform-stress --out hourglass
+python3 form_find_fdm.py sail4 --n 24 --prestress 2 --uniform-stress --cable-force 16 --out sail_us   # soap-film sail
 python3 form_find_fdm.py --input mymodel.json --prestress 2.0 --out result              # any topology
 ```
 - Shapes: `sail4` (4-point sail, cable edges), `hypar` (rigid boundary), `cone` (top ring + anchors, `--anchors`,
@@ -30,11 +31,19 @@ python3 form_find_fdm.py --input mymodel.json --prestress 2.0 --out result      
   `tensile-connections`]) at the mesh you use, and scale `--qc`/`--qr` with n when you refine (`mesh_convergence.py`
   does this automatically).
 - `--prestress`: scales every q so the mean membrane stress equals the target (FDM geometry depends only on q ratios).
-- `--uniform-stress` (+ `--ff-maxiter`, `--ff-tol`): non-linear FDM that iterates the membrane q = σ·w/L (w tributary
-  width) until the stress is uniform and isotropic (soap-film-like), cables keep their q. It converges to the catenoid
-  between two rings with O(h²) error [C: `validation.md`]; convergence is judged on the normal node moves (a uniform
-  stress leaves the mesh free to slide in the tangent plane). On free cable-edged sails the corner cells degenerate on
-  fine meshes: the tool then stops, keeps the most uniform state and prints NOT CONVERGED; use linear FDM there.
+- `--uniform-stress` (+ `--us-method auto|cst|width`, `--cable-force T`, `--ff-maxiter` 300, `--ff-tol`): form finding
+  for a uniform isotropic membrane stress σ = `--prestress` (soap-film-like). `auto` picks `cst` when the model has
+  cables, `width` otherwise.
+  - `cst`: exact isotropic stress σ in every triangle (cotangent force densities, Pinkall–Polthier; URS with λ = 0) and
+    a CONSTANT force T in every cable (`--cable-force`, default the linear-FDM force of each group scaled to σ), so each
+    free edge becomes an arc of radius R = T/σ (choose T = σ·R for the sag you want). Monotone majorise–minimise steps,
+    then normal-only moves (cable nodes also across the cable) to stop tangential mesh creep. Robust at the corners of
+    free cable-edged sails: radius error 0.45 % → 0.14 % → 0.04 % at n = 8/16/32, and the result is an exact CST
+    prestress equilibrium (zero drift in `membrane_dr.py`) [C: `validation.md`]. Stops with "degenerating mesh" (NOT
+    CONVERGED) where an isotropic field is not realisable — tall cones on a small ring — and on the `multibay`
+    generator: use linear FDM there. Membrane links get stress = σ; reactions are the exact element forces.
+  - `width`: q = σ·w/L on the grid links (w tributary width), cables keep their q; converges to the catenoid with O(h²)
+    error; degenerates at the corners of cable-edged sails (kept for rings / rigid boundaries).
 - `arch`: reports the total pull and line load on each arch (ARCH-k) and rail (RAIL-S/N). `multibay`: ridge cables sag
   below their chord, valley cables hog above it (`mid_dz` < 0 / > 0); support groups MAST-k / ANCHOR-k; `--qc 3` gives
   about 8–10 % scallop sag at the default mesh [C: tool output].
@@ -46,7 +55,18 @@ python3 form_find_fdm.py --input mymodel.json --prestress 2.0 --out result      
 python3 membrane_dr.py sail.json --Ew 800 --Ef 600 --nu 0.3 --G 30 --EA-cable 14000 --pressure 0.9 --out up
 python3 membrane_dr.py sail.json --snow 0.75 --ponding --out snow
 python3 membrane_dr.py flat.json --prestress 2 2 --pressure 0.1 --no-wrinkling --tol 1e-6 --maxit 200000 -v
+python3 membrane_dr.py sail.json --pressure 0.9 --solver newton --out up        # implicit, 5-80x faster, same result
 ```
+- Solvers (same residual, same outputs): `--solver dr` (default; explicit kinetic-damping DR) or `--solver newton`
+  (Newton–Raphson with the consistent tangent of the TL CST: material + geometric stiffness, tension-field tangent by
+  central differences, cable stiffness, symmetric part of the follower-pressure stiffness (`--no-follower-stiffness` to
+  drop it; snow on plan is a dead load in the tangent); adaptive load steps, energy line search, modified-Newton reuse
+  of the factor, skyline Cholesky in RCM/input order, Levenberg–Marquardt shift when K is not positive definite, and
+  DR fallback). Newton = DR on every benchmark (node positions to ~1e-5 m) [C]. Use `newton` for meshes above ~12×12
+  and for unstressed starts (airbags, Hencky), DR for small meshes or when the output `analysis.newton.fallback_dr` is
+  true anyway. `--tol` on very wrinkled unstressed starts: 1e-5 kN or larger (smaller can stall → slow DR fallback).
+- Supports per component: a node may carry `"fix": [fx, fy, fz]` (booleans) instead of `"fixed": true` — symmetry
+  planes, rollers (CST solver only; reported in `reactions` with the free components ≈ 0).
 - Constant-strain triangles, Total-Lagrangian (F, Green strain, PK2 stress per unit reference width, exact large
   rotations). Orthotropic plane stress in warp/weft axes: E_w·t, E_f·t, ν_wf (ν_fw by reciprocity), G·t. Quads take warp
   from the grid u direction; triangle faces from the model's optional `"warp_dir"` (default global x).
@@ -59,7 +79,8 @@ python3 membrane_dr.py flat.json --prestress 2 2 --pressure 0.1 --no-wrinkling -
 - Initial stress from the form finding (warp/weft per quad) or uniform `--prestress W F`. The prestress state is first
   relaxed to equilibrium, and the drift and stress ranges are reported. Cables are tension-only links.
 - Loads: follower pressure (+ = uplift), snow per plan area, ponding (`--ponding`, same algorithm as the net solver).
-- `run_cases.py` uses it with `"solver": "cst"` in the cases file (material gains `nu`, `G`).
+- `run_cases.py` uses it with `"solver": "cst"` (DR) or `"cst-newton"` in the cases file (material gains `nu`, `G`);
+  `mesh_convergence.py --solver cst-newton` likewise.
 
 ### `scripts/dynamic_relaxation.py`: non-linear load analysis (cable-net analogy; fast screening)
 ```bash
@@ -106,9 +127,10 @@ Example (sail, net, pressure 0.9): max displacement changes +0.06 % / +0.14 %, m
 
 ### `scripts/benchmarks.py`: validation benchmarks
 ```bash
-python3 benchmarks.py            # all cases, prints the validation table and timings (~1 min)
-python3 benchmarks.py --quick    # coarse meshes
-python3 benchmarks.py --case hencky fichter square catenoid cable_point cable_udl cable_catenary wrinkling speed
+python3 benchmarks.py            # all cases, prints the validation table and timings (~2 min)
+python3 benchmarks.py --quick    # coarse meshes (~15 s)
+python3 benchmarks.py --case hencky fichter square catenoid cable_point cable_udl cable_catenary wrinkling airbag \
+                             sail_us newton speed
 ```
 Reproduces `reference/validation.md` on the user's machine; exit code 1 if a check fails.
 
@@ -122,6 +144,9 @@ All results [C]: computed by `benchmarks.py` / the tests against the cited indep
 | Catenoid between rings, r = c·cosh(z/c) | FDM `--uniform-stress` | max radius error 4e-4 → 1e-4 → 2.5e-5 (R = 1), O(h²); plain linear FDM: −17 % neck |
 | Cable point load / load on plan / self-weight (Irvine 1981) | net DR | < 1e-5 / 0.03 % / 0.03 % |
 | Tension field: uniaxial, off-axis orthotropic, Wagner shear panel | CST wrinkling | exact (≤ 1e-7) |
+| **Published** inflated square airbag (Jarasjarungkiat, Wüchner & Bletzinger 2009 et al., tabulated in arXiv:2504.03400) | CST Newton + wrinkling, partial supports | w_M +0.39 % (8×8), +0.11 % (16×16 vs 10×10); u_B +1.6/+2.3 %; σ₁(M) +3.1/+1.8 % |
+| Cable-edged sail, uniform stress: edge cable radius = T/σ | FDM `--us-method cst` | 0.45 % → 0.14 % → 0.04 % (n = 8/16/32), O(h²); zero CST drift |
+| Newton vs DR (Hencky, square, sail 16×16 and 30×30) | CST | same equilibrium (≤ 1e-5 m, 6 digits on the references) |
 
 Net (cable-net analogy) versus CST: with a uniform isotropic prestress on a regular grid the two give the same answer
 (the CST geometric stiffness equals the 5-point Laplacian of the net); they differ where fabric shear stiffness, Poisson
@@ -130,14 +155,16 @@ the net [C: tool output, n = 10–30], and the existing chain test bounds the ra
 
 ## Performance (one CPU, pure Python; `validation.md` §Timings)
 Measured times [C] (this container, Python 3.11); "was" = previous implementation, identical results.
-| Mesh (sail4) | FDM | net DR, 0.9 kN/m² | CST, prestress + 0.9 kN/m² |
-|---|---|---|---|
-| 10×10 (121 nodes) | 0.01 s | 0.2 s (was 0.6 s) | 1.0 s (was 2.6 s) |
-| 20×20 (441 nodes) | 0.06 s | 1.6 s (was 5.3 s) | 9.9 s (was 24.8 s) |
-| 30×30 (961 nodes) | 0.1 s | 5.5 s (was 17.3 s) | 32 s (was ~100 s) |
+| Mesh (sail4) | FDM | net DR, 0.9 kN/m² | CST DR, prestress + 0.9 kN/m² | CST `--solver newton` |
+|---|---|---|---|---|
+| 10×10 (121 nodes) | 0.01 s | 0.2 s (was 0.6 s) | 1.0 s (was 2.6 s) | 0.12 s |
+| 20×20 (441 nodes) | 0.06 s | 1.6 s (was 5.3 s) | 10 s (was 24.8 s) | 0.7 s |
+| 30×30 (961 nodes) | 0.1 s | 5.5 s (was 17.3 s) | 33 s (was ~100 s) | 4.0–4.4 s |
+| 50×50 (2601 nodes) | 0.55 s | — | minutes | 14 s |
 FDM: matrix-free Jacobi-PCG, three coordinates in one edge loop (60×60: 0.9 s; 100×100: 3.7 s). DR: flat arrays, O(edges +
-faces) per iteration. DR iterations grow about linearly with the mesh side (explicit method), so 50×50+ CST meshes take
-minutes; use the net solver for screening and the CST on the governing cases.
+faces) per iteration, iterations grow about linearly with the mesh side. Newton: ~11 iterations at every mesh size,
+cost dominated by the banded Cholesky (~N²): use it for the CST on any mesh above ~12×12; beyond ~80×80 a commercial
+solver is the practical choice. Uniform-stress `cst` form finding: 0.2 s (8×8), 0.8 s (16×16), 7 s (32×32).
 
 ## Limitations (state them in any report)
 **Fit for:** concept design, form exploration, screening of load cases, order-of-magnitude reactions for steel and
@@ -149,8 +176,11 @@ final design, and not for permit calculations on its own.
 - Elements: CST membrane (no bending, no shell action); net solver ignores shear and Poisson coupling entirely. Stresses
   are element (CST) or link (net) averages: peaks at corners, clamp plates and supports need a finer local mesh or a
   local model; corner/edge minima converge slowest (mesh_convergence.py).
-- Form finding: linear FDM (shape from q ratios; stress uniform only on an "isotropic" grid) or the uniform-stress
-  iteration (not robust at the corners of free cable-edged sails). No anisotropic URS, no seam/patterning-driven form.
+- Form finding: linear FDM (shape from q ratios; stress uniform only on an "isotropic" grid) or the isotropic
+  uniform-stress iteration (`cst`: robust on sails and arch ends; not realisable on tall cones, fails on the multibay
+  generator). No anisotropic URS (warp/weft ratio ≠ 1), no seam/patterning-driven form.
+- Tension-field equilibria are not unique on coarse meshes (airbag 8×8: DR and Newton stop at two different wrinkle
+  patterns, w 0.2220 vs 0.2174 m, the lower-energy one is Newton's); compare two meshes on wrinkle-dominated cases.
 - Analysis: static, quasi-static wind; no dynamic or aeroelastic response, no fluid–structure interaction, no
   buckling/flutter, follower-load stiffness not used in the prestress relaxation. Cables are straight tension-only links
   (no sag within a segment, no friction at clamps/saddles). Supports are rigid unless the steel is modelled.

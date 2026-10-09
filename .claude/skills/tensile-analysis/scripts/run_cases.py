@@ -24,7 +24,8 @@ Example
   python3 run_cases.py sail.json examples/load_cases_example.json --out sail_cases
 
 Cases file
-  {"solver": "net" | "cst",   // cst = orthotropic membrane elements (membrane_dr.py), uses nu and G below
+  {"solver": "net" | "cst" | "cst-newton",   // cst = orthotropic membrane elements (membrane_dr.py), uses nu, G;
+                                             // cst-newton = same with the implicit Newton solver (faster)
    "material": {"Et_u": 800, "Et_v": 600, "nu": 0.3, "G": 30, "EA_cable": 14000},
    "cases": [
      {"name": "PS", "pressure": 0},
@@ -99,11 +100,12 @@ def run(model_path, cases_path, out=None, verbose=False):
     for case in spec["cases"]:
         f = case.get("factor", 1.0)
         pfun = make_pfun(case, base)
-        if spec.get("solver", "net") == "cst":
+        if spec.get("solver", "net") in ("cst", "cst-newton"):
             res = MDR.analyse(base, Et_u, Et_v, mat.get("nu", 0.3), mat.get("G", 30.0), EAc,
                               pressure=(0.0 if pfun else f * case.get("pressure", 0.0)),
                               snow=f * case.get("snow", 0.0), pfun=pfun, tol=case.get("tol", 1e-4),
-                              do_ponding=case.get("ponding", False))
+                              do_ponding=case.get("ponding", False),
+                              solver="newton" if spec["solver"] == "cst-newton" else "dr")
             els = res["elements"]
             for e in res["edges"]:  # membrane edges carry no own result in the CST model
                 if e["kind"] == "membrane":
@@ -187,7 +189,7 @@ def run(model_path, cases_path, out=None, verbose=False):
                 fh.write(f"| {n} | {v['magnitude']:.1f} | {v['case']} | {v['Fz_min']:.1f} | {v['Fz_max']:.1f} |\n")
             fh.write("\nNon-linear analysis per case (no superposition). "
                      + ("Orthotropic CST membrane with tension-field wrinkling (membrane_dr.py)"
-                        if spec.get("solver", "net") == "cst" else "Cable-net analogy (dynamic_relaxation.py)")
+                        if spec.get("solver", "net") in ("cst", "cst-newton") else "Cable-net analogy (dynamic_relaxation.py)")
                      + ": screening / verification results, confirm with a validated membrane FE package for final design.\n")
     return env
 
@@ -203,7 +205,7 @@ def main(argv=None):
         solver = json.load(fh).get("solver", "net")
     print("Assumptions: each case solved separately and non-linearly (no superposition), loads x case 'factor';"
           f" solver {solver} ("
-          + ("membrane_dr.py: linear-orthotropic CST + tension-field wrinkling" if solver == "cst"
+          + ("membrane_dr.py: linear-orthotropic CST + tension-field wrinkling" if solver in ("cst", "cst-newton")
              else "dynamic_relaxation.py: cable-net analogy, no fabric shear/Poisson") + ");")
     print("  pressure zones / gradients are user input: Cp must come from tunnel data, TensiNet guidance or "
           "conservative code canopy values (EN 1991-1-4 has none for hypars/cones).\n")

@@ -16,9 +16,19 @@ branch forces after solving: s_j = q_j·l_j
 * **Scaling property:** multiplying every q by k leaves the geometry unchanged and multiplies the forces by k, so pick the
   q *ratios* for shape, then scale to the target prestress (`--prestress`).
 * **Non-linear FDM:** iterate q_j ← F_target,j / l_j (target forces), or target lengths or unstressed lengths (Easy, ixForten).
-  `form_find_fdm.py --uniform-stress` iterates q_j = σ·w_j/l_j (w = tributary width) for a uniform isotropic membrane
-  stress. Its convergence is judged on the NORMAL node moves: an isotropic uniform stress leaves the mesh free to slide
-  tangentially (the indeterminacy URS stabilises). Validated against the catenoid (O(h²), `validation.md`).
+  `form_find_fdm.py --uniform-stress` has two methods (`--us-method`, default `auto`):
+  - `width`: q_j = σ·w_j/l_j (w = tributary width) on the grid links, cables keep their q ratio. Convergence on the
+    NORMAL node moves (an isotropic uniform stress leaves the mesh free to slide tangentially, the indeterminacy URS
+    stabilises). Validated on the catenoid (O(h²)); used by `auto` for models without cables (rings, rigid hypar).
+  - `cst` (models with cables): exact isotropic Cauchy stress σ in every triangle through the cotangent force densities
+    q_ij = σ/2 (cot α + cot β) (Pinkall & Polthier 1993; the λ = 0 limit of URS for an isotropic prestress) and a
+    CONSTANT force T per cable (`--cable-force`, default the linear-FDM force of each group). Each step minimises a
+    majoriser of σ·A + ΣT·L (monotone; step halving as a guard); when the shape has settled, nodes move only along the
+    normal (cable nodes also across the cable), which stops the tangential creep that would degenerate corner
+    triangles. Result: each free edge is an arc of radius T/σ (checked, O(h²)) and the form is an exact CST
+    equilibrium of `membrane_dr.py` with isotropic prestress σ (zero drift). Not realisable / stops with
+    "degenerating mesh": tall cones (isotropic stress cannot reach a small high ring) and the multibay ridge/valley
+    generator; use linear FDM (or anisotropic URS in an FE package) there.
 * **Mesh dependence of q:** a link force is q·l, so for the same physical cable force the edge-cable q must scale with
   1/segment length: refining the mesh n → 2n at fixed `--qc` halves the cable force and enlarges the sag
   (sail4, qc 12: sag/chord 0.067 → 0.112 → 0.170 at n = 8, 16, 32) [C: tool output].

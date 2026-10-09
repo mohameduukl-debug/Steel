@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Orthotropic MEMBRANE analysis (CST elements + wrinkling) by Dynamic Relaxation.
+"""Orthotropic MEMBRANE analysis (CST elements + wrinkling) by Dynamic Relaxation or Newton-Raphson.
 
 Replaces the cable-net analogy of dynamic_relaxation.py with a continuum membrane:
   * constant-strain triangles (each quad face split in two), Total-Lagrangian formulation:
@@ -21,8 +21,13 @@ Examples
   python3 membrane_dr.py sail.json --snow 0.75 --out snow
 Triangle faces take the warp direction from the model's optional "warp_dir" (default global x) projected on
 each element; quads take it from their grid u direction.
+Solvers: --solver dr (default, explicit kinetic-damping dynamic relaxation) or --solver newton (implicit
+Newton-Raphson: consistent tangent K = K_material + K_geometric + K_cable (+ symmetric follower-pressure part),
+tension-field tangent by central differences, adaptive load steps, energy line search, skyline Cholesky in
+RCM/natural order, Levenberg-Marquardt shift if K is not positive definite, DR fallback). Both solve the same
+residual, so they agree to the tolerance; Newton is 5-50x faster on medium/large meshes.
 Validation (reference/validation.md): Hencky/Fichter clamped circular membrane, prestressed square under
-pressure (Poisson equation), tension-field uniaxial/off-axis/shear-panel cases.
+pressure (Poisson equation), tension-field uniaxial/off-axis/shear-panel cases, Newton = DR on all of them.
 Outputs per element: warp/weft/shear stress, principal n1, n2, wrinkled flag; cable forces; reactions.
 """
 from __future__ import annotations
@@ -56,12 +61,99 @@ def unit(a):
     return [a[0] / n, a[1] / n, a[2] / n]
 
 
+# ------------------------------------------------------------------ sparse direct solver (stdlib)
+def rcm_order(nodes, adj):
+    """Reverse Cuthill-McKee ordering of `nodes` (adjacency dict) to keep the skyline profile small;
+    each connected component starts from a pseudo-peripheral node (repeated BFS)."""
+    deg = {i: len(adj[i]) for i in nodes}
+    seen = set()
+    order = []
+
+    def bfs(s):
+        lev, front, seen_l = {s: 0}, [s], {s}
+        while front:
+            nxt = []
+            for u in front:
+                for v in adj[u]:
+                    if v not in seen_l:
+                        seen_l.add(v)
+                        lev[v] = lev[u] + 1
+                        nxt.append(v)
+            front = nxt
+        return lev
+
+    for s0 in sorted(nodes, key=lambda i: deg[i]):
+        if s0 in seen:
+            continue
+        s, ecc = s0, -1
+        for _ in range(4):                     # pseudo-peripheral start node
+            lev = bfs(s)
+            e = max(lev.values())
+            if e <= ecc:
+                break
+            ecc = e
+            far = [v for v, l in lev.items() if l == e]
+            s = min(far, key=lambda v: deg[v])
+        comp = [s]
+        seen.add(s)
+        k = 0
+        while k < len(comp):
+            u = comp[k]
+            k += 1
+            for v in sorted((v for v in adj[u] if v not in seen), key=lambda v: deg[v]):
+                seen.add(v)
+                comp.append(v)
+        order.extend(reversed(comp))
+    return order
+
+
+def skyline_cholesky(sky, fc):
+    """In-place Cholesky L L^T of a symmetric matrix in skyline (variable band) storage: row i holds columns
+    fc[i]..i. Returns False (matrix not positive definite) at the first non-positive pivot."""
+    from operator import mul
+    sqrt = math.sqrt
+    for i in range(len(sky)):
+        ri, fi = sky[i], fc[i]
+        for j in range(fi, i):
+            rj, fj = sky[j], fc[j]
+            k0 = fi if fi > fj else fj
+            ri[j - fi] = (ri[j - fi] - sum(map(mul, ri[k0 - fi:j - fi], rj[k0 - fj:j - fj]))) / rj[j - fj]
+        seg = ri[:i - fi]
+        d = ri[i - fi] - sum(map(mul, seg, seg))
+        if not d > 0:
+            return False
+        ri[i - fi] = sqrt(d)
+    return True
+
+
+def skyline_solve(L, fc, b):
+    """Solve L L^T x = b with the factor from skyline_cholesky."""
+    from operator import mul
+    N = len(L)
+    y = list(b)
+    for i in range(N):                                   # forward: L y = b
+        ri, fi = L[i], fc[i]
+        y[i] = (y[i] - sum(map(mul, ri[:i - fi], y[fi:i]))) / ri[i - fi]
+    for i in range(N - 1, -1, -1):                       # backward: L^T x = y (column sweep)
+        ri, fi = L[i], fc[i]
+        xi = y[i] / ri[i - fi]
+        y[i] = xi
+        if i > fi:
+            y[fi:i] = [a - xi * c for a, c in zip(y[fi:i], ri[:i - fi])]
+    return y
+
+
 class Membrane:
     def __init__(self, model, Ew, Ef, nu_wf, G, EA_cable, prestress=None, wrinkling=True):
         self.m = model
         nodes = model["nodes"]
         self.X0 = [list(nd["xyz"]) for nd in nodes]          # reference = form-found geometry
-        self.fixed = [bool(nd.get("fixed")) for nd in nodes]
+        # per-component supports: "fixed": true = all three; optional "fix": [bool, bool, bool] (x, y, z), e.g.
+        # symmetry planes or a roller (CST solver only). self.fixed = fully fixed; self.fix = per component.
+        self.fix = [(True, True, True) if nd.get("fixed") else tuple(bool(v) for v in nd.get("fix", (0, 0, 0)))
+                    for nd in nodes]
+        self.fixed = [all(f) for f in self.fix]
+        self.partial = any(any(f) and not all(f) for f in self.fix)
         nu_fw = nu_wf * Ef / Ew
         den = 1 - nu_wf * nu_fw
         if den <= 0 or Ew <= 0 or Ef <= 0 or G <= 0:
@@ -347,6 +439,15 @@ class Membrane:
                 DRN.add_face_loads(tris, x, y, z, pressure, snow, pfun, Rx, Ry, Rz)
             K = [0.0] * n
             self._internal(x, y, z, Rx, Ry, Rz, K)
+            if self.partial:
+                for i in free:
+                    fx_, fy_, fz_ = self.fix[i]
+                    if fx_:
+                        Rx[i] = 0.0
+                    if fy_:
+                        Ry[i] = 0.0
+                    if fz_:
+                        Rz[i] = 0.0
             r2 = 0.0
             for i in free:
                 q = Rx[i] * Rx[i] + Ry[i] * Ry[i] + Rz[i] * Rz[i]
@@ -378,6 +479,341 @@ class Membrane:
             X[i][0], X[i][1], X[i][2] = x[i], y[i], z[i]
         return X, it, Rmax
 
+    # ------------------------------------------------------- implicit (Newton-Raphson) solver
+    def _stress_tangent(self, tri, E11, E22, G12):
+        """Stress (tension-field law) and its tangent dS/dE (3x3, Voigt, engineering shear) of one element.
+        Taut: the elastic D. Wrinkled: central differences of the exact tension-field stress S(E) (6 calls of
+        wrinkle()), symmetrised (the relaxed energy is a potential), plus EPS_WR*D. Slack: EPS_SL*D.
+        The small multiples of D only regularise the tangent; the residual (and so the solution) is exact."""
+        D11, D22, D12, D33 = self.D
+        s0 = tri["S0"]
+
+        def stress(e1, e2, g):
+            S11 = s0[0] + D11 * e1 + D12 * e2
+            S22 = s0[1] + D12 * e1 + D22 * e2
+            S12 = s0[2] + D33 * g
+            if self.wrinkling:
+                h = S11 - S22
+                if 0.5 * (S11 + S22) < math.sqrt(0.25 * h * h + S12 * S12):
+                    return self.wrinkle(S11, S22, S12, tri)
+            return S11, S22, S12, 0
+
+        S = stress(E11, E22, G12)
+        Dm = ((D11, D12, 0.0), (D12, D22, 0.0), (0.0, 0.0, D33))
+        if S[3] == 0:
+            return S, Dm
+        if S[3] == 2:
+            e = self.EPS_SL
+            return S, tuple(tuple(e * v for v in r) for r in Dm)
+        h = 1e-8
+        cols = []
+        for k in range(3):
+            dp = [E11, E22, G12]
+            dm = [E11, E22, G12]
+            dp[k] += h
+            dm[k] -= h
+            sp, sm = stress(*dp), stress(*dm)
+            cols.append([(sp[r] - sm[r]) / (2 * h) for r in range(3)])
+        e = self.EPS_WR
+        Dt = tuple(tuple(0.5 * (cols[c][r] + cols[r][c]) + e * Dm[r][c] for c in range(3)) for r in range(3))
+        return S, Dt
+
+    EPS_WR = 1e-4     # tangent regularisation of wrinkled elements (fraction of D)
+    EPS_SL = 1e-3     # tangent of slack elements / slack cables (fraction of D or EA/L0)
+
+    def _setup_dofs(self):
+        """Free-node equation numbers (reverse Cuthill-McKee order) and the skyline profile."""
+        if getattr(self, "_dofs", None) is not None:
+            return self._dofs
+        n = len(self.X0)
+        adj = defaultdict(set)
+        for tri in self.tris:
+            a, b, c = tri["n"]
+            adj[a] |= {b, c}
+            adj[b] |= {a, c}
+            adj[c] |= {a, b}
+        for cb in self.cables:
+            a, b = cb["n"]
+            adj[a].add(b)
+            adj[b].add(a)
+        free = [i for i in range(n) if not self.fixed[i]]
+        best = None
+        for order in (rcm_order(free, {i: [j for j in adj[i] if not self.fixed[j]] for i in free}), free):
+            dof = [[-1, -1, -1] for _ in range(n)]  # keep the smaller profile of RCM and the input numbering
+            N = 0
+            for i in order:
+                for c in range(3):
+                    if not self.fix[i][c]:
+                        dof[i][c] = N
+                        N += 1
+            first = [min([d for d in dof[i] if d >= 0], default=-1) for i in range(n)]
+            fc = list(range(N))
+            for i in free:
+                lo = min([first[i]] + [first[j] for j in adj[i] if first[j] >= 0])
+                for d in dof[i]:
+                    if d >= 0:
+                        fc[d] = lo
+            prof = sum(i - fc[i] + 1 for i in range(N))
+            if best is None or prof < best[0]:
+                best = (prof, order, dof, N, fc)
+        _, order, dof, N, fc = best
+        # element / cable dof lists and lower-triangle scatter maps
+        def scatter(dofs):
+            out = []
+            for p, dp in enumerate(dofs):
+                if dp < 0:
+                    continue
+                for q, dq in enumerate(dofs):
+                    if 0 <= dq <= dp:
+                        out.append((p, q, dp, dq - fc[dp]))
+            return out
+        tsc = []
+        for tri in self.tris:
+            tsc.append(scatter([dof[v][c] for v in tri["n"] for c in range(3)]))
+        csc = []
+        for cb in self.cables:
+            csc.append(scatter([dof[v][c] for v in cb["n"] for c in range(3)]))
+        dl = [(i, c, dof[i][c]) for i in order for c in range(3) if dof[i][c] >= 0]
+        self._dofs = {"dof": dof, "order": order, "dl": dl, "N": N, "fc": fc, "tsc": tsc, "csc": csc,
+                      "profile": sum(i - fc[i] + 1 for i in range(N))}
+        return self._dofs
+
+    def _tangent(self, X, lam_p, pfun, follower, ltris):
+        """Assemble the consistent tangent K = K_material + K_geometric (+ K_cable, + symmetric part of the
+        follower-pressure load stiffness) in skyline form (lower triangle, rows in RCM order)."""
+        dd = self._setup_dofs()
+        fc, N = dd["fc"], dd["N"]
+        sky = [[0.0] * (i - fc[i] + 1) for i in range(N)]
+        for tri, sc in zip(self.tris, dd["tsc"]):
+            if not sc:
+                continue
+            (a, b, c), g = tri["n"], tri["dN"]
+            A0 = tri["A0"]
+            xa, xb, xc = X[a], X[b], X[c]
+            f1 = [xa[i] * g[0][0] + xb[i] * g[1][0] + xc[i] * g[2][0] for i in range(3)]
+            f2 = [xa[i] * g[0][1] + xb[i] * g[1][1] + xc[i] * g[2][1] for i in range(3)]
+            E11 = 0.5 * (dot(f1, f1) - 1.0)
+            E22 = 0.5 * (dot(f2, f2) - 1.0)
+            G12 = dot(f1, f2)
+            (S11, S22, S12, _), Dt = self._stress_tangent(tri, E11, E22, G12)
+            # B (3 x 9): dE/dx for node k, component i
+            B0, B1, B2 = [], [], []
+            for k in range(3):
+                gx, gy = g[k]
+                for i in range(3):
+                    B0.append(f1[i] * gx)
+                    B1.append(f2[i] * gy)
+                    B2.append(f1[i] * gy + f2[i] * gx)
+            DB = [[Dt[r][0] * B0[p] + Dt[r][1] * B1[p] + Dt[r][2] * B2[p] for p in range(9)] for r in range(3)]
+            gsg = [[A0 * (g[k][0] * (S11 * g[l][0] + S12 * g[l][1]) + g[k][1] * (S12 * g[l][0] + S22 * g[l][1]))
+                    for l in range(3)] for k in range(3)]
+            D0, D1, D2 = DB
+            for p, q, r, cpos in sc:
+                v = A0 * (B0[p] * D0[q] + B1[p] * D1[q] + B2[p] * D2[q])
+                if p % 3 == q % 3:
+                    v += gsg[p // 3][q // 3]
+                sky[r][cpos] += v
+        for cb, sc in zip(self.cables, dd["csc"]):
+            if not sc:
+                continue
+            a, b = cb["n"]
+            d = sub(X[b], X[a])
+            L = math.sqrt(dot(d, d))
+            e = [v / L for v in d]
+            T = cb["EA"] * (L - cb["L0"]) / cb["L0"]
+            kE = cb["EA"] / cb["L0"]
+            if T <= 0:
+                kE, t = self.EPS_SL * kE, 0.0
+            else:
+                t = T / L
+            k3 = [[(kE - t) * e[i] * e[j] + (t if i == j else 0.0) for j in range(3)] for i in range(3)]
+            for p, q, r, cpos in sc:
+                v = k3[p % 3][q % 3]
+                sky[r][cpos] += v if (p < 3) == (q < 3) else -v
+        if follower and (lam_p or pfun):
+            dof = dd["dof"]
+            for (a, b, c) in ltris:
+                xa, xb, xc = X[a], X[b], X[c]
+                nz = (xb[0] - xa[0]) * (xc[1] - xa[1]) - (xb[1] - xa[1]) * (xc[0] - xa[0])
+                p = lam_p if pfun is None else pfun((xa[0] + xb[0] + xc[0]) / 3, (xa[1] + xb[1] + xc[1]) / 3)
+                coef = -(p if nz >= 0 else -p) / 12.0     # K_T -= sym(dP/dx): block (v,w) = coef [e_w - e_v]x
+                es = (sub(xc, xb), sub(xa, xc), sub(xb, xa))
+                vs = (a, b, c)
+                for iv in range(3):
+                    if self.fixed[vs[iv]]:
+                        continue
+                    for iw in range(3):
+                        if iw == iv or self.fixed[vs[iw]]:
+                            continue
+                        w = sub(es[iw], es[iv])
+                        # skew matrix [w]x = [[0,-w2,w1],[w2,0,-w0],[-w1,w0,0]]
+                        sk = ((0.0, -w[2], w[1]), (w[2], 0.0, -w[0]), (-w[1], w[0], 0.0))
+                        for i in range(3):
+                            r = dof[vs[iv]][i]
+                            if r < 0:
+                                continue
+                            for j in range(3):
+                                cdof = dof[vs[iw]][j]
+                                if 0 <= cdof <= r and sk[i][j]:
+                                    sky[r][cdof - fc[r]] += coef * sk[i][j]
+        return sky
+
+    def _residual(self, X, pressure, snow, pfun, extra, ltris):
+        """Out-of-balance nodal forces (external + internal), flat arrays, and the max nodal norm."""
+        n = len(X)
+        x, y, z = [p[0] for p in X], [p[1] for p in X], [p[2] for p in X]
+        Rx, Ry, Rz = [0.0] * n, [0.0] * n, [0.0] * n
+        if extra:
+            for i, f in extra.items():
+                Rx[i] += f[0]
+                Ry[i] += f[1]
+                Rz[i] += f[2]
+        if pressure or snow or pfun:
+            DRN.add_face_loads(ltris, x, y, z, pressure, snow, pfun, Rx, Ry, Rz)
+        self._internal(x, y, z, Rx, Ry, Rz, [0.0] * n)
+        return Rx, Ry, Rz
+
+    def newton(self, X, pressure=0.0, snow=0.0, pfun=None, tol=1e-4, maxit=400, verbose=False, extra=None,
+               follower=True, fallback=True):
+        """Implicit solution: Newton-Raphson with the consistent tangent (material + geometric stiffness of the
+        Total-Lagrangian CST, tension-field tangent by central differences, cable stiffness, symmetric part of
+        the follower-pressure stiffness; snow on plan treated as dead load in the tangent), adaptive load
+        stepping (lambda from 0 to 1), step limit and backtracking line search on the residual norm, skyline
+        Cholesky in reverse Cuthill-McKee order. A tangent that is not positive definite (no wrinkling model
+        with compression, slack regions) is shifted (K + mu*diag K); if a load step cannot be completed the
+        remaining load is solved by dynamic relaxation (fallback). The residual is the same as relax(), so
+        the converged state is the same equilibrium to within the tolerance.
+        X is updated in place. Returns (X, iterations, max residual) and stores self.newton_info."""
+        dd = self._setup_dofs()
+        order, dl, N = dd["order"], dd["dl"], dd["N"]
+        ltris = DRN._tri_list(self.m)
+        n = len(X)
+        Xs = [list(p) for p in X]
+        size = max(max(p[c] for p in X) - min(p[c] for p in X) for c in range(3)) or 1.0
+        dmax = 0.2 * size
+        info = {"newton_iterations": 0, "factorizations": 0, "modified_steps": 0, "load_steps": 0, "step_cuts": 0,
+                "shifts": 0,
+                "line_search_cuts": 0, "fallback_dr": False, "dr_iterations": 0, "profile": dd["profile"],
+                "equations": N}
+        loaded = bool(pressure or snow or pfun or extra)
+
+        def loads(lam):
+            pf = (lambda xx, yy: lam * pfun(xx, yy)) if pfun else None
+            ex = {i: [lam * v for v in f] for i, f in extra.items()} if extra else None
+            return lam * pressure, lam * snow, pf, ex
+
+        def rnorm(R):                                  # max nodal norm and 2-norm over the free components
+            if self.partial:
+                for i in order:
+                    for c in range(3):
+                        if self.fix[i][c]:
+                            R[c][i] = 0.0
+            Rx, Ry, Rz = R
+            m2 = s2 = 0.0
+            for i in order:
+                q = Rx[i] * Rx[i] + Ry[i] * Ry[i] + Rz[i] * Rz[i]
+                s2 += q
+                if q > m2:
+                    m2 = q
+            return math.sqrt(m2), math.sqrt(s2)
+
+        def stage(lam, tol_s, max_s):
+            p_, s_, pf_, ex_ = loads(lam)
+            R = self._residual(Xs, p_, s_, pf_, ex_, ltris)
+            rmax, r2 = rnorm(R)
+            sky, reuse = None, False
+            for it in range(max_s):
+                if rmax < tol_s:
+                    return True, rmax
+                if reuse:                                  # modified Newton: keep the factor of the last tangent
+                    info["modified_steps"] += 1
+                else:
+                    sky0 = self._tangent(Xs, p_, pf_, follower, ltris)
+                    dbar = sum(abs(row[-1]) for row in sky0) / max(1, len(sky0))
+                    mu, ok = 0.0, False
+                    for _ in range(8):                     # Levenberg-Marquardt shift K + mu*mean(diag)*I if needed
+                        sky = [row[:-1] + [row[-1] + mu * dbar] for row in sky0]
+                        info["factorizations"] += 1
+                        if skyline_cholesky(sky, dd["fc"]):
+                            ok = True
+                            break
+                        info["shifts"] += 1
+                        mu = 1e-8 if mu == 0.0 else mu * 10
+                    if not ok:
+                        return False, rmax
+                b = [0.0] * N
+                for i, c, d in dl:
+                    b[d] = R[c][i]
+                du = skyline_solve(sky, dd["fc"], b)
+                big = max(abs(v) for v in du) if du else 0.0
+                scale = min(1.0, dmax / big) if big > 0 else 1.0
+                X0 = [Xs[i][c] for i, c, d in dl]
+
+                def slope(Rv):                             # du . R: derivative of the potential along du
+                    return sum(du[d] * Rv[c][i] for i, c, d in dl)
+                s0 = slope(R)
+                lo, hi = (0.0, s0), None
+                alpha = scale
+                for ls in range(6):                        # energy line search (regula falsi on du . R = 0)
+                    for (i, c, d), x0 in zip(dl, X0):
+                        Xs[i][c] = x0 + alpha * du[d]
+                    Rn = self._residual(Xs, p_, s_, pf_, ex_, ltris)
+                    sa = slope(Rn)
+                    if abs(sa) <= 0.5 * abs(s0) or (sa > 0 and hi is None):
+                        break
+                    if sa < 0:
+                        hi = (alpha, sa)
+                    else:
+                        lo = (alpha, sa)
+                    a_new = lo[0] - lo[1] * (hi[0] - lo[0]) / (hi[1] - lo[1])
+                    alpha = min(max(a_new, lo[0] + 0.05 * (hi[0] - lo[0])), hi[0] - 0.05 * (hi[0] - lo[0]))
+                    info["line_search_cuts"] += 1
+                rmax_n, r2_n = rnorm(Rn)
+                info["newton_iterations"] += 1
+                if verbose:
+                    print(f"  newton lam {lam:.3f} it {it:3d} residual {rmax_n:.3e} alpha {alpha:.3f}"
+                          f"{' shift %.0e' % mu if mu else ''}", file=sys.stderr)
+                if not rmax_n < 1e6 * (rmax + tol):         # diverging (or NaN): cut the load increment
+                    return False, rmax
+                # quadratic phase (residual down > 10x; > 4x for a reused factor): reuse the factorisation
+                reuse = rmax_n < (0.25 if reuse else 0.1) * rmax
+                R, rmax, r2 = Rn, rmax_n, r2_n
+            return rmax < tol_s, rmax
+
+        lam, dlam = 0.0, 1.0
+        rmax = math.inf
+        if not loaded:
+            ok, rmax = stage(0.0, tol, maxit)
+            lam = 1.0 if ok else 0.0
+        while loaded and lam < 1.0 and info["newton_iterations"] < maxit:
+            target = min(1.0, lam + dlam)
+            saved = [list(p) for p in Xs]
+            before = info["newton_iterations"]
+            ok, rmax = stage(target, tol if target >= 1.0 else 100 * tol, 30)
+            if ok:
+                lam = target
+                info["load_steps"] += 1
+                if info["newton_iterations"] - before <= 6:
+                    dlam = min(1.0, 2 * dlam)
+            else:
+                Xs = saved
+                dlam *= 0.5
+                info["step_cuts"] += 1
+                if dlam < 1.0 / 64:
+                    break
+        if lam < 1.0 or rmax >= tol:
+            if fallback:
+                info["fallback_dr"] = True
+                Xs, itd, rmax = self.relax(Xs, pressure, snow, pfun, tol, 200000, verbose=verbose, extra=extra)
+                info["dr_iterations"] = itd
+        info["lambda"] = lam if not info["fallback_dr"] else 1.0
+        self.newton_info = info
+        R = self._residual(Xs, pressure, snow, pfun, extra, ltris)   # also refreshes cable forces (_T)
+        rmax = rnorm(R)[0]
+        for i in range(n):
+            X[i][0], X[i][1], X[i][2] = Xs[i]
+        return X, info["newton_iterations"], rmax
+
     def results(self, X, pressure=0.0, snow=0.0, pfun=None):
         els = []
         for tri in self.tris:
@@ -390,22 +826,37 @@ class Membrane:
         reac = {}
         P = DRN.external_loads(self.m, X, pressure, snow, pfun) if (pressure or snow or pfun) else {}
         for i in range(len(X)):
-            if self.fixed[i]:
-                reac[i] = [R[i][c] + P.get(i, [0, 0, 0])[c] for c in range(3)]  # pull of structure + direct load
+            if any(self.fix[i]):                       # pull of structure + direct load (free components ~ 0)
+                reac[i] = [R[i][c] + P.get(i, [0, 0, 0])[c] for c in range(3)]
         return els, reac
 
 
 def analyse(base, Ew=800.0, Ef=600.0, nu=0.3, G=30.0, EA_cable=14000.0, pressure=0.0, snow=0.0, pfun=None,
             prestress=None, tol=1e-4, maxit=100000, verbose=False, wrinkling=True, do_ponding=False,
-            depth_limit=1.0):
+            depth_limit=1.0, solver="dr", follower_stiffness=True):
+    """solver: "dr" (kinetic-damping dynamic relaxation, default) or "newton" (implicit Newton-Raphson with
+    the consistent tangent, load stepping, line search, skyline Cholesky, DR fallback). Same equilibrium
+    equations and outputs; maxit caps the DR iterations (Newton: at most 400 iterations per solve)."""
+    if solver not in ("dr", "newton"):
+        raise ValueError("solver must be 'dr' or 'newton'")
     model = copy.deepcopy(base)
     mem = Membrane(model, Ew, Ef, nu, G, EA_cable, prestress, wrinkling)
+    nstats = []
+
+    def solve(X, p=0.0, s=0.0, pf=None, extra=None, verbose=False):
+        if solver == "dr":
+            return mem.relax(X, p, s, pf, tol, maxit, verbose=verbose, extra=extra)
+        out = mem.newton(X, p, s, pf, tol, min(maxit, 400), verbose=verbose, extra=extra,
+                         follower=follower_stiffness)
+        nstats.append(mem.newton_info)
+        return out
+
     X = [list(p) for p in mem.X0]
-    X, it0, r0 = mem.relax(X, tol=tol, maxit=maxit, verbose=verbose)           # prestress equilibrium
+    X, it0, r0 = solve(X, verbose=verbose)                                      # prestress equilibrium
     drift = max(math.dist(X[i], mem.X0[i]) for i in range(len(X)))
     Xp = [list(p) for p in X]
     els_p, _ = mem.results(Xp)
-    X, it1, r1 = mem.relax(X, pressure, snow, pfun, tol, maxit, verbose=verbose)
+    X, it1, r1 = solve(X, pressure, snow, pfun, verbose=verbose)
     pond, extra = None, {}
     if do_ponding:  # same fill-to-spill iteration as dynamic_relaxation.ponding, with the membrane model
         outs = DRN.outlets(model)
@@ -427,7 +878,7 @@ def analyse(base, Ew=800.0, Ef=600.0, nu=0.3, G=30.0, EA_cable=14000.0, pressure
                 status = "stable (water volume converged)"
                 break
             extra = {i: [0.0, 0.0, -DRN.GAMMA_W * d[i] * A[i]] for i in d if d[i] > 0 and not mem.fixed[i]}
-            X, _, r1 = mem.relax(X, pressure, snow, pfun, tol, maxit, extra=extra)
+            X, _, r1 = solve(X, pressure, snow, pfun, extra=extra)
         else:
             status = "PONDING INSTABILITY (water volume did not converge)"
         pond = {"status": status, "water_volume_m3": hist[-1][0], "max_depth_m": hist[-1][1], "iterations": len(hist)}
@@ -448,7 +899,9 @@ def analyse(base, Ew=800.0, Ef=600.0, nu=0.3, G=30.0, EA_cable=14000.0, pressure
     model["reactions"] = [{"node": k, "pull": v, "magnitude": math.sqrt(dot(v, v))} for k, v in sorted(reac.items())]
     wr = [e["wrinkled"] for e in els]
     model["analysis"] = {
-        "method": "CST orthotropic membrane (TL) + tension-field wrinkling, dynamic relaxation",
+        "method": "CST orthotropic membrane (TL) + tension-field wrinkling, "
+                  + ("dynamic relaxation" if solver == "dr" else "Newton-Raphson (consistent tangent)"),
+        "solver": solver,
         "material": {"Ew_t": Ew, "Ef_t": Ef, "nu_wf": nu, "G_t": G, "EA_cable": EA_cable},
         "pressure_kN_m2": pressure, "snow_kN_m2": snow, "pressure_field": pfun is not None,
         "prestress_equilibrium": {"iterations": it0, "residual": r0, "max_drift_m": drift,
@@ -458,6 +911,14 @@ def analyse(base, Ew=800.0, Ef=600.0, nu=0.3, G=30.0, EA_cable=14000.0, pressure
         "max_displacement_m": disp[imax], "max_disp_node": imax,
         "wrinkled_elements": sum(1 for w in wr if w == 1), "slack_elements": sum(1 for w in wr if w == 2),
         "n_elements": len(els), "ponding": pond, "tol": tol}
+    if nstats:
+        tot = {k: sum(st[k] for st in nstats) for k in ("newton_iterations", "factorizations", "modified_steps",
+                                                         "load_steps",
+                                                         "step_cuts", "shifts", "line_search_cuts", "dr_iterations")}
+        tot["fallback_dr"] = any(st["fallback_dr"] for st in nstats)
+        tot["equations"] = nstats[0]["equations"]
+        tot["skyline_profile"] = nstats[0]["profile"]
+        model["analysis"]["newton"] = tot
     return model
 
 
@@ -467,8 +928,11 @@ def print_assumptions(an, wrinkling=True):
     print("  " + ("tension-field wrinkling (mixed criterion; uniaxial stress σ·n⊗n with σ = ε_nn/C_nn, exact for linear "
                   "orthotropy)" if wrinkling else "NO wrinkling model: compressive stresses are kept (--no-wrinkling)")
           + "; cables = tension-only links; follower pressure (+ = uplift), snow per plan area;")
+    sol = ("Newton-Raphson (consistent tangent; wrinkled tangent by central differences; follower-pressure "
+           "stiffness symmetrised, snow as dead load in the tangent; load stepping, energy line search; DR fallback)"
+           if an.get("solver") == "newton" else "kinetic-damping DR")
     print("  initial stress from the form finding (per quad) or --prestress, relaxed to equilibrium first; "
-          f"kinetic-damping DR to max residual < {an.get('tol', 1e-4):.0e} kN. Not modelled: non-linear/hysteretic fabric,")
+          f"{sol} to max residual < {an.get('tol', 1e-4):.0e} kN. Not modelled: non-linear/hysteretic fabric,")
     print("  creep, crimp interchange beyond the constant ν, bending, dynamic wind. Screening/verification aid, not a "
           "replacement for a validated membrane FE package.")
     print()
@@ -484,6 +948,12 @@ def summary(model):
           f"{pe['warp_range'][0]:.2f}–{pe['warp_range'][1]:.2f}, weft {pe['weft_range'][0]:.2f}–{pe['weft_range'][1]:.2f} kN/m")
     print(f"Load: pressure {an['pressure_kN_m2']:+.3f} kN/m2, snow {an['snow_kN_m2']:.3f} kN/m2 -> "
           f"{an['iterations']} it, residual {an['max_residual_kN']:.1e}" + ("" if an["converged"] else "  NOT CONVERGED"))
+    if an.get("newton"):
+        nw = an["newton"]
+        print(f"Newton: {nw['newton_iterations']} iterations ({nw['factorizations']} factorisations, "
+              f"{nw['modified_steps']} modified steps), {nw['load_steps']} load steps, {nw['step_cuts']} step cuts, "
+              f"{nw['shifts']} tangent shifts; {nw['equations']} equations, skyline {nw['skyline_profile']} terms"
+              + (f"; DR FALLBACK used ({nw['dr_iterations']} DR iterations)" if nw["fallback_dr"] else ""))
     print(f"Max displacement {an['max_displacement_m'] * 1000:.0f} mm")
     print(f"Stresses [kN/m]: warp max {max(e['n_warp'] for e in els):.2f}, weft max {max(e['n_weft'] for e in els):.2f}, "
           f"principal n1 max {max(e['n1'] for e in els):.2f}, n2 min {min(e['n2'] for e in els):.2f}")
@@ -518,15 +988,22 @@ def main(argv=None):
     ap.add_argument("--prestress", type=float, nargs=2, default=None, help="uniform S0 warp weft [kN/m]")
     ap.add_argument("--no-wrinkling", action="store_true")
     ap.add_argument("--ponding", action="store_true")
+    ap.add_argument("--solver", choices=["dr", "newton"], default="dr",
+                    help="dr = kinetic-damping dynamic relaxation (default); newton = implicit Newton-Raphson with the "
+                         "consistent tangent, load stepping, line search, skyline Cholesky, DR fallback (faster on "
+                         "large meshes, same equilibrium)")
+    ap.add_argument("--no-follower-stiffness", action="store_true",
+                    help="newton: leave the (symmetrised) follower-pressure load stiffness out of the tangent")
     ap.add_argument("--tol", type=float, default=1e-4)
-    ap.add_argument("--maxit", type=int, default=100000)
+    ap.add_argument("--maxit", type=int, default=100000, help="max DR iterations (newton: max 400 iterations)")
     ap.add_argument("--out", default=None)
     ap.add_argument("-v", "--verbose", action="store_true")
     a = ap.parse_args(argv)
     with open(a.model) as fh:
         base = json.load(fh)
     m = analyse(base, a.Ew, a.Ef, a.nu, a.G, a.EA_cable, a.pressure, a.snow, None, a.prestress, a.tol, a.maxit,
-                a.verbose, not a.no_wrinkling, a.ponding)
+                a.verbose, not a.no_wrinkling, a.ponding, solver=a.solver,
+                follower_stiffness=not a.no_follower_stiffness)
     print_assumptions(m["analysis"], not a.no_wrinkling)
     summary(m)
     if a.out:

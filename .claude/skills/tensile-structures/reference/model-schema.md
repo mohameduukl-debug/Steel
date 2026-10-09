@@ -34,6 +34,12 @@ width of a membrane link, m), `stress_kN_m`, `L0` and `EA` (after DR), node `dis
 `analysis.tol` (DR tolerance), `solver.uniform_stress` {iterations, status, converged, normal_move, move,
 stress_dev} (form_find_fdm.py --uniform-stress). Shape `type` may also be `arch`, `multibay`, `rings`
 (support groups RING-B / RING-T).
+Optional node key `fix`: [bool, bool, bool] = support per component x/y/z (symmetry planes, rollers);
+`fixed: true` = all three. Honoured by membrane_dr.py only.
+`solver.uniform_stress` may also hold `method` ("cst" | "width"), `residual_kN`, `normal_residual_kN`,
+`cable_forces` {group: kN}, `halvings`, `free_iterations`, `energy`, `min_q`.
+`analysis.solver` ("dr" | "newton") and `analysis.newton` {newton_iterations, factorizations, modified_steps,
+load_steps, step_cuts, shifts, line_search_cuts, dr_iterations, fallback_dr, equations, skyline_profile}.
 
 Conventions
 * `kind`: `membrane` (net link representing fabric), `edge_cable`, `cable`, `strut` (not in FDM).

@@ -73,7 +73,7 @@ def metrics(model, solver):
         return out
     an = model["analysis"]
     out["disp_max_mm"] = an["max_displacement_m"] * 1000.0
-    if solver == "cst":
+    if solver in ("cst", "cst-newton"):
         els = model["elements"]
         out["stress_max"] = max(e["n1"] for e in els)
         out["stress_min"] = min(e["n2"] for e in els)
@@ -92,7 +92,8 @@ def run_level(model, o):
         return model
     if o.solver == "net":
         return DR.analyse(model, o.Et_u, o.Et_v, o.EA_cable, o.pressure, o.snow, None, False, o.tol)
-    return MDR.analyse(model, o.Et_u, o.Et_v, o.nu_wf, o.G, o.EA_cable, o.pressure, o.snow, None, None, o.tol)
+    return MDR.analyse(model, o.Et_u, o.Et_v, o.nu_wf, o.G, o.EA_cable, o.pressure, o.snow, None, None, o.tol,
+                       solver="newton" if o.solver == "cst-newton" else "dr")
 
 
 def study(models, o, labels):
@@ -178,8 +179,9 @@ def print_assumptions(o):
         print("  cable force densities --qc/--qr scaled with the mesh factor so cable force / membrane stress is constant;")
     if o.solver == "net":
         print("  solver: dynamic_relaxation.py (cable-net analogy: no fabric shear, no Poisson coupling);")
-    elif o.solver == "cst":
-        print("  solver: membrane_dr.py (linear-orthotropic CST, tension-field wrinkling);")
+    elif o.solver in ("cst", "cst-newton"):
+        print("  solver: membrane_dr.py (linear-orthotropic CST, tension-field wrinkling; "
+              + ("Newton-Raphson" if o.solver == "cst-newton" else "dynamic relaxation") + ");")
     print(f"  loads: pressure {o.pressure:+.3f} kN/m2 (follower), snow {o.snow:.3f} kN/m2 (plan); "
           f"material E_w·t {o.Et_u}, E_f·t {o.Et_v} kN/m, ν {o.nu_wf}, G·t {o.G} kN/m, EA cable {o.EA_cable} kN;")
     print(f"  converged = last change < {o.target} % (engineering judgement, not a code value); max values can move"
@@ -193,8 +195,9 @@ def main(argv=None):
     ap.add_argument("--levels", type=float, nargs="+", default=[1.0, 2.0, 3.0],
                     help="mesh multipliers of the base mesh (2-4 values, increasing)")
     ap.add_argument("--models", nargs="+", help="pre-built form-found models (coarse -> fine) instead of a shape")
-    ap.add_argument("--solver", choices=["none", "net", "cst"], default="net",
-                    help="none = compare form-finding only; net = dynamic_relaxation; cst = membrane_dr")
+    ap.add_argument("--solver", choices=["none", "net", "cst", "cst-newton"], default="net",
+                    help="none = compare form-finding only; net = dynamic_relaxation; cst = membrane_dr (DR); "
+                         "cst-newton = membrane_dr --solver newton (same results, faster on fine meshes)")
     ap.add_argument("--pressure", type=float, default=0.0, help="normal pressure [kN/m2], + = uplift")
     ap.add_argument("--snow", type=float, default=0.0, help="snow on plan [kN/m2]")
     ap.add_argument("--Et-u", type=float, default=800.0, help="warp E·t [kN/m]")
