@@ -586,6 +586,207 @@
       "value": 16.0,
       "status": "V",
       "source": "AISC 360 D5 b_eff = 2t + 0.63 in"
+    },
+    "E": {
+      "value": 200000,
+      "status": "C",
+      "source": "ANSI/AISC 360-16 and 360-22 Symbols: E = 29,000 ksi (200 000 MPa) modulus of elasticity of steel (member_check --code aisc)"
+    },
+    "G": {
+      "value": 77200,
+      "status": "C",
+      "source": "ANSI/AISC 360-16 and 360-22 Symbols: G = 11,200 ksi (77 200 MPa) shear modulus of steel (E4 torsional buckling)"
+    },
+    "resistance": {
+      "status": "V",
+      "source": "ANSI/AISC 360-16/360-22 resistance factor phi (LRFD) and safety factor Omega (ASD), [phi, Omega]: D2(a) tension yielding 0.90/1.67, D2(b) tension rupture 0.75/2.00 (shown in Design Examples V16.0 Ex. D.1), E1 compression 0.90/1.67, F1 flexure 0.90/1.67 (shown in Design Examples V14.0 Ch. F intro), G1 shear 0.90/1.67, G2.1(a) webs of rolled I-shapes with h/tw <= 2.24 sqrt(E/Fy) 1.00/1.50 (shown in Design Examples V16.0 Ex. G.1B)",
+      "tension_yield": [
+        0.9,
+        1.67
+      ],
+      "tension_rupture": [
+        0.75,
+        2.0
+      ],
+      "compression": [
+        0.9,
+        1.67
+      ],
+      "flexure": [
+        0.9,
+        1.67
+      ],
+      "shear": [
+        0.9,
+        1.67
+      ],
+      "shear_rolled_I": [
+        1.0,
+        1.5
+      ]
+    },
+    "B4_1a": {
+      "status": "C",
+      "source": "ANSI/AISC 360-16/360-22 Table B4.1a width-to-thickness limits lambda_r for members in axial compression, coefficient on sqrt(E/Fy) (round HSS: on E/Fy): case 1 flanges of rolled I 0.56; case 2 flanges of built-up I 0.64 sqrt(kc E/Fy) with kc = 4/sqrt(h/tw), 0.35 <= kc <= 0.76; case 5 webs of doubly symmetric I 1.49; case 6 walls of rectangular HSS 1.40; case 9 round HSS D/t 0.11 E/Fy",
+      "flange_rolled": 0.56,
+      "flange_builtup": 0.64,
+      "web_doubly_symmetric": 1.49,
+      "hss_rect_wall": 1.4,
+      "hss_round": 0.11,
+      "kc_limits": [
+        0.35,
+        0.76
+      ]
+    },
+    "B4_1b": {
+      "status": "C",
+      "source": "ANSI/AISC 360-16/360-22 Table B4.1b width-to-thickness limits [lambda_p, lambda_r] for flexure, coefficients on sqrt(E/Fy) (round HSS: on E/Fy; built-up flange lambda_r on sqrt(kc E/FL), FL = 0.7Fy): case 10/13 flanges of rolled I (major and minor axis) [0.38, 1.0]; case 11 flanges of built-up I [0.38, 0.95]; case 15 webs of doubly symmetric I [3.76, 5.70]; case 17 flanges of rectangular HSS [1.12, 1.40]; case 19 webs of rectangular HSS [2.42, 5.70]; case 20 round HSS [0.07, 0.31]",
+      "flange_rolled": [
+        0.38,
+        1.0
+      ],
+      "flange_builtup": [
+        0.38,
+        0.95
+      ],
+      "web_doubly_symmetric": [
+        3.76,
+        5.7
+      ],
+      "hss_rect_flange": [
+        1.12,
+        1.4
+      ],
+      "hss_rect_web": [
+        2.42,
+        5.7
+      ],
+      "hss_round": [
+        0.07,
+        0.31
+      ]
+    },
+    "E3": {
+      "status": "C",
+      "source": "ANSI/AISC 360-16/360-22 E3 flexural buckling: Fe = pi^2 E/(Lc/r)^2 (E3-4); Fcr = 0.658^(Fy/Fe) Fy for Fy/Fe <= 2.25 (E3-2), else 0.877 Fe (E3-3); E4 torsional buckling Fe = (pi^2 E Cw/Lcz^2 + GJ)/(Ix + Iy) (E4-2, doubly symmetric)",
+      "base": 0.658,
+      "inelastic_limit": 2.25,
+      "elastic_factor": 0.877,
+      "slenderness_note": 200
+    },
+    "E7": {
+      "status": "C",
+      "source": "ANSI/AISC 360-16/360-22 E7 members with slender elements: Pn = Fcr Ae (E7-1); be = b for lambda <= lambda_r sqrt(Fy/Fcr) (E7-2), else be = b(1 - c1 sqrt(Fel/Fcr)) sqrt(Fel/Fcr) (E7-3), Fel = (c2 lambda_r/lambda)^2 Fy (E7-5); Table E7.1 [c1, c2]: (a) stiffened elements except walls of square/rectangular HSS [0.18, 1.31], (b) walls of square/rectangular HSS [0.20, 1.38], (c) all other elements [0.22, 1.49]. Round HSS (E7-7): Ae = [0.038 E/(Fy D/t) + 2/3] Ag for 0.11 E/Fy < D/t < 0.45 E/Fy",
+      "stiffened": [
+        0.18,
+        1.31
+      ],
+      "hss_wall": [
+        0.2,
+        1.38
+      ],
+      "unstiffened": [
+        0.22,
+        1.49
+      ],
+      "round_coef": 0.038,
+      "round_add": 0.6666666666666666,
+      "round_limit": 0.45
+    },
+    "F2": {
+      "status": "V",
+      "source": "ANSI/AISC 360-16/360-22 F2 doubly symmetric compact I, major axis: Mp = Fy Zx (F2-1); Mn = Cb[Mp - (Mp - 0.7 Fy Sx)(Lb - Lp)/(Lr - Lp)] <= Mp (F2-2); Mn = Fcr Sx, Fcr = Cb pi^2 E/(Lb/rts)^2 sqrt(1 + 0.078 Jc/(Sx ho) (Lb/rts)^2) (F2-3, F2-4) (all shown in Design Examples V14.0 Ch. F); Lp = 1.76 ry sqrt(E/Fy) (F2-5); Lr = 1.95 rts E/(0.7Fy) sqrt(Jc/(Sx ho) + sqrt((Jc/(Sx ho))^2 + 6.76 (0.7Fy/E)^2)) (F2-6); c = 1",
+      "FL_ratio": 0.7,
+      "Lp": 1.76,
+      "Lr": 1.95,
+      "Lr_term": 6.76,
+      "Fcr_term": 0.078
+    },
+    "Cb": {
+      "status": "V",
+      "source": "ANSI/AISC 360-16/360-22 F1 eq. (F1-1): Cb = 12.5 Mmax/(2.5 Mmax + 3 MA + 4 MB + 3 MC) (shown in Design Examples V14.0/V16.0 Ex. F.1-2B: Cb = 1.01 middle segment, 1.46 end segments)",
+      "coef": [
+        12.5,
+        2.5,
+        3.0,
+        4.0,
+        3.0
+      ]
+    },
+    "F3_F6": {
+      "status": "C",
+      "source": "ANSI/AISC 360-16/360-22 F3 (I with noncompact/slender flanges, major axis): Mn = Mp - (Mp - 0.7 Fy Sx)(lambda - lambda_pf)/(lambda_rf - lambda_pf) (F3-1), slender Mn = 0.9 E kc Sx/lambda^2 (F3-2); F6 (I minor axis): Mp = min(Fy Zy, 1.6 Fy Sy) (F6-1), noncompact flange as F3-1 with Sy (F6-2), slender Fcr = 0.69 E/lambda^2 (F6-3, F6-4)",
+      "F3_slender": 0.9,
+      "F6_Mp_cap": 1.6,
+      "F6_slender": 0.69
+    },
+    "F7": {
+      "status": "C",
+      "source": "ANSI/AISC 360-16/360-22 F7 square/rectangular HSS: FLB noncompact Mn = Mp - (Mp - Fy S)(3.57 (b/t) sqrt(Fy/E) - 4.0) <= Mp (F7-2); slender Mn = Fy Se with be = 1.92 t sqrt(E/Fy)(1 - 0.38/(b/t) sqrt(E/Fy)) <= b (F7-3, F7-4); WLB noncompact Mn = Mp - (Mp - Fy S)(0.305 (h/t) sqrt(Fy/E) - 0.738) <= Mp (F7-5); LTB (F7.4, major axis of rectangular HSS): Lp = 0.13 E ry sqrt(J Ag)/Mp (F7-12), Lr = 2 E ry sqrt(J Ag)/(0.7 Fy Sx) (F7-13), Mn = Cb[Mp - (Mp - 0.7 Fy Sx)(Lb - Lp)/(Lr - Lp)] (F7-10), Mn = 2 E Cb sqrt(J Ag)/(Lb/ry) (F7-11)",
+      "flb": [
+        3.57,
+        4.0
+      ],
+      "be": [
+        1.92,
+        0.38
+      ],
+      "wlb": [
+        0.305,
+        0.738
+      ],
+      "ltb": [
+        0.13,
+        2.0
+      ]
+    },
+    "F8": {
+      "status": "C",
+      "source": "ANSI/AISC 360-16/360-22 F8 round HSS (D/t < 0.45 E/Fy): Mp = Fy Z (F8-1); noncompact Mn = (0.021 E/(D/t) + Fy) S (F8-2); slender Mn = Fcr S, Fcr = 0.33 E/(D/t) (F8-3, F8-4)",
+      "noncompact": 0.021,
+      "slender": 0.33,
+      "limit": 0.45
+    },
+    "G_shear": {
+      "status": "C",
+      "source": "ANSI/AISC 360-16/360-22 Chapter G: Vn = 0.6 Fy Aw Cv (G2-1, G4-1, G6-1); G2.1(a) rolled I webs h/tw <= 2.24 sqrt(E/Fy): Cv1 = 1.0 (with phi_v = 1.00, Omega_v = 1.50); G2.1(b)(1) Cv1 = 1.0 for h/tw <= 1.10 sqrt(kv E/Fy), else 1.10 sqrt(kv E/Fy)/(h/tw) (G2-3, G2-4), kv = 5.34 unstiffened webs; G2.2 Cv2: 1.0 for h/t <= 1.10 sqrt(kv E/Fy), 1.10 sqrt(kv E/Fy)/(h/t) up to 1.37 sqrt(kv E/Fy), else 1.51 kv E/((h/t)^2 Fy) (G2-9..G2-11); G4 rectangular HSS Aw = 2ht, kv = 5; G6 weak-axis I Aw = bf tf per flange, kv = 1.2, h/t = bf/(2tf); G5 round HSS Vn = Fcr Ag/2 with Fcr = max(1.60 E/(sqrt(Lv/D)(D/t)^(5/4)), 0.78 E/(D/t)^(3/2)) <= 0.6 Fy (G5-2a, G5-2b)",
+      "shear_yield": 0.6,
+      "rolled_I_limit": 2.24,
+      "cv": [
+        1.1,
+        1.37,
+        1.51
+      ],
+      "kv_web": 5.34,
+      "kv_hss": 5.0,
+      "kv_flange": 1.2,
+      "round": [
+        1.6,
+        0.78
+      ]
+    },
+    "H1": {
+      "status": "V",
+      "source": "ANSI/AISC 360-16/360-22 H1.1 doubly and singly symmetric members: Pr/Pc >= 0.2: Pr/Pc + 8/9 (Mrx/Mcx + Mry/Mcy) <= 1.0 (H1-1a); Pr/Pc < 0.2: Pr/(2Pc) + (Mrx/Mcx + Mry/Mcy) <= 1.0 (H1-1b); H1.2 same with tension (shown in Design Examples V16.0 Ex. H.1A and H.4)",
+      "threshold": 0.2,
+      "factor": 0.8888888888888888
+    },
+    "B1": {
+      "status": "C",
+      "source": "ANSI/AISC 360-16/360-22 Appendix 8 approximate second-order analysis: B1 = Cm/(1 - alpha Pr/Pe1) >= 1 (A-8-3), alpha = 1.00 LRFD / 1.60 ASD, Cm = 0.6 - 0.4 M1/M2 (A-8-4) for no transverse loading, Pe1 = pi^2 EI*/(K1 L)^2 (A-8-5) with EI* = EI here (no direct-analysis stiffness reduction)",
+      "alpha": [
+        1.0,
+        1.6
+      ],
+      "Cm": [
+        0.6,
+        0.4
+      ]
+    },
+    "D1_slenderness_note": {
+      "value": 300,
+      "status": "C",
+      "source": "ANSI/AISC 360-16/360-22 D1 User Note: L/r preferably not over 300 for tension members (not a requirement)"
     }
   },
   "geotech": {

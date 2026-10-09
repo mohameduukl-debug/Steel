@@ -504,6 +504,232 @@ class TestFoundations(unittest.TestCase):
         self.assertAlmostEqual(CF.get("geotech.helical_Kt_per_m"), 10 / 0.3048, delta=0.05)
 
 
+# ======================================================================= member_check --code aisc
+IN, KSI, KIP, KIPFT, FT = 25.4, 6.894757, 4.448222, 1.3558179, 0.3048
+
+
+def W(d, bf, tw, tf, kdes):
+    """AISC W shape from AISC Shapes Database v16.0 dimensions [in]; fillet r = k_des − t_f."""
+    return MC.Section(f"I:{d * IN}:{bf * IN}:{tw * IN}:{tf * IN}:{(kdes - tf) * IN}")
+
+
+def HSS(H, B, t_des):
+    return MC.Section(f"RHS:{H * IN}x{B * IN}x{t_des * IN}:aisc")
+
+
+def PIPE(D, t_des):
+    return MC.Section(f"CHS:{D * IN}x{t_des * IN}")
+
+
+def cap(rows, prefix):
+    return [r for r in rows if r[0].startswith(prefix)][0][2]
+
+
+class TestAISC360DesignExamples(unittest.TestCase):
+    """member_check --code aisc against the AISC *Design Examples* companion to the Steel Construction Manual
+    (free download, https://www.aisc.org/publications/steel-construction-manual-resources/16th-ed-steel-construction-manual/manual-companion-for-16th-edition).
+    [DE16] = Design Examples V16.0 (AISC 360-22), published final strengths as tabulated next to the example numbers in
+    the Dlubal verification documents VE 1030 (Ch. D), 1031 (Ch. E), 1032 (Ch. F), 1033 (Ch. G), 1034 (Ch. H)
+    (https://www.dlubal.com/en/downloads-and-information/examples-and-tutorials/verification-examples/001031 etc.).
+    [DE15.1] = V15.1 (AISC 360-16) values as quoted by ClearCalcs (support.clearcalcs.com/article/164).
+    [DE14] = V14.0 (AISC 360-10) where the clause is unchanged. Inputs in US units are converted to the tool's SI
+    units; sections are built from the AISC nominal dimensions (W: d, bf, tw, tf, k_des; HSS/pipe: t_des), so
+    section-property rounding is part of the error. Tolerance 1 % unless stated."""
+
+    def both(self, fn, lrfd, asd, tol=0.01, msg=""):
+        for is_asd, ref in ((False, lrfd), (True, asd)):
+            if ref is not None:
+                got = fn(is_asd)
+                self.assertAlmostEqual(got / ref, 1.0, delta=tol,
+                                       msg=f"{msg} {'ASD' if is_asd else 'LRFD'}: {got:.3f} vs {ref}")
+
+    # ---------------- Chapter D
+    def test_D1_W8x21_tension_yield_and_rupture(self):
+        # [DE16] D.1: W8x21 A992, Ag = 6.16 in²; yielding 277 / 184 kips; rupture with An = 4.76 in², U = 0.908
+        # (Ae = 4.32 in²): 211 / 141 kips
+        s = W(8.28, 5.27, 0.250, 0.400, 0.700)
+
+        def run(asd, key):
+            rows, _ = MC.check_aisc(s, 50 * KSI, 25 * FT, -180.0, asd=asd, Fu=65 * KSI, An=4.76 * IN ** 2, U=0.908)
+            return cap(rows, key) / KIP
+        self.both(lambda a: run(a, "tension yielding"), 277, 184, msg="D.1 yield")
+        self.both(lambda a: run(a, "tension rupture"), 211, 141, msg="D.1 rupture")
+
+    def test_D5_round_HSS_tension_yield(self):
+        # [DE16] D.5: HSS6.000x0.500 (t_des = 0.465 in), Fy = 50 ksi: yielding 364 / 242 kips
+        self.both(lambda a: cap(MC.check_aisc(PIPE(6.0, 0.465), 50 * KSI, 30 * FT, -100.0, asd=a)[0],
+                                "tension yielding") / KIP, 364, 242, msg="D.5")
+
+    # ---------------- Chapter E
+    def test_E1C_E1D_W_columns(self):
+        # [DE16] E.1C: W14x132, Lc = 30 ft both axes: φcPn = 892 kips; ASD 594 kips (E.1A, Manual Table 4-1a at
+        # Lc = 30 ft; VE 1031 lists 598 for E.1C ASD, which is inconsistent with 892/0.90/1.67 = 593.5).
+        w132 = W(14.66, 14.725, 0.645, 1.03, 1.63)
+        self.both(lambda a: cap(MC.check_aisc(w132, 50 * KSI, 30 * FT, 100.0, asd=a)[0], "compression") / KIP,
+                  892, 594, msg="E.1C")
+        # [DE16] E.1D: W14x90, Lcx = 30 ft, Lcy = Lcz = 15 ft: 927 / 617 kips (x-x flexural buckling governs)
+        w90 = W(14.02, 14.52, 0.440, 0.710, 1.31)
+        self.both(lambda a: cap(MC.check_aisc(w90, 50 * KSI, 30 * FT, 100.0, ky=1.0, kz=0.5, asd=a)[0],
+                                "compression") / KIP, 927, 617, msg="E.1D")
+        _, res = MC.check_aisc(w90, 50 * KSI, 30 * FT, 100.0, ky=1.0, kz=0.5)
+        self.assertEqual(res["buckling_mode"], "flexural y")      # strong axis (AISC x-x) governs, as published
+
+    def test_E2_E3_built_up_slender_elements_E7(self):
+        # [DE16] E.2: built-up I, flanges PL1x8, web PL1/4x15 (slender web), A572-50, L = 15 ft: 500 / 332 kips.
+        # [DE14] text: Fe = 38.3 ksi (flexural, y-y).  [DE16] E.3: flanges PL3/8x10-1/2, web PL1/4x7-1/4 (slender
+        # flanges, kc = 0.743), L = 15 ft: 318 / 211 kips; [DE14] Fe = 65.9 ksi. Fillet welds ignored (r = 0).
+        e2 = MC.Section(f"I:{17 * IN}:{8 * IN}:{0.25 * IN}:{1.0 * IN}:0:welded")
+        e3 = MC.Section(f"I:{8 * IN}:{10.5 * IN}:{0.25 * IN}:{0.375 * IN}:0:welded")
+        self.both(lambda a: cap(MC.check_aisc(e2, 50 * KSI, 15 * FT, 100.0, asd=a)[0], "compression") / KIP,
+                  500, 332, msg="E.2")
+        self.both(lambda a: cap(MC.check_aisc(e3, 50 * KSI, 15 * FT, 100.0, asd=a)[0], "compression") / KIP,
+                  318, 211, msg="E.3")
+        _, r2 = MC.check_aisc(e2, 50 * KSI, 15 * FT, 100.0)
+        _, r3 = MC.check_aisc(e3, 50 * KSI, 15 * FT, 100.0)
+        self.assertAlmostEqual(r2["Fe"] / KSI / 38.3, 1.0, delta=0.005)
+        self.assertAlmostEqual(r3["Fe"] / KSI / 65.9, 1.0, delta=0.005)
+        self.assertTrue(r2["slender"] and r2["Ae"] < e2.A)          # slender web -> reduced effective area
+
+    def test_E9_E10_rectangular_HSS(self):
+        # [DE16] E.9: HSS12x10x3/8 (t_des 0.349), Fy = 50, Lc = 0.8·20 = 16 ft: 556 / 370 kips (non-slender)
+        self.both(lambda a: cap(MC.check_aisc(HSS(12, 10, 0.349), 50 * KSI, 16 * FT, 100.0, asd=a)[0],
+                                "compression") / KIP, 556, 370, msg="E.9")
+        # [DE16] E.10: HSS12x8x3/16 (t_des 0.174), Lc = 0.8·30 = 24 ft, slender walls (E7): 151 / 101 kips;
+        # [DE15.1] Fcr = 29.1 ksi, Ae = 5.77 in²
+        s = HSS(12, 8, 0.174)
+        self.both(lambda a: cap(MC.check_aisc(s, 50 * KSI, 24 * FT, 100.0, asd=a)[0], "compression") / KIP,
+                  151, 101, msg="E.10")
+        _, res = MC.check_aisc(s, 50 * KSI, 24 * FT, 100.0)
+        self.assertAlmostEqual(res["Fcr"] / KSI / 29.1, 1.0, delta=0.005)
+        self.assertAlmostEqual(res["Ae"] / IN ** 2 / 5.77, 1.0, delta=0.005)
+
+    # ---------------- Chapter F
+    def test_Cb_eq_F1_1(self):
+        # [DE14]/[DE16] F.1-2B: Mmax, MA, MB, MC = 1.00, 0.972, 1.00, 0.972 -> Cb = 1.01 (middle third);
+        # 0.889, 0.306, 0.556, 0.750 -> 1.46 (end thirds). Uniform load, braced at midspan (F.1-3B, Manual Table 3-1):
+        # Cb = 1.30, here from the parabola's quarter-point moments of the half span (0.4375, 0.75, 0.9375).
+        self.assertAlmostEqual(MC.Cb_F1_1(1.0, 0.972, 1.0, 0.972), 1.01, delta=0.005)
+        self.assertAlmostEqual(MC.Cb_F1_1(0.889, 0.306, 0.556, 0.750), 1.46, delta=0.005)
+        self.assertAlmostEqual(MC.Cb_F1_1(1.0, 0.4375, 0.75, 0.9375), 1.30, delta=0.005)
+        self.assertAlmostEqual(MC.Cb_linear(1.0), 1.0, places=12)       # uniform moment
+        self.assertAlmostEqual(MC.Cb_linear(0.0), 12.5 / 7.5, places=12)  # quarter points 0.75, 0.5, 0.25
+
+    def test_F1_W18x50_LTB(self):
+        # [DE16] W18x50 A992: F.1-1B continuously braced 379 / 252 kip-ft; F.1-2B Lb = 11.67 ft, Cb = 1.01:
+        # 304 / 202 kip-ft (inelastic LTB, F2-2); F.1-3B Lb = 17.5 ft, Cb = 1.30: 289 / 192 kip-ft (elastic LTB, F2-3).
+        s = W(17.99, 7.495, 0.355, 0.570, 0.972)
+        for ex, Lb, Cb, l, a_ in (("F.1-1B", 0.001, 1.0, 379, 252), ("F.1-2B", 35 / 3, 1.01, 304, 202),
+                                  ("F.1-3B", 17.5, 1.30, 289, 192)):
+            self.both(lambda a: cap(MC.check_aisc(s, 50 * KSI, Lb * FT, 0.0, My=300.0, Cb=Cb, asd=a)[0],
+                                    "flexure strong") / KIPFT, l, a_, msg=ex)
+        _, res = MC.check_aisc(s, 50 * KSI, 17.5 * FT, 0.0, My=300.0, Cb=1.3)
+        # [DE14] F.1-2B: Manual Table 3-2 Lp = 5.83 ft, Lr = 16.9 ft
+        self.assertAlmostEqual(res["flex_y"]["Lp"] / 1e3 / FT / 5.83, 1.0, delta=0.005)
+        self.assertAlmostEqual(res["flex_y"]["Lr"] / 1e3 / FT / 16.9, 1.0, delta=0.005)
+
+    def test_F6_F7_F8_HSS_and_pipe_flexure(self):
+        # [DE16] F.6: HSS3-1/2x3-1/2x1/8 (t_des 0.116), Fy = 50: 7.21 / 4.79 kip-ft (flange just noncompact at 50 ksi)
+        # [DE16] F.7B: HSS10x6x3/16 (t_des 0.174), noncompact flange b/t = 31.5 (F7-2): 59.7 / 39.7 kip-ft
+        # [DE16] F.8A: HSS8x8x3/16, slender flange (F7-3/F7-4), Manual Table 3-13: 46.3 kip-ft (LRFD)
+        # [DE16] F.9B: Pipe 8 x-Strong (t_des = 0.93·0.500 = 0.465 in), A53 Gr. B Fy = 35 ksi, compact: 81.4 / 54.1
+        for ex, s, Fy, l, a_ in (("F.6", HSS(3.5, 3.5, 0.116), 50, 7.21, 4.79),
+                                 ("F.7B", HSS(10, 6, 0.174), 50, 59.7, 39.7),
+                                 ("F.8A", HSS(8, 8, 0.174), 50, 46.3, None),
+                                 ("F.9B", PIPE(8.625, 0.465), 35, 81.4, 54.1)):
+            self.both(lambda a: cap(MC.check_aisc(s, Fy * KSI, 1.0, 0.0, My=10.0, asd=a)[0], "flexure strong") / KIPFT,
+                      l, a_, msg=ex)
+        # F.8B is the hand calculation of the same section: 45.4 / 30.2 kip-ft. Its effective section modulus is
+        # about 2 % below the one with the shifted neutral axis that the Manual table (F.8A, 46.3) and this tool use.
+        self.both(lambda a: cap(MC.check_aisc(HSS(8, 8, 0.174), 50 * KSI, 1.0, 0.0, My=10.0, asd=a)[0],
+                                "flexure strong") / KIPFT, 45.4, 30.2, tol=0.025, msg="F.8B")
+
+    # ---------------- Chapter G
+    def test_G_shear(self):
+        # [DE16] G.1B: W24x62, Aw = d·tw, G2.1(a) φv = 1.00 / Ωv = 1.50: 306 / 204 kips
+        self.both(lambda a: cap(MC.check_aisc(W(23.74, 7.04, 0.430, 0.590, 1.09), 50 * KSI, 6.0, 0.0, Vz=100.0,
+                                              asd=a)[0], "shear") / KIP, 306, 204, msg="G.1B")
+        # [DE16] G.6: W21x48 weak-axis shear (G6, Cv2 = 1): 189 / 126 kips
+        self.both(lambda a: cap(MC.check_aisc(W(20.62, 8.14, 0.350, 0.430, 0.930), 50 * KSI, 6.0, 0.0, Vy=100.0,
+                                              asd=a)[0], "shear") / KIP, 189, 126, msg="G.6")
+        # [DE16] G.5: round HSS16.000x0.375 (t_des 0.349), Fy = 50 ksi (ASTM A500 Gr. C since 2021, as in D.5),
+        # Fcr = 0.6 Fy governs: 232 / 155 kips
+        self.both(lambda a: cap(MC.check_aisc(PIPE(16.0, 0.349), 50 * KSI, 6.0, 0.0, Vz=100.0, Lv=3.0, asd=a)[0],
+                                "shear") / KIP, 232, 155, msg="G.5")
+        # [DE14] G.4 (AISC 360-10, unchanged): HSS6x4x3/8 (t_des 0.349) A500 Gr. B Fy = 46, shear parallel to the
+        # 6 in. side, h = 6 − 3t, Aw = 2ht: φvVn = 85.9 kips (value as reproduced by SDC Verifier's benchmark)
+        self.both(lambda a: cap(MC.check_aisc(HSS(6, 4, 0.349), 46 * KSI, 3.0, 0.0, Vz=100.0, asd=a)[0],
+                                "shear") / KIP, 85.9, None, msg="G.4")
+
+    # ---------------- Chapter H
+    def test_H1A_W14x99_combined(self):
+        # [DE16] H.1A: W14x99, Lc = Lb = 14 ft, Cb = 1: LRFD Pu = 400 kips, Mux = 250, Muy = 80 kip-ft:
+        # Pc = 1130, Mcx = 642 (F3 noncompact flange + LTB), Mcy = 311 (F6) -> H1-1a = 0.928;
+        # ASD Pa = 267, Max = 167, May = 53.3: Pc = 750, Mcx = 427, Mcy = 207 -> 0.931
+        s = W(14.16, 14.565, 0.485, 0.780, 1.38)
+        for asd, P, Mx, My, ref in ((False, 400, 250, 80, (1130, 642, 311, 0.928)),
+                                    (True, 267, 167, 53.3, (750, 427, 207, 0.931))):
+            _, res = MC.check_aisc(s, 50 * KSI, 14 * FT, P * KIP, My=Mx * KIPFT, Mz=My * KIPFT, asd=asd)
+            got = (res["Pc"] / 1e3 / KIP, res["Mcx"] / KIPFT, res["Mcy"] / KIPFT, res["H1"])
+            for g, r, name in zip(got, ref, ("Pc", "Mcx", "Mcy", "H1-1a")):
+                self.assertAlmostEqual(g / r, 1.0, delta=0.005, msg=f"H.1A {name} {'ASD' if asd else 'LRFD'}")
+            self.assertEqual(res["H1_eq"], "H1-1a")
+            self.assertEqual(res["flex_y"]["clause"], "F3")       # W14x99 flange is noncompact for Fy = 50 ksi
+
+    def test_H4_W10x33_B1_and_H1_1b(self):
+        # [DE15.1] H.4 (ASD): W10x33, L = 14 ft, Pa = 20 kips, first-order Max = 60, May = 8 kip-ft, Cm = 1.0,
+        # Cb = 1.14 (Manual Table 3-1): B1-amplified Max = 61.2, May = 8.72 kip-ft (B1 = 1.02 / 1.09 rounded),
+        # Pc = 168 kips, Mcx = 91.0, Mcy = 34.9 kip-ft, H1-1b = 0.982
+        s = W(9.73, 7.96, 0.290, 0.435, 0.935)
+        _, res = MC.check_aisc(s, 50 * KSI, 14 * FT, 20 * KIP, My=60 * KIPFT, Mz=8 * KIPFT, Cb=1.14, asd=True, B1=True)
+        for g, r, name in ((res["Pc"] / 1e3 / KIP, 168, "Pc"), (res["Mrx"] / KIPFT, 61.2, "Mrx"),
+                           (res["Mry"] / KIPFT, 8.72, "Mry (published B1 rounded to 1.09)"),
+                           (res["Mcx"] / KIPFT, 91.0, "Mcx"), (res["Mcy"] / KIPFT, 34.9, "Mcy"),
+                           (res["H1"], 0.982, "H1")):
+            self.assertAlmostEqual(g / r, 1.0, delta=0.005, msg=f"H.4 {name}: {g:.3f} vs {r}")
+        self.assertEqual(res["H1_eq"], "H1-1b")
+
+    def test_limit_state_transitions_are_continuous(self):
+        # Paths without a published example (E3 elastic branch, E7 at the slenderness boundary, F2-3 and F7-11 at Lr,
+        # G2.2 Cv2) are checked by properties the Specification itself is built on: E3-2 = E3-3 at Fy/Fe = 2.25;
+        # E7-3 gives be = b at λ = λr√(Fy/Fcr) for each [c1, c2] of Table E7.1 (be/b = c2(1 − c1c2) ≈ 1);
+        # F2-4 at Lb = Lr gives Fcr = 0.7Fy (definition of Lr, F2-6; −0.12 % from its rounded constants);
+        # F7-11 at Lr equals 0.7FyS; G2-10 = G2-11 at 1.37.
+        Fy = 345.0
+        self.assertAlmostEqual(MC.aisc_E3(Fy, Fy / 2.25 * (1 + 1e-9)) / MC.aisc_E3(Fy, Fy / 2.25 * (1 - 1e-9)), 1.0,
+                               delta=0.002)
+        for c in CF.get("aisc.E7")["stiffened"], CF.get("aisc.E7")["hss_wall"], CF.get("aisc.E7")["unstiffened"]:
+            self.assertAlmostEqual(c[1] * (1 - c[0] * c[1]), 1.0, delta=0.002, msg=str(c))
+        s = W(17.99, 7.495, 0.355, 0.570, 0.972)
+        Lr = MC.aisc_flexure(s, Fy, "y", 1.0)["Lr"]
+        Mn = MC.aisc_flexure(s, Fy, "y", Lr * (1 + 1e-9), 1.0)["Mn"]
+        self.assertAlmostEqual(Mn / (0.7 * Fy * s.Wel_y), 1.0, delta=0.003)    # 1.95 and 6.76 in F2-6 are rounded
+        r = HSS(12, 4, 0.174)
+        f = MC.aisc_flexure(r, Fy, "y", 1.0)
+        self.assertAlmostEqual(MC.aisc_flexure(r, Fy, "y", f["Lr"] * (1 + 1e-9))["limits"]["LTB (F7.4)"] /
+                               (0.7 * Fy * r.Wel_y), 1.0, delta=1e-6)
+        E, kv = CF.get("aisc.E"), 5.0
+        x = math.sqrt(kv * E / Fy)
+        self.assertAlmostEqual(MC._Cv2(1.37 * x * (1 - 1e-9), kv, E, Fy) / MC._Cv2(1.37 * x * (1 + 1e-9), kv, E, Fy),
+                               1.0, delta=0.003)
+
+    def test_register_and_cli(self):
+        # every AISC coefficient comes from the register (status V/C + source); CLI prints its assumptions
+        for k in ("E", "G", "resistance", "B4_1a", "B4_1b", "E3", "E7", "F2", "Cb", "F3_F6", "F7", "F8", "G_shear",
+                  "H1", "B1"):
+            self.assertIn(CF.status("aisc." + k), ("V", "C"), k)
+        self.assertEqual(CF.get("aisc.resistance")["shear_rolled_I"], [1.0, 1.5])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            MC.main(["--code", "aisc", "--section", "I:359.7:369.9:12.3:19.8:15.2", "--fy", "345", "--L", "4.27",
+                     "--N", "1780", "--My", "339", "--Mz", "108"])
+            MC.main(["--code", "aisc", "--asd", "--section", "RHS:304.8x203.2x4.42:aisc", "--fy", "345", "--L",
+                     "7.32", "--N", "300"])
+        txt = out.getvalue()
+        self.assertIn("Assumptions / model limits (ANSI/AISC 360", txt)
+        self.assertIn("H1-1a", txt)
+        self.assertIn("ASD (Rn/Ω)", txt)
+
+
 class TestCLIs(unittest.TestCase):
     def test_all_clis_print_assumptions(self):
         cases = [(MC.main, ["--section", "IPE300", "--L", "6", "--N", "50", "--My", "80", "--psi-LT", "0"]),

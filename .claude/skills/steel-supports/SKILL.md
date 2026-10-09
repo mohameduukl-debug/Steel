@@ -39,7 +39,7 @@ python3 frame3d.py --input frame3d.json --reactions sail.json --map 0:1,12:9    
   regimes (both guys active / one slack), tan u/u amplification, agreement with frame2d (α_cr, N, M, P-Δ, < 10⁻³), and
   the 5.3.2(11) imperfection reproducing χ to within 0.5 %.
 
-## Tool: `scripts/member_check.py` (CHS, RHS/SHS, I/H to EN 1993-1-1)
+## Tool: `scripts/member_check.py` (CHS, RHS/SHS, I/H to EN 1993-1-1, or AISC 360-16/22 with `--code aisc`)
 ```bash
 python3 member_check.py --list                                                     # built-in IPE/HEA/HEB
 python3 member_check.py --section CHS:219.1x8 --L 7.5 --N 420 --My 12              # pinned mast
@@ -59,6 +59,27 @@ python3 member_check.py --section CHS:273x10 --L 6 --N 300 --My 40 --ky 2 --kz 2
 - Options: `--cold`, `--fy`, `--ky/--kz`, `--Vy/--Vz`, `--factors`.
 - Validated: χ against the ECCS/ESDEP table (28 values, ≤ 5·10⁻⁵); M_cr closed form (−0.3 %); Gardner & Nethercot
   Ex. 6.6 (M_N,y), 6.7 (CHS N_b,Rd), 6.8 (M_cr, χ_LT) and 6.10 (Annex B: 0.66/0.97, k_zy, k_zz) all within 0.5 % or 0.01.
+
+**AISC 360-16 / 360-22 route: `--code aisc`** (EN stays the default; all EN options and output unchanged)
+```bash
+python3 member_check.py --code aisc --section I:359.7:369.9:12.3:19.8:15.2 --fy 345 --L 4.27 --N 1780 --My 339 --Mz 108
+python3 member_check.py --code aisc --asd --section RHS:304.8x203.2x4.42:aisc --fy 345 --L 7.32 --N 300   # HSS12x8x3/16
+python3 member_check.py --code aisc --section CHS:219.1x8 --fy 345 --fu 450 --L 6 --N=-500 --An 4800 --U 0.87
+python3 member_check.py --code aisc --section I:450:190:9.4:14.6:21 --fy 345 --L 6 --My 200 --Cb-moments 1,0.44,0.75,0.94
+```
+- LRFD (φR_n) by default, `--asd` for R_n/Ω. Forces are the required strengths of that method, in kN/kNm; F_y/F_u in MPa.
+  W shapes: `I:d:bf:tw:tf:r` with r = k_des − t_f; AISC HSS: `RHS:HxBxt_des:aisc` (corner radius 2t_des, t_des =
+  0.93 t_nom for ERW); pipes/round HSS: `CHS:Dxt_des`.
+- D2 yielding and rupture (`--fu`, `--An`, `--U`, A_e = U·A_n); E3 about both axes plus E4 torsional (doubly symmetric I);
+  E7 effective width for slender elements (Table B4.1a; Table E7.1 c1/c2) and E7-7 for round HSS; F2 LTB with C_b
+  (`--Cb`, `--Cb-moments Mmax,MA,MB,MC` for eq. F1-1, or F1-1 on a linear diagram from `--psi-LT`; default 1.0), F3/F6
+  flange local buckling, F7 HSS (FLB with the effective section, WLB, F7.4 LTB), F8 round HSS; G2.1(a)/(b), G4, G5
+  (`--Lv`), G6 shear; H1-1a/b (H1.2 for tension). `--B1` applies the App. 8 P-δ amplifier (K1 = 1, C_m from
+  `--psi-y/--psi-z` or `--Cmy/--Cmz`, else 1.0); otherwise the moments must already include second-order effects.
+- All φ, Ω, limits and coefficients come from the register section `aisc` (status V/C with clause sources).
+- Validated against the AISC *Design Examples* V16.0 (and V15.1/V14.0 where noted): D.1, D.5, E.1C, E.1D, E.2, E.3, E.9,
+  E.10, F.1-1B/2B/3B (incl. C_b, L_p, L_r), F.6, F.7B, F.8A, F.9B, G.1B, G.4, G.5, G.6, H.1A and H.4. All are within
+  0.6 %, except F.8B at +1.9 % (its hand calculation uses a simpler S_e; the tool matches the Manual-table value F.8A).
 
 ## Tool: `scripts/frame2d.py` (planar: arches, tapered/guyed masts, frames: stability + second order)
 ```bash
@@ -123,12 +144,19 @@ python3 foundation_check.py helical --T 8 --pull 110 [--shaft SS175|SS5|RS2875|R
   LTB is checked per member. Rigid supports (no springs or settlements).
 - member_check: doubly-symmetric sections only. M_cr assumes fork supports with the load at the shear centre (C1 from end
   moments; use `--C1` otherwise). Class 4 is simplified (no neutral-axis shift) and class 4 CHS is not designed. No torsion,
-  fatigue, fire or net-section checks.
+  fatigue, fire or net-section checks (EN route).
+- member_check `--code aisc`: no F4/F5 (noncompact or slender webs of I girders), F7.3(c) slender HSS webs, round HSS with
+  D/t ≥ 0.45E/F_y, tension-field action, H3 torsion or the H1.2 C_b increase. These cases are flagged NOT OK, not designed.
+  Singly symmetric shapes, channels, tees and angles are not covered. App. 8 B1 is for braced members only: sway (B2) and
+  the direct-analysis stiffness reduction belong in frame2d/frame3d. Some sub-paths (E4 governing, E7-7, F3-2/F6-3, F7-5,
+  F7.4, F8-2/F8-3, C_v < 1, H1.2) are not covered by a published example. See `reference/validation.md`.
 - Cm comes from a linear moment (ψ). For transverse loads give `--Cmy/--Cmz/--CmLT`.
 - foundation_check: rigid block, drained sliding, no passive resistance, no group or interaction effects. The helical K_t is
   product-specific (CHANCE ESR-2794).
-- Eurocode checks only. The AISC 360 equivalents are listed in reference §15 for hand checks.
-- Every factor is a recommended value (status C/V in the register). Confirm against the National Annex in force.
+- frame2d/frame3d `--check`, mast_check and foundation_check are Eurocode only. For single members, `member_check --code aisc` gives
+  the AISC 360 checks (reference §15). Use second-order forces from the frame tools.
+- Every factor is a recommended value (status C/V in the register). Confirm against the National Annex in force, or for
+  AISC against the Specification edition adopted by the governing building code (360-16 or 360-22).
 
 ## References
 - `reference/steel-support-design.md`: design guide covering support types, §5.2/5.3 stability and imperfections, member resistance, masts

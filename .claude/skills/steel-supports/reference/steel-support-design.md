@@ -245,17 +245,32 @@ torsion n·e. Deflection limits used in practice (characteristic combination):
   [C, EN 1993-1-2 eq. (4.22)], with μ0 the utilisation in fire. Cable sockets and PVC/PTFE membranes lose strength at much lower
   temperatures than steel.
 
-## 15. AISC 360-16 equivalents [C, AISC 360-16 clauses]
-| Topic | AISC 360-16 |
-|---|---|
-| Stability design | Ch. C direct analysis: second-order analysis, notional loads N_i = 0.002αY_i (α = 1.0 LRFD) (C2.2b), stiffness reduction 0.8τ_b·EI and 0.8·EA (C2.3); τ_b = 1.0 for αP_r/P_ns ≤ 0.5, otherwise 4(αP_r/P_ns)(1 − αP_r/P_ns); K = 1 for member checks |
-| Compression (E3) | F_e = π²E/(L_c/r)²; F_cr = 0.658^(F_y/F_e)·F_y if L_c/r ≤ 4.71√(E/F_y), else 0.877F_e; φ_c = 0.90 |
-| Round HSS slenderness | compression non-slender D/t ≤ 0.11E/F_y (Table B4.1a); flexure compact ≤ 0.07E/F_y, non-compact ≤ 0.31E/F_y (Table B4.1b); F8 applies only for D/t < 0.45E/F_y |
-| Flexure (F2, F8) | I sections: M_n = M_p for L_b ≤ L_p, LTB beyond that (C_b from F1); round HSS compact M_n = M_p; φ_b = 0.90 |
-| Combined (H1-1) | P_r/P_c ≥ 0.2: P_r/P_c + 8/9(M_rx/M_cx + M_ry/M_cy) ≤ 1.0; otherwise P_r/(2P_c) + (M_rx/M_cx + M_ry/M_cy) ≤ 1.0 |
-| HSS torsion | H3 (torsional strength of round/rectangular HSS, combined H3-6) |
-| Tension (D2) | φ_t = 0.90 yielding (register `aisc.phi_yield`), 0.75 rupture |
-The tools implement Eurocode checks only. Use these clauses for an AISC hand check.
+## 15. AISC 360-16 / 360-22 (`member_check.py --code aisc`)
+The values below are in the register section `aisc` (`code_factors.json`). [V] means the clause text or factor is printed
+in a named AISC Design Example. [C] means the Specification clause content as in 360-16. The 360-22 Design Examples
+V16.0 reproduce the clauses the tool uses, within 0.6 % (see `validation.md`). Still confirm the edition adopted by your
+building code. The V16.0 examples take F_y = 50 ksi for round HSS (D.5, G.5), the same as rectangular HSS, so check the
+ASTM A500 edition specified for the job.
+
+| Topic | AISC 360-16 / 360-22 | Tag |
+|---|---|---|
+| Stability design | Ch. C direct analysis: second-order analysis, notional loads N_i = 0.002αY_i (α = 1.0 LRFD) (C2.2b), stiffness reduction 0.8τ_b·EI and 0.8·EA (C2.3); τ_b = 1.0 for αP_r/P_ns ≤ 0.5, otherwise 4(αP_r/P_ns)(1 − αP_r/P_ns); K = 1 for member checks. App. 8: B1 = C_m/(1 − αP_r/P_e1) ≥ 1, α = 1.0 LRFD / 1.6 ASD, C_m = 0.6 − 0.4M1/M2 (`--B1`, braced members only) | [C] |
+| φ / Ω | tension yielding 0.90 / 1.67; rupture 0.75 / 2.00 (D.1); compression 0.90 / 1.67; flexure 0.90 / 1.67 (V14 Ch. F); shear 0.90 / 1.67; rolled I webs h/t_w ≤ 2.24√(E/F_y): 1.00 / 1.50 (G.1B) | [V] |
+| E, G | 29 000 ksi (200 000 MPa), 11 200 ksi (77 200 MPa) | [C] |
+| Tension (D2) | P_n = F_y A_g (yielding), F_u A_e with A_e = U·A_n (rupture, Table D3.1); L/r ≤ 300 user note | [C] |
+| Slenderness, compression (B4.1a) | λ_r: rolled-I flange b/t = (b_f/2)/t_f 0.56√(E/F_y); built-up flange 0.64√(k_cE/F_y), k_c = 4/√(h/t_w) in 0.35–0.76; I web h/t_w 1.49√(E/F_y); rectangular HSS wall (B − 3t)/t 1.40√(E/F_y); round HSS D/t 0.11E/F_y | [C] |
+| Slenderness, flexure (B4.1b) | [λ_p, λ_r]: rolled-I flange 0.38/1.0√(E/F_y); built-up flange λ_r 0.95√(k_cE/F_L); I web 3.76/5.70; HSS flange 1.12/1.40; HSS web 2.42/5.70; round HSS 0.07/0.31 E/F_y | [C] |
+| Compression (E3, E4) | F_e = π²E/(L_c/r)²; F_cr = 0.658^(F_y/F_e)·F_y if F_y/F_e ≤ 2.25 (L_c/r ≤ 4.71√(E/F_y)), else 0.877F_e; torsional F_e = (π²EC_w/L_cz² + GJ)/(I_x + I_y) | [C] |
+| Slender elements (E7) | P_n = F_cr A_e; b_e = b(1 − c1√(F_el/F_cr))√(F_el/F_cr) for λ > λ_r√(F_y/F_cr), F_el = (c2λ_r/λ)²F_y; c1/c2 = 0.18/1.31 stiffened, 0.20/1.38 HSS walls, 0.22/1.49 unstiffened; round HSS A_e = (0.038E/(F_y D/t) + 2/3)A_g | [C] |
+| Flexure, I (F2, F3, F6) | M_p = F_yZ_x; L_p = 1.76r_y√(E/F_y); L_r per F2-6; inelastic F2-2 and elastic F2-3/F2-4 with C_b = 12.5M_max/(2.5M_max + 3M_A + 4M_B + 3M_C); FLB F3-1/F3-2; minor axis M_p = min(F_yZ_y, 1.6F_yS_y) and F6 FLB | [V] F2, C_b; [C] F3, F6 |
+| Flexure, HSS (F7, F8) | FLB M_p − (M_p − F_yS)(3.57(b/t)√(F_y/E) − 4.0); slender F_yS_e with b_e = 1.92t√(E/F_y)(1 − 0.38/(b/t)·√(E/F_y)); WLB 0.305/0.738; LTB of rectangular HSS (F7.4) L_p = 0.13Er_y√(JA)/M_p, L_r = 2Er_y√(JA)/(0.7F_yS); round HSS (D/t < 0.45E/F_y) noncompact (0.021E/(D/t) + F_y)S, slender 0.33E/(D/t)·S | [C] |
+| Shear (G) | V_n = 0.6F_yA_wC_v; I web A_w = d·t_w; C_v1 (G2.1(b), k_v = 5.34) or C_v2 (G2.2); rectangular HSS A_w = 2ht, h = H − 3t, k_v = 5 (G4); round HSS F_cr = max(1.60E/(√(L_v/D)(D/t)^1.25), 0.78E/(D/t)^1.5) ≤ 0.6F_y, V_n = F_crA_g/2 (G5); weak-axis I (G6, k_v = 1.2) | [C] |
+| Combined (H1) | P_r/P_c ≥ 0.2: P_r/P_c + 8/9(M_rx/M_cx + M_ry/M_cy) ≤ 1.0 (H1-1a); otherwise P_r/(2P_c) + (M_rx/M_cx + M_ry/M_cy) ≤ 1.0 (H1-1b); H1.2 tension the same (the optional C_b increase is not used) | [V] |
+| HSS torsion | H3 (torsional strength of round/rectangular HSS, combined H3-6): not in the tool, so check it by hand | [C] |
+
+Not covered by the tool: F4/F5 (noncompact or slender webs), slender HSS webs, D/t ≥ 0.45E/F_y, tension-field action,
+singly symmetric shapes, channels, tees, angles and H3 torsion. The tool flags these cases NOT OK and does not design them.
+frame2d and frame3d `--check` remain Eurocode. Take their second-order forces into `member_check --code aisc`.
 
 ## 16. frame2d.py input schema (planar frames)
 ```jsonc
