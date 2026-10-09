@@ -17,9 +17,9 @@ Sub-commands
              K·l_avg) with EN 1993-1-1 curve c; --aisc adds AISC J4.3 block shear and J4.1/J4.4/E3.
   clampbar   membrane clamp-bar / keder-plate bolts: bolt force = n · peak · spacing (shear via keder
              bearing) or tension (plate pulled off) with prying; aluminium 6082-T6 bearing (EN 1999-1-1).
-  baseplate  mast / column base plate: compression (6.2.5 equivalent T-stub, f_jd = β_j k_j f_ck/γ_c),
-             uplift (T-stub Table 6.2, prying decided by L_b vs L_b*), shear by friction (C_f,d·N_c) +
-             anchor shear (α_bc). CHS or I column.
+  baseplate  mast / column base plate: compression (6.2.5 equivalent T-stub, f_jd = β_j k_j α_cc f_ck/γ_c),
+             uplift (T-stub Table 6.2, prying decided by L_b vs L_b*; CHS with a ring of anchors: SCI P358 6.8
+             ring-flange rules), shear by friction (C_f,d·N_c) + anchor shear (α_bc). CHS or I column.
   anchor     EN 1992-4 cast-in headed anchors (rectangular group): tension (steel, pull-out, concrete cone,
              splitting), shear (steel without / with lever arm, pry-out, concrete edge with ψ factors) and
              tension-shear interaction (steel exponent 2, concrete 1.5).
@@ -334,21 +334,65 @@ def leff_extension(mx, ex, e, w, bp):
     return {"cp": cp, "nc": nc, "leff1": min(cp, nc), "leff2": nc}
 
 
+def disc_in_rect(R, hx, hy):
+    """Area of a disc of radius R (centre at the origin) inside the rectangle |x| <= hx, |y| <= hy (exact)."""
+    if R <= 0:
+        return 0.0
+
+    def F(x):                                            # ∫ sqrt(R² - x²) dx
+        x = min(max(x, -R), R)
+        return 0.5 * (x * math.sqrt(max(R * R - x * x, 0.0)) + R * R * math.asin(x / R))
+
+    def quadrant(a, b):                                  # area of {0<=x<=a, 0<=y<=b, x²+y²<=R²}
+        xe = min(a, R)
+        if R <= b:
+            return F(xe) - F(0.0)
+        xs = math.sqrt(R * R - b * b)                    # the circle leaves the line y = b at x = xs
+        if xs >= xe:
+            return b * xe
+        return b * xs + F(xe) - F(xs)
+
+    return 4.0 * quadrant(hx, hy)
+
+
 def bearing_area(col, c, B, H, D=0.0, tc=0.0, bf=0.0, hc=0.0, tf=0.0, tw=0.0):
     """Effective area of the T-stubs in compression (EN 1993-1-8 6.2.5, Fig. 6.4), clipped to the plate B×H.
     I: Aeff = min(B, b+2c)·min(H, h+2c) - max(min(B, b+2c) - tw - 2c, 0)·max(h - 2tf - 2c, 0)
-    (Wald, JRC Eurocodes workshop 2014, simple base plate example). CHS: annulus of width tc + 2c."""
+    (Wald, JRC Eurocodes workshop 2014, simple base plate example).
+    CHS: annulus of width tc + 2c around the wall, π(D - tc)(tc + 2c), a full disc π(D + 2c)²/4 when the inner
+    projection overlaps (c > D/2 - tc), intersected exactly with the plate B×H (SCI P358 Check 2 and Table G.33)."""
     if col.upper() == "CHS":
         Ro, Ri = D / 2 + c, max(D / 2 - tc - c, 0.0)
-        Ro = min(Ro, B / 2, H / 2)
-        return math.pi * (Ro ** 2 - Ri ** 2)
+        return disc_in_rect(Ro, B / 2, H / 2) - disc_in_rect(Ri, B / 2, H / 2)
     bb, hh = min(B, bf + 2 * c), min(H, hc + 2 * c)
     return bb * hh - max(bb - tw - 2 * c, 0.0) * max(hc - 2 * tf - 2 * c, 0.0)
 
 
+def ring_flange(D, tc, r2, e2, tp, fy, n, FtRd, gM0=None):
+    """CHS flange (base) plate in tension with n bolts equally spaced on a circle of radius r2 around the tube:
+    SCI P358 (2011) §6.8 Checks 2-4 (semi-empirical rules after the CIDECT design guide). N, mm, MPa.
+    Check 2 plate: N = tp² fy π f3/(2γM0); Check 3 plate + bolts (prying): n F_t,Rd/(1 - 1/f3 + 1/(f3 ln(r1/r2)));
+    Check 4 bolts: n F_t,Rd. f3 = (k3 + sqrt(k3² - 4k1))/(2k1), k1 = ln(r2/r3), k3 = k1 + 2, r3 = (D - tc)/2,
+    r1 = r2 + e_eff, e_eff = min(e2, 1.25 e1), e1 = r2 - D/2."""
+    gM0 = g("steel.gM0") if gM0 is None else gM0
+    e1 = r2 - D / 2
+    r3 = (D - tc) / 2
+    k1 = math.log(r2 / r3)
+    k3 = k1 + 2
+    f3 = (k3 + math.sqrt(k3 * k3 - 4 * k1)) / (2 * k1)
+    eeff = min(e2, g("connections.cidect_ring_eeff_per_e1") * e1)
+    r1 = r2 + eeff
+    N2 = tp ** 2 * fy * math.pi * f3 / (2 * gM0)
+    N3 = n * FtRd / (1 - 1 / f3 + 1 / (f3 * math.log(r1 / r2))) / gM0
+    return {"e1": e1, "r1": r1, "r2": r2, "r3": r3, "k1": k1, "k3": k3, "f3": f3, "eeff": eeff,
+            "N_plate": N2, "N_plate_bolts": N3, "N_bolts": n * FtRd}
+
+
 def baseplate(a):
     gM0, gM2, gC = g("steel.gM0"), g("steel.gM2"), g("steel.gC")
-    fjd = g("connections.beta_j") * a.kj * a.fck / gC
+    acc = getattr(a, "alpha_cc", None)
+    acc = g("connections.alpha_cc") if acc is None else acc
+    fjd = g("connections.beta_j") * a.kj * acc * a.fck / gC
     c = a.tp * math.sqrt(a.fy / (3 * fjd * gM0))
     rows = []
     if a.col.upper() == "CHS":
@@ -358,7 +402,7 @@ def baseplate(a):
         Aeff = bearing_area("I", c, a.B, a.H, bf=a.bf, hc=a.hc, tf=a.tfc, tw=a.twc)
         lever_face = a.hc / 2
     NcRd = Aeff * fjd / 1e3
-    info = {"fjd": fjd, "c": c, "Aeff": Aeff, "NcRd": NcRd}
+    info = {"fjd": fjd, "c": c, "Aeff": Aeff, "NcRd": NcRd, "alpha_cc": acc}
     if a.Nc:
         rows.append(row(f"compression: A_eff={Aeff / 1e3:.1f}e3 mm², c={c:.0f} mm, f_jd={fjd:.1f} MPa [kN]",
                         a.Nc, NcRd, "6.2.5 / 6.2.8.2"))
@@ -366,27 +410,40 @@ def baseplate(a):
         fyb, fub, _ = BOLT[a.anchor_grade]
         As = AS.get(int(a.anchor_d), 0.78 * math.pi * a.anchor_d ** 2 / 4)
         FtRd = g("steel.k2_thread") * fub * As / gM2                           # N
-        if a.layout == "corners":   # anchors at plate corners, diagonal lever arm
+        if a.layout == "ring":      # anchors equally spaced on a circle around a CHS (P358 §6.8 / CIDECT)
+            if a.col.upper() != "CHS":
+                raise SystemExit("--layout ring needs --col CHS")
+            r2 = min(a.B, a.H) / 2 - a.edge
+            ring = ring_flange(a.D, a.tc, r2, a.edge, a.tp, a.fy, a.anchors, FtRd, gM0)
+            info.update({"ring": ring})
+            rows.append(row(f"anchor bolt tension {a.anchor_grade} M{a.anchor_d:g} [kN/bolt]", a.Nt / a.anchors,
+                            FtRd / 1e3, "T3.4"))
+            tag = f"r2={r2:.0f}, e1={ring['e1']:.1f}, f3={ring['f3']:.2f}"
+            rows.append(row(f"ring plate in bending ({tag}) [kN]", a.Nt, ring["N_plate"] / 1e3, "P358 6.8 Check 2"))
+            rows.append(row(f"ring plate + anchors with prying (r1={ring['r1']:.0f}) [kN]", a.Nt,
+                            ring["N_plate_bolts"] / 1e3, "P358 6.8 Check 3"))
+        elif a.layout == "corners":   # anchors at plate corners, diagonal lever arm
             bolt_r = math.hypot(a.B / 2 - a.edge, a.H / 2 - a.edge)
         else:                       # anchors on the plate sides, opposite the column faces
             bolt_r = min(a.B, a.H) / 2 - a.edge
-        m = max(bolt_r - lever_face - 0.8 * a.weld * math.sqrt(2), 10.0)
-        le = leff_single_row(m, a.edge)
-        # one T-stub = one anchor each side of the column wall -> resistances for 2 anchors, halved per anchor
-        T = tstub(le["leff1"], le["leff2"], m, a.edge, a.tp, a.fy, 2 * FtRd)
-        Lb = a.Lb if a.Lb else 8 * a.anchor_d + a.grout + a.tp + a.washer + 0.5 * 0.8 * a.anchor_d
-        Lb_star = g("connections.Lb_star_coeff") * m ** 3 * As * 1 / (le["leff1"] * a.tp ** 3)
-        prying = Lb <= Lb_star
-        per = a.Nt / a.anchors
-        info.update({"m": m, "leff": le, "tstub": T, "Lb": Lb, "Lb_star": Lb_star, "prying": prying})
-        rows.append(row(f"anchor bolt tension {a.anchor_grade} M{a.anchor_d:g} [kN/bolt]", per, FtRd / 1e3, "T3.4"))
-        tag = f"m={m:.0f}, l_eff={le['leff1']:.0f}, L_b={Lb:.0f} {'≤' if prying else '>'} L_b*={Lb_star:.0f}"
-        if prying:
-            rows.append(row(f"plate mode 1 ({tag}) [kN/bolt]", per, T["F1"] / 2e3, "6.2.4 T6.2"))
-            rows.append(row("plate mode 2 (bolt + plate with prying) [kN/bolt]", per, T["F2"] / 2e3, "6.2.4 T6.2"))
-        else:
-            rows.append(row(f"plate mode 1-2, no prying ({tag}) [kN/bolt]", per, T["F12"] / 2e3, "6.2.4 T6.2"))
-        rows.append(row("T-stub mode 3 (bolt failure) [kN/bolt]", per, T["F3"] / 2e3, "6.2.4 T6.2"))
+        if a.layout != "ring":
+            m = max(bolt_r - lever_face - 0.8 * a.weld * math.sqrt(2), 10.0)
+            le = leff_single_row(m, a.edge)
+            # one T-stub = one anchor each side of the column wall -> resistances for 2 anchors, halved per anchor
+            T = tstub(le["leff1"], le["leff2"], m, a.edge, a.tp, a.fy, 2 * FtRd)
+            Lb = a.Lb if a.Lb else 8 * a.anchor_d + a.grout + a.tp + a.washer + 0.5 * 0.8 * a.anchor_d
+            Lb_star = g("connections.Lb_star_coeff") * m ** 3 * As * 1 / (le["leff1"] * a.tp ** 3)
+            prying = Lb <= Lb_star
+            per = a.Nt / a.anchors
+            info.update({"m": m, "leff": le, "tstub": T, "Lb": Lb, "Lb_star": Lb_star, "prying": prying})
+            rows.append(row(f"anchor bolt tension {a.anchor_grade} M{a.anchor_d:g} [kN/bolt]", per, FtRd / 1e3, "T3.4"))
+            tag = f"m={m:.0f}, l_eff={le['leff1']:.0f}, L_b={Lb:.0f} {'≤' if prying else '>'} L_b*={Lb_star:.0f}"
+            if prying:
+                rows.append(row(f"plate mode 1 ({tag}) [kN/bolt]", per, T["F1"] / 2e3, "6.2.4 T6.2"))
+                rows.append(row("plate mode 2 (bolt + plate with prying) [kN/bolt]", per, T["F2"] / 2e3, "6.2.4 T6.2"))
+            else:
+                rows.append(row(f"plate mode 1-2, no prying ({tag}) [kN/bolt]", per, T["F12"] / 2e3, "6.2.4 T6.2"))
+            rows.append(row("T-stub mode 3 (bolt failure) [kN/bolt]", per, T["F3"] / 2e3, "6.2.4 T6.2"))
     if a.V:
         fyb, fub, av = BOLT[a.anchor_grade]
         av = alpha_v(a.anchor_grade)
@@ -698,6 +755,8 @@ def main(argv=None):
     p.add_argument("--fy", type=float, default=355.0)
     p.add_argument("--fck", type=float, default=30.0)
     p.add_argument("--kj", type=float, default=1.5, help="concentration factor √(A_c1/A_c0) ≤ 3 (1.0 conservative)")
+    p.add_argument("--alpha-cc", type=float, default=None,
+                   help="α_cc of EN 1992-1-1 3.1.6 in f_cd (default register connections.alpha_cc = 1.0; UK NA 0.85)")
     p.add_argument("--Nc", type=float, default=0.0, help="compression [kN] (compression combination)")
     p.add_argument("--Nt", type=float, default=0.0,
                    help="uplift [kN] (uplift combination; if given, no friction is credited for --V)")
@@ -707,7 +766,9 @@ def main(argv=None):
     p.add_argument("--anchor-grade", default="8.8", choices=list(BOLT))
     p.add_argument("--edge", type=float, default=60.0, help="anchor axis to plate edge [mm]")
     p.add_argument("--weld", type=float, default=6.0, help="column-to-plate weld throat [mm]")
-    p.add_argument("--layout", choices=["corners", "sides"], default="corners", help="anchor position on the plate")
+    p.add_argument("--layout", choices=["corners", "sides", "ring"], default="corners",
+                   help="anchor position: corners / sides (T-stub per anchor) or ring = --anchors equally spaced on "
+                        "a circle of radius min(B,H)/2 - edge around a CHS (SCI P358 6.8 / CIDECT ring flange)")
     p.add_argument("--Lb", type=float, default=None, help="anchor elongation length [mm] (default 8d+grout+tp+washer+0.4d)")
     p.add_argument("--grout", type=float, default=30.0, help="grout thickness for the default L_b [mm]")
     p.add_argument("--washer", type=float, default=5.0, help="washer thickness for the default L_b [mm]")
@@ -790,9 +851,21 @@ def main(argv=None):
         return report("", rows)
     rows, info = baseplate(a)
     print(f"Base plate {a.B:g}x{a.H:g}x{a.tp:g} S{int(a.fy)} on C{a.fck:g}; column {a.col}; "
-          f"{CF.tag('connections.beta_j')}, k_j={a.kj:g}, {CF.tag('connections.Cfd_sand_cement')}")
-    print("Assumptions: f_jd = β_j k_j f_ck/γ_c (α_cc = 1); uplift per anchor as a T-stub with one anchor each side "
-          "of the column wall, l_eff = min(2πm, 4m+1.25e); prying from L_b vs L_b*; rigid plate, no plate FE.")
+          f"{CF.tag('connections.beta_j')}, k_j={a.kj:g}, α_cc={info['alpha_cc']:g} "
+          f"[{'project' if a.alpha_cc is not None else CF.status('connections.alpha_cc')}], "
+          f"{CF.tag('connections.Cfd_sand_cement')}")
+    print("Assumptions: f_jd = β_j k_j α_cc f_ck/γ_c; compression on the equivalent T-stub area (CHS: annulus "
+          "π(D−t)(t+2c), full disc if the inner projections overlap, intersected exactly with the plate); rigid "
+          "plate, no plate FE.")
+    if a.Nt and a.layout == "ring":
+        print("Uplift (ring): SCI P358 6.8 / CIDECT ring-flange rules for a CHS with bolts equally spaced around it "
+              "(≥ 4); e2 = --edge to the nearest plate edge; prying assumed (conservative for long anchors).")
+        if a.anchors < 4:
+            print("WARNING: the ring-flange rules need at least 4 equally spaced anchors (P358 6.8 Check 1).")
+    elif a.Nt:
+        print("Uplift: per anchor as a T-stub with one anchor each side of the column wall, l_eff = min(2πm, "
+              "4m+1.25e) (EN 1993-1-8 Table 6.4 pattern, not a CHS-specific yield-line solution); prying from "
+              "L_b vs L_b*. For anchors on a circle around a CHS use --layout ring.")
     print("Anchor embedment / concrete breakout / pull-out: use the `anchor` sub-command (EN 1992-4).")
     return report("", rows)
 

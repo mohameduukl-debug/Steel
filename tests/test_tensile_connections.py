@@ -480,6 +480,221 @@ class TestPinWorkedExample(unittest.TestCase):
         self.assertAlmostEqual(rows["D5.2 a >= 1.33 beff [mm]"][1], 74.48, places=2)
         self.assertAlmostEqual(rows["D5.2 w >= 2 beff + d [mm]"][1], 152.0)
 
+    def test_cheek_sls_share_when_cheek_equals_lug(self):
+        # regression: the SLS bearing share of a cheek is F_ser/2 also when fork_t == t (was F_ser)
+        rows = {r[0]: r for r in PIN.en1993(250, 170, 40, 41, 20, 50, 35, 355, 490, 640, 800, 20, 2, True)}
+        self.assertAlmostEqual(rows["Bearing SLS (replaceable pin), fork cheek (each) [kN]"][1], 85.0)
+        self.assertAlmostEqual(rows["Bearing SLS (replaceable pin), lug plate [kN]"][1], 170.0)
+
+
+def _pin(F, d, t, a, c, fy, fyp, fup, gM0=1.0, gM2=1.0, Fser=None, d0=None, replaceable=False):
+    """EN 1993-1-8 pin rows keyed by name (lug = middle plate b = t, cheeks a, gap c)."""
+    rows = PIN.en1993(F, F if Fser is None else Fser, d, d + 1 if d0 is None else d0, t, 1e3, 1e3, fy, 510,
+                      fyp, fup, a, c, replaceable, gM0=gM0, gM2=gM2)
+    return {r[0]: r for r in rows}
+
+
+class TestPinPublishedEN(unittest.TestCase):
+    """EN 1993-1-8 §3.13 Table 3.10 against published calculations.
+    CONDE = J. Conde, L. S. da Silva, T. Tankova, R. Simões, T. Abecasis, 'Design of pin connections between steel
+    members', J. Constr. Steel Res. 201 (2023) 107752, open access https://oa.upm.es/85661/ (§3 counterexample,
+    Tables 2-4). LBV = Landesamt für Bauen und Verkehr Brandenburg, Bautechnisches Prüfamt, Tipp 22/05
+    'Bemessungswerte für Bolzenverbindungen nach DIN EN 1993-1-8', https://lbv.brandenburg.de/sixcms/media.php/9/bautechnik_Tipp_22-05.pdf."""
+
+    def test_conde_counterexample(self):
+        # CONDE §3: S355 (f_y 355, f_u 510), d = 16, a = 8, b = 12, c = 5: F_v,Rd = 49.2 kN per plane,
+        # M_Rd = 1.5 W_el f_yp/γM0 = 214 kN·mm, F_Rd,pin = 8 M_Rd/(b + 4c + 2a) = 35.7 kN
+        r = _pin(35.7, 16, 12, 8, 5, 355, 355, 510, gM2=1.25)
+        self.assertLess(rel(r["Pin shear per plane [kN]"][2], 49.2), 0.002)
+        self.assertLess(rel(r["Pin bending [kNm]"][2] * 1e3, 214.0), 0.002)
+        self.assertLess(abs(r["Pin bending [kNm]"][3] - 1.0), 0.002)             # F = 35.7 kN exhausts M_Rd
+
+    def _proto(self, d, fyp, fup, gM2=1.0):
+        # CONDE Tables 2-3 (measured): two 10.1 mm lugs (cheeks, f_y 395.27), middle plate b = 15, gap c = 2
+        # (Fig. 5); lever b + 4c + 2a = 43.2 mm; f_y for bearing = min(pin, plate)
+        return lambda F: _pin(F, d, 15, 10.1, 2, 395.27, fyp, fup, gM2=gM2)
+
+    def _published(self, pin, Fv, Fb, FM, FMV):
+        r = pin(100.0)
+        self.assertLess(rel(2 * r["Pin shear per plane [kN]"][2], Fv), 0.005)            # 2 shear planes
+        self.assertLess(rel(2 * r["Bearing ULS, fork cheek (each) [kN]"][2], Fb), 0.005)  # 2 × 10.1 mm lugs
+        self.assertLess(rel(100.0 / r["Pin bending [kNm]"][3], FM), 0.006)               # F at M_Ed = M_Rd
+        F = FMV
+        for _ in range(30):                                                           # F at interaction = 1
+            F /= math.sqrt(pin(F)["Pin shear + bending interaction [-]"][3])
+        self.assertLess(rel(F, FMV), 0.006)
+
+    def test_conde_prototype1_table4(self):
+        # P1: pin 35.8 mm (CK45, f_y 321.16, f_u 670.84), γ = 1: F_v,Rd 808.1, F_b,Rd 347.9, F(M_Rd) 399.9,
+        # F(M_Rd, F_v,Rd) 358.4 kN
+        self._published(self._proto(35.8, 321.16, 670.84), 808.1, 347.9, 399.9, 358.4)
+
+    def test_conde_prototype2_table4(self):
+        # P2: pin 19.8 mm (f_y 457.06, f_u 777.65), γ = 1: 286.8 / 237.4 / 96.4 / 91.4 kN; γ code (γM2 1.25):
+        # F_v,Rd 229.4, F(M_Rd, F_v,Rd) 88.9 kN
+        self._published(self._proto(19.8, 457.06, 777.65), 286.8, 237.4, 96.4, 91.4)
+        pin = self._proto(19.8, 457.06, 777.65, gM2=1.25)
+        self.assertLess(rel(2 * pin(100.0)["Pin shear per plane [kN]"][2], 229.4), 0.005)
+        F = 88.9
+        for _ in range(30):
+            F /= math.sqrt(pin(F)["Pin shear + bending interaction [-]"][3])
+        self.assertLess(rel(F, 88.9), 0.006)
+
+    def test_brandenburg_tipp_22_05_design_values(self):
+        # LBV Tipp 22/05 charts (γM2 1.25, γM0 1.0): F_v,Rd [kN] d16/f_up490 47.29, d20/490 73.89, d24/490 106.40,
+        # d20/360 54.29, d24/360 78.17; F_b,Rd/t [kN/mm] d24/f_y355 12.78, d20/355 10.65, d24/235 8.46;
+        # M_Rd [kNm] d24/f_yp355 0.723, d20/355 0.418, d24/235 0.478
+        for d, fup, v in ((16, 490, 47.29), (20, 490, 73.89), (24, 490, 106.40), (20, 360, 54.29), (24, 360, 78.17)):
+            self.assertAlmostEqual(_pin(10, d, 1, 1, 0, 355, 355, fup, gM2=1.25)["Pin shear per plane [kN]"][2], v,
+                                   delta=0.006)
+        for d, fy, v in ((24, 355, 12.78), (20, 355, 10.65), (24, 235, 8.46)):
+            self.assertAlmostEqual(_pin(10, d, 1, 1, 0, fy, 640, 800)["Bearing ULS, lug plate [kN]"][2], v,
+                                   delta=0.006)
+        for d, fyp, v in ((24, 355, 0.723), (20, 355, 0.418), (24, 235, 0.478)):
+            self.assertAlmostEqual(_pin(10, d, 1, 1, 0, 355, fyp, 510)["Pin bending [kNm]"][2], v, delta=0.0006)
+
+    def test_contact_stress_is_hertz_line_contact(self):
+        # Eq. (3.15) constant 0.591 = 1/sqrt(π(1 - ν²)), ν = 0.3: Hertz line contact of a cylinder in a conforming
+        # hole p0 = sqrt(P'E*/(πR)) with E* = E/(2(1 - ν²)), 1/R = 2/d - 2/d0 (K. L. Johnson, Contact Mechanics,
+        # CUP 1985, §4.2) and d·d0 ≈ d²
+        self.assertAlmostEqual(1 / math.sqrt(math.pi * (1 - 0.3 ** 2)), 0.591, places=3)
+        E, F, d, d0, t = 210000.0, 170e3, 40.0, 41.0, 20.0
+        Estar, R = E / (2 * (1 - 0.3 ** 2)), 1 / (2 / d - 2 / d0)
+        p0 = math.sqrt(F / t * Estar / (math.pi * R)) * math.sqrt(d0 / d)          # d·d0 -> d²
+        self.assertLess(rel(PIN.contact_stress(F, d, d0, t, E), p0), 0.001)
+        # F_b,Ed,ser per plate: cheeks carry F_ser/2; f_h,Rd = 2.5 min(f_y, f_yp)/γM6,ser
+        r = {x[0]: x for x in PIN.en1993(250, 170, 40, 41, 20, 50, 35, 355, 490, 300, 400, 15, 2, True)}
+        self.assertAlmostEqual(r["Contact stress sigma_h,Ed (fork cheek) [MPa]"][1],
+                               PIN.contact_stress(85e3, 40, 41, 15, CF.get("steel.E")), places=6)
+        self.assertAlmostEqual(r["Contact stress sigma_h,Ed (lug) [MPa]"][2], 2.5 * 300 / CF.get("steel.gM6ser"))
+
+
+class TestPinPublishedAISC(unittest.TestCase):
+    """AISC Design Examples v15.1 (Companion to the AISC Steel Construction Manual, Vol. 1),
+    https://www.aisc.org/media/q5fcgxxu/v151_vol-1_design-examples.pdf, Examples D.7 and D.8 (printed values as
+    reproduced in the University of Mustansiriyah lecture notes 'Pin-connected members' / 'Eye bars member',
+    https://uomustansiriyah.edu.iq/media/lectures/5/5_2021_03_15!03_29_38_PM.pdf and ...03_30_02_PM.pdf)."""
+
+    def test_D7_pin_connected_tension_member(self):
+        # A36 (F_y 36, F_u 58 ksi), t = 1/2, w = 4.25, d = 1, d_h = 1 1/32, a = 2.25 in; P_u 20.8 / P_a 16.0 kips.
+        # b = (4.25 - 1.03)/2 = 1.61 < 2t + 0.63 = 1.63 -> b_eff = 1.61 in; LRFD φP_n: rupture 70.0, shear 71.8,
+        # bearing 24.3 (governs), yielding 68.9 kips; ASD P_n/Ω: 46.7, 47.9, 16.2, 45.8 kips
+        args = (1.0 * IN, (1 + 1 / 32) * IN, 0.5 * IN, 2.25 * IN, 4.25 * IN, 36 * KSI, 58 * KSI)
+        for method, Pr, pub in (("LRFD", 20.8, (70.0, 71.8, 24.3, 68.9)), ("ASD", 16.0, (46.7, 47.9, 16.2, 45.8))):
+            rows = PIN.aisc(Pr * KIP / 1e3, *args, method=method)
+            for r, v in zip(rows[:4], pub):
+                self.assertLess(rel(r[2] * 1e3 / KIP, v), 0.004, (method, r[0]))
+            gov = min(rows[:4], key=lambda r: r[2])
+            self.assertTrue(gov[0].startswith("J7"))                                 # bearing governs
+            self.assertLess(gov[3], 1.0)                                             # 24.3 > 20.8, 16.2 > 16.0
+        rows = {r[0]: r for r in PIN.aisc(92.5, *args)}
+        self.assertLess(rel(rows["D5.2 a >= 1.33 beff [mm]"][1] / IN, 1.33 * 1.61), 0.002)     # 2.14 in
+        self.assertLess(rel(rows["D5.2 w >= 2 beff + d [mm]"][1] / IN, 2 * 1.61 + 1.0), 0.002)  # 4.22 in
+
+    def test_D8_eyebar(self):
+        # A36, t = 5/8, w = 3.00, b = 2.23, d = 3.00, d_h = 3 1/32, R = 8.00 in; P_u 54.0 / P_a 40.0 kips.
+        # A_g = 3.00 × 0.625 = 1.875 in², P_n = 67.5 kips: φP_n = 60.8 kips, P_n/Ω = 40.4 kips (governs, 0.99)
+        args = (3.0 * IN, (3 + 1 / 32) * IN, 0.625 * IN, 3.0 * IN, 2.23 * IN, 8.0 * IN, 36 * KSI)
+        for method, Pr, pub in (("LRFD", 54.0, 60.75), ("ASD", 40.0, 40.42)):
+            rows = PIN.aisc_eyebar(Pr * KIP / 1e3, *args, method=method)
+            self.assertLess(rel(rows[0][2] * 1e3 / KIP, pub), 0.002, method)
+            self.assertTrue(all(r[3] <= 1.0 for r in rows), method)                  # all D6.2 proportions met
+        rows = {r[0]: r for r in PIN.aisc_eyebar(240, *args)}
+        self.assertLess(rel(rows["D6.2 transition radius R >= head diameter d0 + 2b [mm]"][1] / IN, 7.49), 0.002)
+        self.assertAlmostEqual(rows["D6.2 pin d >= 7/8 w [mm]"][1] / IN, 2.625)
+        self.assertAlmostEqual(rows["D6.2 b >= 2/3 w [mm]"][1] / IN, 2.0, places=3)
+
+
+# SCI P358 (2011) Table G.33, column bases for CHS 273 (lightest section of the range; t = 5.0 mm is fixed by the
+# 4-figure value 1376 kN quoted in Example 4), S275 plates: (plate B = H, t_p, [N_Rd for C16 C20 C25 C30 C35] kN)
+P358_G33_CHS273 = [
+    (400, 20, [991, 1110, 1250, 1380, 1490]), (400, 25, [1170, 1360, 1550, 1700, 1840]),
+    (400, 30, [1300, 1530, 1790, 2010, 2200]), (400, 35, [1380, 1660, 1960, 2230, 2480]),
+    (400, 40, [1430, 1740, 2090, 2400, 2690]), (450, 25, [1230, 1380, 1550, 1700, 1840]),
+    (450, 30, [1460, 1650, 1850, 2030, 2200]), (450, 35, [1610, 1880, 2140, 2350, 2550]),
+    (450, 40, [1710, 2030, 2380, 2670, 2900]), (450, 45, [1760, 2120, 2520, 2870, 3170]),
+    (500, 25, [1230, 1380, 1550, 1700, 1840]), (500, 30, [1470, 1650, 1850, 2030, 2200]),
+    (500, 40, [1900, 2180, 2440, 2680, 2900]), (500, 50, [2100, 2500, 2930, 3270, 3540]),
+    (500, 60, [2220, 2700, 3230, 3710, 4150]), (600, 30, [1470, 1650, 1850, 2030, 2200]),
+    (600, 40, [1940, 2180, 2440, 2680, 2900]), (600, 50, [2390, 2660, 2980, 3270, 3540]),
+    (600, 60, [2810, 3220, 3570, 3910, 4230]), (600, 70, [3020, 3560, 4110, 4490, 4830]),
+    (700, 40, [1940, 2180, 2440, 2680, 2900]), (700, 50, [2390, 2660, 2980, 3270, 3540]),
+    (700, 60, [2920, 3220, 3570, 3910, 4230]), (700, 70, [3420, 3750, 4130, 4490, 4830])]
+
+
+class TestCHSBasePlateP358(unittest.TestCase):
+    """SCI P358 'Joints in steel construction: Simple joints to Eurocode 3' (2011),
+    https://www.steelconstruction.info/images/a/a9/SCI_P358.pdf: §7.5 Check 2 (CHS effective area π(d - t)(t + 2c),
+    0.25π(d + 2c)² with overlap), Example 4 'Column base - CHS', Table G.33 (CHS bases), §6.8 and Example 5 'CHS
+    tension splice' (ring-flange rules after the CIDECT design guide). UK NA: α_cc = 0.85, f_jd = β_j α f_cd with
+    α = 1.5; S275 f_y = 275 / 265 / 255 / 245 MPa for t ≤ 16 / 40 / 63 / 80 mm (EN 10025-2)."""
+
+    @staticmethod
+    def _ns(**k):
+        d = dict(col="CHS", D=273.0, tc=5.0, hc=0, bf=0, tfc=0, twc=0, B=400, H=400, tp=20, fy=265, fck=30, kj=1.5,
+                 alpha_cc=0.85, Nc=1.0, Nt=0.0, V=0.0, anchors=8, anchor_d=24, anchor_grade="8.8", edge=50,
+                 weld=6, layout="ring", Lb=None, grout=30, washer=5)
+        d.update(k)
+        return types.SimpleNamespace(**d)
+
+    @staticmethod
+    def _fy(tp):
+        return 275 if tp <= 16 else 265 if tp <= 40 else 255 if tp <= 63 else 245
+
+    def test_example4_column_base_chs(self):
+        # Example 4: C30, f_jd = 1.5 × 2/3 × 0.85 × 30/1.5 = 17 N/mm²; Table G.33 (273 lightest, 400×400×20)
+        # 'Resistance given in the tables is 1376 kN'
+        rows, info = J.baseplate(self._ns())
+        self.assertAlmostEqual(info["fjd"], 17.0, places=6)
+        self.assertLess(rel(info["NcRd"], 1376.0), 0.001)
+        # 273×10 detailed check: A_req = 1400e3/17 -> c = 45 mm; t_p,min = c √(3 f_jd γM0/f_y) = 20 mm (265 MPa)
+        Areq = 1400e3 / 17.0
+        c = (Areq / (math.pi * (273 - 10)) - 10) / 2
+        self.assertAlmostEqual(c, 45.0, delta=0.2)
+        rows, info = J.baseplate(self._ns(tc=10.0, tp=c * math.sqrt(3 * 17.0 / 265)))
+        self.assertLess(rel(info["NcRd"], 1400.0), 1e-9)                         # inverse of the P358 steps
+        self.assertEqual(math.ceil(c * math.sqrt(3 * 17.0 / 265)), 20)             # 'tp,min = 20 mm' (19.7)
+        rows, info = J.baseplate(self._ns(tc=10.0, tp=20))
+        self.assertGreaterEqual(info["NcRd"], 1400.0)                              # tp = 20 mm ≥ 20 mm O.K.
+
+    def test_table_G33_chs273_all_120_values(self):
+        # covers no clipping, the annulus cut by the plate edges (42 values) and the inner overlap (29 values);
+        # the former radius-clip model was up to 20 % low on this set
+        worst = 0.0
+        for B, tp, vals in P358_G33_CHS273:
+            for fck, v in zip((16, 20, 25, 30, 35), vals):
+                rows, info = J.baseplate(self._ns(B=B, H=B, tp=tp, fy=self._fy(tp), fck=fck))
+                worst = max(worst, rel(info["NcRd"], v))
+        self.assertLess(worst, 0.005)                                              # 3 significant figures
+
+    def test_disc_in_rect_closed_forms(self):
+        self.assertAlmostEqual(J.disc_in_rect(50, 100, 100), math.pi * 2500)
+        self.assertAlmostEqual(J.disc_in_rect(150, 100, 100), 4e4)
+        R, h = 104.66, 100.0                                                         # four circular segments cut off
+        seg = R * R * math.acos(h / R) - h * math.sqrt(R * R - h * h)
+        self.assertAlmostEqual(J.disc_in_rect(R, h, h), math.pi * R * R - 4 * seg, places=6)
+        self.assertAlmostEqual(J.disc_in_rect(R, h, 1e6), math.pi * R * R - 2 * seg, places=6)
+
+    def test_example5_ring_flange_uplift(self):
+        # Example 5: CHS 273×6.3, 8 × M24 8.8 on a 380 mm circle, e1 = 53.5, e2 = 50, t_p = 20 (f_y 265):
+        # r2 = 190, r3 = 133.4, k1 = 0.354, f3 = 6.19; plate 1030 kN; plate + bolts 1061 kN (with F_t,Rd = 203);
+        # bolts 8 × 203 = 1624 kN
+        rows, info = J.baseplate(self._ns(D=273.0, tc=6.3, B=480, H=480, Nc=0.0, Nt=750.0))
+        ring = info["ring"]
+        self.assertAlmostEqual(ring["r2"], 190.0)
+        self.assertAlmostEqual(ring["e1"], 53.5)
+        self.assertAlmostEqual(ring["r1"], 240.0)
+        self.assertAlmostEqual(ring["r3"], 133.35)
+        self.assertAlmostEqual(ring["k1"], 0.354, delta=0.0005)
+        self.assertAlmostEqual(ring["f3"], 6.19, delta=0.005)
+        self.assertLess(rel(ring["N_plate"] / 1e3, 1030.0), 0.002)
+        FtRd = 0.9 * 800 * 353 / 1.25
+        self.assertLess(rel(ring["N_plate_bolts"] / 1e3 * 203.0 / (FtRd / 1e3), 1061.0), 0.001)   # with 203 kN
+        self.assertLess(rel(ring["N_plate_bolts"] / 1e3, 1061.0), 0.003)                           # unrounded
+        self.assertLess(rel(ring["N_bolts"] / 1e3, 1624.0), 0.002)
+        names = [r[0] for r in rows]
+        self.assertTrue(any("ring plate in bending" in n for n in names))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -27,13 +27,19 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import factors as CF  # noqa: E402  central code-factor register (V/C/U tagged)
 
 
+def contact_stress(Fser_N, d, d0, t, E):
+    """EN 1993-1-8 Eq. (3.15): sigma_h,Ed = 0.591 sqrt(E F_b,Ed,ser (d0 - d) / (d^2 t)) [MPa], forces in N."""
+    return 0.591 * math.sqrt(E * Fser_N * (d0 - d) / (d * d * t))
+
+
 def en1993(F, Fser, d, d0, t, a_lug, c_lug, fy, fu, fyp, fup, fork_t, gap,
            replaceable, gM0=None, gM2=None, gM6ser=None, E=None, n_planes=2):
+    """Return list of (check, demand, capacity, utilisation, clause). F, Fser in kN; mm, MPa.
+    The fork is the 3-plate case of EN 1993-1-8 Fig. 3.11: lug (middle plate) t = b, cheeks fork_t = a, gap c."""
     gM0 = CF.get("steel.gM0") if gM0 is None else gM0
     gM2 = CF.get("steel.gM2") if gM2 is None else gM2
     gM6ser = CF.get("steel.gM6ser") if gM6ser is None else gM6ser
     E = CF.get("steel.E") if E is None else E
-    """Return list of (check, demand, capacity, utilisation, clause)."""
     F *= 1e3
     Fser *= 1e3
     out = []
@@ -51,14 +57,15 @@ def en1993(F, Fser, d, d0, t, a_lug, c_lug, fy, fu, fyp, fup, fork_t, gap,
     Fv = F / n_planes
     FvRd = 0.6 * A * fup / gM2
     out.append(("Pin shear per plane [kN]", Fv / 1e3, FvRd / 1e3, Fv / FvRd, "T3.10"))
-    # bearing: lug plate, fork cheeks (each takes F/2), and pin; weakest fy governs
-    for name, tt, Fb in (("lug plate", t, F), ("fork cheek (each)", fork_t, F / 2)):
-        fy_min = min(fy, fyp)
+    # bearing: lug plate (F), fork cheeks (F/2 each) and pin; f_y = lower of plate and pin (Table 3.10 note)
+    fy_min = min(fy, fyp)
+    for name, tt, share in (("lug plate", t, 1.0), ("fork cheek (each)", fork_t, 0.5)):
+        Fb = share * F
         FbRd = 1.5 * tt * d * fy_min / gM0
         out.append((f"Bearing ULS, {name} [kN]", Fb / 1e3, FbRd / 1e3, Fb / FbRd, "T3.10"))
         if replaceable:
             FbRdser = 0.6 * tt * d * fy_min / gM6ser
-            Fbs = Fser if tt == t else Fser / 2
+            Fbs = share * Fser
             out.append((f"Bearing SLS (replaceable pin), {name} [kN]", Fbs / 1e3, FbRdser / 1e3, Fbs / FbRdser, "T3.10"))
     # bending
     Wel = math.pi * d ** 3 / 32
@@ -69,11 +76,13 @@ def en1993(F, Fser, d, d0, t, a_lug, c_lug, fy, fu, fyp, fup, fork_t, gap,
         MEds = Fser * (t + 4 * gap + 2 * fork_t) / 8
         MRds = 0.8 * Wel * fyp / gM6ser
         out.append(("Pin bending SLS (replaceable) [kNm]", MEds / 1e6, MRds / 1e6, MEds / MRds, "T3.10"))
-        # contact (Hertz) bearing stress, lug plate
+        # contact (Hertz) bearing stress, Eq. (3.14)-(3.16), F_b,Ed,ser = force on that plate; f_y = lower of
+        # plate and pin. 0.591 = 1/sqrt(pi (1 - nu^2)), nu = 0.3 (Hertz line contact, d.d0 ~ d^2)
         if d0 > d:
-            sig = 0.591 * math.sqrt(E * Fser * (d0 - d) / (d * d * t))
-            fhRd = 2.5 * fy / gM6ser
-            out.append(("Contact stress sigma_h,Ed (lug) [MPa]", sig, fhRd, sig / fhRd, "3.13.2"))
+            fhRd = 2.5 * fy_min / gM6ser
+            for name, tt, share in (("lug", t, 1.0), ("fork cheek", fork_t, 0.5)):
+                sig = contact_stress(share * Fser, d, d0, tt, E)
+                out.append((f"Contact stress sigma_h,Ed ({name}) [MPa]", sig, fhRd, sig / fhRd, "3.13.2(4)"))
     inter = (MEd / MRd) ** 2 + (Fv / FvRd) ** 2
     out.append(("Pin shear + bending interaction [-]", inter, 1.0, inter, "T3.10"))
     # net section of lug (tension across the hole) — plain EN 1993-1-1 check
@@ -83,31 +92,68 @@ def en1993(F, Fser, d, d0, t, a_lug, c_lug, fy, fu, fyp, fup, fork_t, gap,
     return out
 
 
+def _aisc_factors(method):
+    """(resistance factor for rupture/bearing, for yielding) as multipliers: φ (LRFD) or 1/Ω (ASD)."""
+    if method.upper() == "LRFD":
+        return CF.get("aisc.phi_pin"), CF.get("aisc.phi_yield")
+    return 1 / CF.get("connections.aisc_Omega_rupture"), 1 / CF.get("connections.aisc_Omega_yield")
+
+
 def aisc(F_kN, d, d0, t, a_lug, w_lug, fy, fu, method="LRFD"):
-    """AISC 360 D5 + J7 for the lug plate. w_lug = total plate width at the hole."""
+    """AISC 360 D5 + J7 for the pin plate (lug). w_lug = total plate width at the hole.
+    Validated against AISC Design Examples D.7 (tests/test_tensile_connections.py)."""
     F = F_kN * 1e3
-    lrfd = method.upper() == "LRFD"
+    f_r, f_y = _aisc_factors(method)
     out = []
     beff = min(2 * t + CF.get("aisc.beff_add_mm"), (w_lug - d0) / 2)
     # D5.1(a) tensile rupture on net effective area
     Pn = fu * 2 * t * beff
-    phi_p, phi_y = CF.get("aisc.phi_pin"), CF.get("aisc.phi_yield")
-    out.append(("D5.1a tensile rupture net effective area [kN]", Pn, phi_p if lrfd else 1 / 2.00))
+    out.append(("D5.1a tensile rupture net effective area [kN]", Pn, f_r))
     # D5.1(b) shear rupture on effective area
     Asf = 2 * t * (a_lug + d / 2)
     Pn = 0.6 * fu * Asf
-    out.append(("D5.1b shear rupture [kN]", Pn, phi_p if lrfd else 1 / 2.00))
+    out.append(("D5.1b shear rupture [kN]", Pn, f_r))
     # J7 bearing on projected area
     Pn = 1.8 * fy * d * t
-    out.append(("J7 bearing on projected area [kN]", Pn, phi_p if lrfd else 1 / 2.00))
+    out.append(("J7 bearing on projected area [kN]", Pn, f_r))
     # D2 yielding on gross section
     Pn = fy * w_lug * t
-    out.append(("D2 gross section yielding [kN]", Pn, phi_y if lrfd else 1 / 1.67))
+    out.append(("D2 gross section yielding [kN]", Pn, f_y))
     res = [(n, F / 1e3, p * phi / 1e3, F / (p * phi), "AISC") for n, p, phi in out]
     # D5.2 dimensional requirements
+    clr = CF.get("connections.aisc_pin_hole_clearance_mm")
     res.append(("D5.2 a >= 1.33 beff [mm]", 1.33 * beff, a_lug, 1.33 * beff / a_lug, "AISC D5.2"))
     res.append(("D5.2 w >= 2 beff + d [mm]", 2 * beff + d, w_lug, (2 * beff + d) / w_lug, "AISC D5.2"))
-    res.append(("D5.2 hole d0 <= d + 1 mm [mm]", d0, d + 1.0, d0 / (d + 1.0), "AISC D5.2"))
+    res.append((f"D5.2 hole d0 <= d + {clr:g} mm [mm]", d0, d + clr, d0 / (d + clr), "AISC D5.2"))
+    return res
+
+
+def aisc_eyebar(F_kN, d, d0, t, w, b, R, fy, method="LRFD"):
+    """AISC 360 D6 eyebar (forged or flame-cut, uniform thickness, circular head): D6.1 yielding of the body
+    (width taken ≤ 8t) and the D6.2 proportions. w = body width, b = hole edge to plate edge across the force,
+    R = transition radius (head to body). The pin itself (shear, bending) is checked separately.
+    Validated against AISC Design Examples D.8 (tests/test_tensile_connections.py)."""
+    F = F_kN * 1e3
+    _, f_y = _aisc_factors(method)
+    w_calc = min(w, CF.get("connections.aisc_eyebar_w_max_per_t") * t)
+    Pn = fy * w_calc * t
+    res = [("D6.1 eyebar body yielding (w <= 8t) [kN]", F / 1e3, Pn * f_y / 1e3, F / (Pn * f_y), "AISC D6.1")]
+    clr = CF.get("connections.aisc_pin_hole_clearance_mm")
+    Dh = d0 + 2 * b                                           # head diameter
+    d_min = CF.get("connections.aisc_eyebar_d_min_per_w") * w
+    b_lo = CF.get("connections.aisc_eyebar_b_min_per_w") * w
+    b_hi = CF.get("connections.aisc_eyebar_b_max_per_w") * w
+    res.append(("D6.2 transition radius R >= head diameter d0 + 2b [mm]", Dh, R, Dh / R, "AISC D6.2"))
+    res.append(("D6.2 pin d >= 7/8 w [mm]", d_min, d, d_min / d, "AISC D6.2"))
+    res.append((f"D6.2 hole d0 <= d + {clr:g} mm [mm]", d0, d + clr, d0 / (d + clr), "AISC D6.2"))
+    res.append(("D6.2 b >= 2/3 w [mm]", b_lo, b, b_lo / b, "AISC D6.2"))
+    res.append(("D6.2 b <= 3/4 w (larger b not credited) [mm]", b, b_hi, b / b_hi, "AISC D6.2 (info)"))
+    res.append(("D6.1 w <= 8t (larger w not credited) [mm]", w, w_calc, w / w_calc, "AISC D6.1 (info)"))
+    t_min = CF.get("connections.aisc_eyebar_t_min_mm")
+    res.append((f"D6.2 t >= {t_min:g} mm unless nuts clamp the plies [mm]", t_min, t, t_min / t, "AISC D6.2 (info)"))
+    if fy > CF.get("connections.aisc_eyebar_fy_high_MPa"):
+        k = CF.get("connections.aisc_eyebar_d0_max_per_t_high_fy")
+        res.append((f"D6.2 F_y > 485 MPa: d0 <= {k:g} t [mm]", d0, k * t, d0 / (k * t), "AISC D6.2"))
     return res
 
 
@@ -142,6 +188,9 @@ def main(argv=None):
     ap.add_argument("--replaceable", action="store_true", help="pin designed to be replaceable (SLS checks)")
     ap.add_argument("--aisc", action="store_true", help="also run AISC 360 D5/J7 lug checks")
     ap.add_argument("--method", default="LRFD", choices=["LRFD", "ASD"])
+    ap.add_argument("--eyebar-w", type=float, default=None,
+                    help="with --aisc: eyebar body width w [mm] -> AISC D6 eyebar checks (b = --c-lug)")
+    ap.add_argument("--eyebar-R", type=float, default=None, help="eyebar transition radius R [mm] (default d0 + 2b)")
     ap.add_argument("--factors", default=None, help="project code-factor file")
     a = ap.parse_args(argv)
     if a.factors:
@@ -156,13 +205,21 @@ def main(argv=None):
     print(f"Assumptions: double-shear fork (2 planes), F_Ed,ser = {Fser:.1f} kN"
           f"{' (default F/1.4)' if a.Fser is None else ''}, fork cheek {fork_t:.1f} mm"
           f"{' (default 0.6 t)' if a.fork_t is None else ''}, pin moment F(b+4c+2a)/8 (EN 1993-1-8 Fig. 3.11), "
-          "bearing f_y = lower of plate and pin, lug net section 2c·t; lug in the cable plane (no out-of-plane load).")
+          "bearing and contact-stress f_y = lower of plate and pin, lug net section 2c·t; lug in the cable plane "
+          "(no out-of-plane load); pin clearance not included in the EN checks (only through sigma_h).")
+    if a.aisc:
+        print(f"AISC factors: {CF.tag('aisc.phi_pin')}, {CF.tag('aisc.phi_yield')}, "
+              f"{CF.tag('connections.aisc_Omega_rupture')}, {CF.tag('connections.aisc_Omega_yield')}")
     w = report(rows, f"EN 1993-1-8 pin connection  F_Ed={a.F} kN  F_Ed,ser={Fser:.1f} kN  "
                      f"pin d={a.d} hole d0={a.d0} lug t={a.t} fork cheeks {fork_t:.1f} mm")
     if a.aisc:
         width = a.d0 + 2 * a.c_lug
         report(aisc(a.F, a.d, a.d0, a.t, a.a_lug, width, a.fy, a.fu, a.method),
                f"AISC 360 {a.method} lug checks (plate width at hole = {width:.0f} mm)")
+        if a.eyebar_w:
+            R = a.eyebar_R if a.eyebar_R else a.d0 + 2 * a.c_lug
+            report(aisc_eyebar(a.F, a.d, a.d0, a.t, a.eyebar_w, a.c_lug, R, a.fy, a.method),
+                   f"AISC 360 {a.method} eyebar D6 (body w = {a.eyebar_w:g} mm, b = {a.c_lug:g} mm, R = {R:g} mm)")
     print("\nNotes: fork (clevis) itself is a proprietary fitting — take its capacity from the "
           "manufacturer (matched to cable MBL). Check welds of the lug to the supporting member, "
           "out-of-plane eccentricity (lug must lie in the cable plane) and plate buckling of long "

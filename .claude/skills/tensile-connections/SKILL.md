@@ -15,15 +15,20 @@ Validation of every computational path: `reference/validation.md` (tests in `tes
 ### `scripts/pin_connection.py`: fork/eye + pin + lug (gusset)
 ```bash
 python3 pin_connection.py --F 250 --Fser 170 --d 40 --d0 41 --t 20 --a-lug 50 --c-lug 35 \
-        --pin-fy 640 --pin-fu 800 --fork-t 15 --gap 2 --replaceable [--aisc --method LRFD|ASD] [--factors p.json]
+        --pin-fy 640 --pin-fu 800 --fork-t 15 --gap 2 --replaceable [--aisc --method LRFD|ASD \
+        --eyebar-w 45 --eyebar-R 120] [--factors p.json]
 ```
 Options: `--F` ULS force [kN]; `--Fser` SLS force (default F/1.4); `--d` pin, `--d0` hole, `--t` lug [mm]; `--a-lug`
 end distance and `--c-lug` side distance from the hole edge [mm]; `--fy/--fu` plate (355/490), `--pin-fy/--pin-fu`
 pin (460/610); `--fork-t` cheek thickness (default 0.6t); `--gap` (2 mm); `--replaceable` adds the SLS checks;
-`--aisc` adds AISC 360 D5.1(a)(b), J7, D2 and D5.2 geometry (φ from the register).
+`--aisc` adds AISC 360 D5.1(a)(b), J7, D2 and D5.2 geometry (φ and ASD Ω from the register); with `--eyebar-w` (body
+width; b = `--c-lug`, `--eyebar-R` transition radius, default d₀ + 2b) also the D6 eyebar checks (body yielding with
+w ≤ 8t, R ≥ head diameter, d ≥ 7/8w, d₀ ≤ d + 1 mm, 2/3w ≤ b ≤ 3/4w, t ≥ 13 mm, d₀ ≤ 5t if F_y > 485 MPa) [V].
 EN 1993-1-8 Table 3.9 (type A geometry a, c; type B for information), Table 3.10 (pin shear per plane, bearing of lug
-and cheeks, pin bending M = F(b + 4c + 2a)/8, interaction), replaceable-pin SLS checks and contact stress
-σ_h,Ed = 0.591√(E·F_ser(d₀−d)/(d²t)) ≤ 2.5f_y/γM6,ser [C], lug net section 0.9·2c·t·f_u/γM2 [C].
+and cheeks with f_y = lower of plate and pin, pin bending M = F(b + 4c + 2a)/8, interaction), replaceable-pin SLS
+checks (cheeks take F_ser/2) and contact stress σ_h,Ed = 0.591√(E·F_b,Ed,ser(d₀−d)/(d²t)) ≤ 2.5f_y/γM6,ser for lug and
+cheeks [C], lug net section 0.9·2c·t·f_u/γM2 [C]. Validated against Conde et al. (JCSR 2023), the Brandenburg
+Prüfamt design aid and AISC Design Examples D.7/D.8 (`reference/validation.md`).
 
 ### `scripts/corner_plate.py`: force resolution and concurrency
 ```bash
@@ -45,8 +50,9 @@ python3 steel_joint_checks.py gusset --F 300 --n1 3 --n2 2 --p1 70 --p2 60 --e1 
 python3 steel_joint_checks.py clampbar --n 12 --spacing 150 --d 12 --grade A4-70 --t 10 \
         [--mode shear|tension --prying 1.3 --peak 1.5 --plate steel|alu6082 --fu-plate 490]
 python3 steel_joint_checks.py baseplate --col CHS --D 219.1 --tc 8 --B 400 --H 400 --tp 25 \
-        --Nc 450 --Nt 120 --V 40 --anchors 4 --anchor-d 24 --edge 60 --layout corners \
-        [--col I --hc --bf --tfc --twc --fy 355 --fck 30 --kj 1.5 --anchor-grade 8.8 --weld 6 --Lb --grout 30 --washer 5]
+        --Nc 450 --Nt 120 --V 40 --anchors 4 --anchor-d 24 --edge 60 --layout corners|sides|ring \
+        [--col I --hc --bf --tfc --twc --fy 355 --fck 30 --kj 1.5 --alpha-cc 1.0 --anchor-grade 8.8 --weld 6 --Lb \
+         --grout 30 --washer 5]
 python3 steel_joint_checks.py anchor --n1 2 --n2 2 --s1 200 --s2 200 --c1 400 --c2 400 --hef 250 --d 24 \
         --N 150 --V 40 [--c1b --c2b --dh --grade --fck --uncracked --psi-re --k1 --ccr-sp --hmin --cv --no-edge \
         --cv2a --cv2b --h --alpha-v --eV --edge-reinf --standoff --alphaM --brittle --A-shear]
@@ -69,10 +75,15 @@ python3 steel_joint_checks.py anchor --n1 2 --n2 2 --s1 200 --s2 200 --c1 400 --
 - **clampbar**: bolt force = n × peak factor × spacing; warns above ~200 mm spacing [V, TensiNet]; e1 = 3d,
   e2 = 1.5d assumed. `--plate alu6082`: bearing on 6082-T6 per EN 1999-1-1 Table 8.5 [V] (f_u 290 / 310 MPa for
   t ≤ 5 / > 5 mm, γM2 = 1.25 [V]).
-- **baseplate**: compression with the equivalent T-stub (c = t√(f_y/(3f_jd γM0)), f_jd = β_j k_j f_ck/γ_c,
-  β_j = 2/3 [V]); I column A_eff = (b+2c)(h+2c) − (b − t_w)(h − 2t_f − 2c) form clipped to the plate; CHS annulus.
-  Uplift per anchor with a T-stub (l_eff = min(2πm, 4m + 1.25e)), prying decided by L_b (= 8d + grout + t_p +
-  washer + h_nut/2 [V]) against L_b* = 8.8m³A_s/(l_eff t³) [C]: modes 1, 2, 3 with prying, else modes 1-2 and 3.
+- **baseplate**: compression with the equivalent T-stub (c = t√(f_y/(3f_jd γM0)), f_jd = β_j k_j α_cc f_ck/γ_c,
+  β_j = 2/3 [V], α_cc = 1.0 [C] (UK NA 0.85, `--alpha-cc`)); I column A_eff = (b+2c)(h+2c) − (b − t_w)(h − 2t_f − 2c)
+  form clipped to the plate; CHS annulus π(D − t)(t + 2c), full disc π(D + 2c)²/4 when the inner projections overlap,
+  intersected exactly with the plate (validated against all 120 SCI P358 Table G.33 values for CHS 273).
+  Uplift, `--layout corners|sides`: per anchor with a T-stub (l_eff = min(2πm, 4m + 1.25e)), prying decided by L_b
+  (= 8d + grout + t_p + washer + h_nut/2 [V]) against L_b* = 8.8m³A_s/(l_eff t³) [C]: modes 1, 2, 3 with prying, else
+  modes 1-2 and 3. `--layout ring` (CHS, ≥ 4 anchors equally spaced on a circle of radius min(B,H)/2 − edge): SCI P358
+  §6.8 / CIDECT ring-flange rules, plate t_p²f_yπf₃/(2γM0), plate + anchors with prying nF_t,Rd/(1 − 1/f₃ +
+  1/(f₃ ln(r₁/r₂))), anchors nF_t,Rd (e_eff = min(e₂, 1.25e₁) [V]); validated against P358 Example 5.
   Shear: friction C_f,d = 0.2 × N_c [V] (none with uplift) plus anchors α_bc = 0.44 − 0.0003f_yb [V].
 - **anchor** (EN 1992-4, cast-in headed, rectangular group; edge distances per side `--c1/--c1b/--c2/--c2b`):
   tension — steel (γMs = 1.2f_uk/f_yk ≥ 1.4 [V]), pull-out N_Rk,p = k2·A_h·f_ck (k2 = 7.5 cracked / 10.5 uncracked
@@ -144,7 +155,9 @@ route uses 112 N/mm² for FLC hangers (low end of the Δσ_C range); `--sensitiv
   (β_Lf) or packing reductions; oversized/slotted holes not handled.
 - Welds: fillets only (no partial-penetration or butt welds); the lug T-joint model assumes 45° fillets.
 - Base plates: rigid plate, uniform anchor tension; no bending moment (M–N interaction) of the column base, no plate
-  stiffness/rotation; L_b* uses n_b = 1 per T-stub.
+  stiffness/rotation; L_b* uses n_b = 1 per T-stub. CHS uplift with corner/side anchors uses the Table 6.4 T-stub
+  pattern around the curved wall (no CHS-specific published check); the ring rules assume prying (conservative with
+  long anchors).
 - Anchors: cast-in headed anchors in plain concrete; no blow-out, no supplementary/anchor reinforcement, no h′_ef rule
   for narrow members with ≥ 3 edges, no fatigue/seismic/fire, no torsion or eccentric loads beyond ψec; post-installed
   anchors only through `--k1` and ETA values. Splitting needs c_cr,sp and h_min from the product's ETA.
@@ -160,4 +173,5 @@ route uses 112 N/mm² for FLC hangers (low end of the Δσ_C range); `--sensitiv
 - `reference/cable-steel-connections.md`: pins/lugs (full EN and AISC formulas plus worked examples), gussets (block tearing,
   Whitmore), mast heads, bases (base plate, EN 1992-4 anchors), tensioning, anchors, corner plates, fatigue.
 - `reference/fabrication-tolerances.md`: EN 1090-2 execution, NDT, hole tolerances, galvanising, supplier hardware list.
-- `reference/validation.md`: every tool path against published worked examples (SBE/SCI, Wald, Dowswell, Hilti PROFIS, IDEA StatiCa).
+- `reference/validation.md`: every tool path against published worked examples (SBE/SCI P358/P398, Wald, Dowswell,
+  Conde et al. 2023, AISC Design Examples D.7/D.8, Hilti PROFIS, IDEA StatiCa).

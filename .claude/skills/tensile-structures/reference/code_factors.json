@@ -951,7 +951,7 @@
   },
   "connections": {
     "beta_j": {
-      "value": 0.6667,
+      "value": 0.6666666666666666,
       "status": "V",
       "source": "EN 1993-1-8:2005 6.2.5(7): 'βj is the foundation joint material coefficient, which may be taken as 2/3 provided that the characteristic strength of the grout is not less than 0,2 times ... the concrete foundation and the thickness of the grout is not greater than 0,2 times the smallest width of the steel base plate'"
     },
@@ -989,6 +989,70 @@
       "value": 1.1,
       "status": "C",
       "source": "SCI/SBE practice for tying resistance γMu = 1.1 (SBE Part 5, https://www.steelconstruction.info/images/5/53/SBE_MS5.pdf: 'In this publication γMu has been used. A value of γMu = 1,1 is recommended'); not an EN 1993-1-8 factor"
+    },
+    "alpha_cc": {
+      "value": 1.0,
+      "status": "C",
+      "range": [
+        0.85,
+        1.0
+      ],
+      "source": "EN 1992-1-1 3.1.6(1) f_cd = α_cc f_ck/γ_c, recommended α_cc = 1.0 (National Annex choice); it enters the base-plate bearing strength f_jd = β_j F_Rdu/(b_eff l_eff) of EN 1993-1-8 6.2.5(7) through F_Rdu (EN 1992-1-1 6.7). UK NA: 0.85, as used by SCI P358 (2011) Check 1, https://www.steelconstruction.info/images/a/a9/SCI_P358.pdf: 'fcd = αcc fck/γc, αcc = 0.85 (National Annex to BS EN 1992-1-1)'"
+    },
+    "cidect_ring_eeff_per_e1": {
+      "value": 1.25,
+      "status": "V",
+      "source": "SCI P358 (2011) §6.8 CHS end plate in tension, Check 3 (semi-empirical rules after the CIDECT Design Guide), https://www.steelconstruction.info/images/a/a9/SCI_P358.pdf: 'eeff = min ( e2 ; 1.25e1 )', r1 = D/2 + e1 + eeff, r2 = D/2 + e1, r3 = (D − t)/2, k1 = ln(r2/r3), k3 = k1 + 2"
+    },
+    "aisc_Omega_rupture": {
+      "value": 2.0,
+      "status": "V",
+      "source": "AISC 360-16/-22 D5.1 (tensile and shear rupture of pin-connected members) and J7 (bearing) ASD Ω = 2.00; applied in AISC Design Examples v15.1 Example D.7 (https://www.aisc.org/media/q5fcgxxu/v151_vol-1_design-examples.pdf), as reproduced in the University of Mustansiriyah lecture 'Pin-connected members', https://uomustansiriyah.edu.iq/media/lectures/5/5_2021_03_15!03_29_38_PM.pdf: 'Pn/Ω = 2tbeffFu/2 ... = 46.66 kips', '1.8FyApb/2 = 16.2 kip'"
+    },
+    "aisc_Omega_yield": {
+      "value": 1.67,
+      "status": "V",
+      "source": "AISC 360-16/-22 D2(a) tensile yielding ASD Ω = 1.67 (D6.1 eyebars by D2); AISC Design Examples v15.1 Example D.8 (URL as aisc_Omega_rupture), as reproduced in https://uomustansiriyah.edu.iq/media/lectures/5/5_2021_03_15!03_30_02_PM.pdf: 'Pn/Ω = (67.5 kips)/1.67 = 40.42 kips'"
+    },
+    "aisc_pin_hole_clearance_mm": {
+      "value": 1.0,
+      "status": "V",
+      "source": "AISC 360-16/-22 D5.2 and D6.2: pin hole not more than 1/32 in. (1 mm) larger than the pin, quoted in https://uomustansiriyah.edu.iq/media/lectures/5/5_2021_03_15!03_30_02_PM.pdf: 'the pin hole diameter shall not be more than 1/32 in. (1 mm) greater than the pin diameter'"
+    },
+    "aisc_eyebar_w_max_per_t": {
+      "value": 8.0,
+      "status": "V",
+      "source": "AISC 360-16/-22 D6.1: for calculation the eyebar body width shall not exceed 8 times its thickness; AISC Design Example D.8 check 'w ≤ 8t' (lecture URL as aisc_Omega_yield: '3- w ≤ 8t')"
+    },
+    "aisc_eyebar_d_min_per_w": {
+      "value": 0.875,
+      "status": "V",
+      "source": "AISC 360-16/-22 D6.2 (lecture URL as aisc_Omega_yield): 'The pin diameter shall not be less than seven-eighths times the eye bar body width'"
+    },
+    "aisc_eyebar_b_min_per_w": {
+      "value": 0.6666666666666666,
+      "status": "V",
+      "source": "AISC 360-16/-22 D6.2 (lecture URL as aisc_Omega_yield): 'The width from the hole edge to the plate edge perpendicular to the direction of applied load shall be greater than two-thirds and, for the purpose of calculation, not more than three-fourths times the eye bar body width'"
+    },
+    "aisc_eyebar_b_max_per_w": {
+      "value": 0.75,
+      "status": "V",
+      "source": "AISC 360-16/-22 D6.2, same quote as aisc_eyebar_b_min_per_w (upper limit for calculation only)"
+    },
+    "aisc_eyebar_t_min_mm": {
+      "value": 13.0,
+      "status": "V",
+      "source": "AISC 360-16/-22 D6.2 (lecture URL as aisc_Omega_yield): 'A thickness of less than 1/2 in. is permissible only if external nuts are provided to tighten pin plates and filler plates into snug contact' (1/2 in. = 13 mm SI value of the Specification)"
+    },
+    "aisc_eyebar_fy_high_MPa": {
+      "value": 485.0,
+      "status": "V",
+      "source": "AISC 360-16/-22 D6.2 (lecture URL as aisc_Omega_yield): 'For steels having Fy greater than 70 ksi, the hole diameter shall not exceed five times the plate thickness' (70 ksi = 485 MPa)"
+    },
+    "aisc_eyebar_d0_max_per_t_high_fy": {
+      "value": 5.0,
+      "status": "V",
+      "source": "AISC 360-16/-22 D6.2, same quote as aisc_eyebar_fy_high_MPa"
     }
   }
 }

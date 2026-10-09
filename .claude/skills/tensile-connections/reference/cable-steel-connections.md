@@ -23,7 +23,11 @@ Type B figure proportions (plate width 2.5d₀ etc.): read them from the figure 
 | Shear + bending | (M_Ed/M_Rd)² + (F_v,Ed/F_v,Rd)² ≤ 1 | — |
 f_y in bearing = lower of plate and pin. W_el = πd³/32. γM0 = 1.0, γM2 = 1.25, γM6,ser = 1.0 (recommended) [V].
 **Pin moment** (Fig. 3.11): M_Ed = F_Ed·(b + 4c + 2a)/8, with b = lug thickness, a = fork cheek thickness, c = gap [C].
-**Contact stress (replaceable pins)**: σ_h,Ed = 0.591·√(E·F_Ed,ser·(d₀ − d)/(d²·t)) ≤ f_h,Rd = 2.5·f_y/γM6,ser [V/C].
+**Contact stress (replaceable pins)**: σ_h,Ed = 0.591·√(E·F_b,Ed,ser·(d₀ − d)/(d²·t)) ≤ f_h,Rd = 2.5·f_y/γM6,ser [V/C],
+per plate (lug F_ser, each cheek F_ser/2), f_y = lower of plate and pin. 0.591 = 1/√(π(1 − ν²)) with ν = 0.3: Hertz line
+contact of the pin in its hole with d·d₀ ≈ d² (Johnson, *Contact Mechanics*, §4.2).
+Published checks of Table 3.10: Conde et al., JCSR 201 (2023) 107752 (counterexample and test prototypes) and the
+Brandenburg Prüfamt *Tipp 22/05* design charts — see `validation.md`.
 Smaller clearance lowers σ_h, which is better for fatigue and wear under wind flutter.
 
 ### 1.3 Worked example (EN, hand calculation to Tables 3.9/3.10): reproduced by `pin_connection.py`
@@ -46,7 +50,9 @@ P_n = min of:
 4. gross yielding (D2) F_y·A_g (φ 0.90).
 
 D5.2 geometry: a ≥ 1.33 b_eff; w ≥ 2 b_eff + d; c ≥ a; hole ≤ d + 1 mm (1/32 in) if the pin moves under load.
-D6 eyebars: t ≥ 12 mm, width ≤ 8t, pin d ≥ 7/8 × body width [C]. Pin flexure (F11): M_n = F_y·Z ≤ 1.6M_y, Z = d³/6.
+D6 eyebars (`--eyebar-w`): strength = body yielding F_y·w·t with w ≤ 8t; R (head-to-body transition) ≥ head diameter
+d₀ + 2b; pin d ≥ 7/8 w; d₀ ≤ d + 1 mm; 2/3 w ≤ b (≤ 3/4 w credited); t < 13 mm only with nuts clamping the plies;
+F_y > 485 MPa: d₀ ≤ 5t [V]. D.7 (pin plate) and D.8 (eyebar) of the AISC Design Examples are reproduced in the tests. Pin flexure (F11): M_n = F_y·Z ≤ 1.6M_y, Z = d³/6.
 Same example in AISC terms: b_eff = 56 mm, so a ≥ 74.5 mm and w ≥ 152 mm. **AISC edge distances are much larger than EC3 type A.**
 
 ### 1.5 Lugs, cheek plates, welds
@@ -110,9 +116,16 @@ anchors; deadman blocks; tension piles. Anchor head on the cable line with an ar
 * **Compression** (EN 1993-1-8 6.2.5) [C]: f_jd = β_j k_j f_ck/γ_c with β_j = 2/3 [V] (grout ≥ 0.2 f_ck and
   thickness ≤ 0.2 × smallest plate width) and k_j = √(A_c1/A_c0) ≤ 3 [C]; additional bearing width
   c = t√(f_y/(3 f_jd γM0)). Wald's simple base plate (HE 200 B, t = 18, C12/15): c = 43.7 mm, N_Rd = 887 kN.
+  f_cd inside F_Rdu carries α_cc (EN 1992-1-1 3.1.6, recommended 1.0, UK NA 0.85 → `--alpha-cc`).
+  CHS mast: A_eff = π(D − t)(t + 2c), or π(D + 2c)²/4 when c > D/2 − t, cut exactly by the plate edges (SCI P358 Check 2;
+  e.g. CHS 273×5 on 400×400×20 S275, C30, UK NA: f_jd = 17 MPa, c = 45.6 mm, N_Rd = 1376 kN = P358 Table G.33).
 * **Uplift** [C]: equivalent T-stub per anchor row (Table 6.2): modes 1, 2, 3 when prying can develop (L_b ≤ L_b*),
   otherwise mode 1-2 = 2M_pl,1/m and mode 3. Anchor elongation length L_b = 8d + grout + plate + washer + h_nut/2 [V];
-  long anchors usually give no prying.
+  long anchors usually give no prying. CHS with n ≥ 4 anchors on a circle (`--layout ring`): ring-flange rules of
+  SCI P358 §6.8 (after CIDECT): r2 = D/2 + e1, r3 = (D − t)/2, k1 = ln(r2/r3), k3 = k1 + 2,
+  f3 = (k3 + √(k3² − 4k1))/(2k1); plate N = t_p² f_y π f3/(2γM0); plate + anchors N = nF_t,Rd/(1 − 1/f3 +
+  1/(f3 ln(r1/r2))), r1 = r2 + min(e2, 1.25e1); anchors nF_t,Rd. P358 Example 5 (273×6.3, 8 M24, t_p 20):
+  f3 = 6.19, 1030 / 1061 / 1624 kN — reproduced by the tool.
 * **Shear**: friction C_f,d·N_c,Ed with C_f,d = 0.20 for sand-cement mortar [V] (zero under uplift) plus the anchors
   F_2,vb,Rd = α_bc f_ub A_s/γM2, α_bc = 0.44 − 0.0003 f_yb (235 ≤ f_yb ≤ 640) [V]; or a shear key.
 * **Anchors in the concrete (EN 1992-4)** — `steel_joint_checks.py anchor`; factors with sources in the register:
