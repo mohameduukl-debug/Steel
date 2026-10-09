@@ -15,9 +15,9 @@ by polygon integration; plastic moduli by half-section clipping.
 
 Checks
   * cross-section class (Table 5.2) under the actual N (+ bending)
-  * section: N, V (y/z), N + My + Mz (conservative linear 6.2.1(7) for class 1–3)
+  * section: N, V (y/z), N + My + Mz (6.2.9.1 plastic interaction for class 1–2, linear 6.2.1(7) for class 3–4)
   * flexural buckling y and z (6.3.1, curves per Table 6.2)
-  * lateral-torsional buckling for I sections (6.3.2.2 general case, M_cr with C1)
+  * lateral-torsional buckling for I sections (6.3.2.2 general case, M_cr with C1 from NCCI SN003b Table 3.1 or --C1)
   * member interaction N + My + Mz (6.3.3, Annex B method 2)
   * tension members (N < 0): N_t,Rd = A·fy/γM0 (net section: check separately)
 
@@ -48,7 +48,24 @@ PROFILES = {
     "HEA300": (290, 300, 8.5, 14.0, 27), "HEB160": (160, 160, 8.0, 13.0, 15), "HEB200": (200, 200, 9.0, 15.0, 18),
     "HEB240": (240, 240, 10.0, 17.0, 21), "HEB300": (300, 300, 11.0, 19.0, 27),
 }
-ALPHA = {"a0": 0.13, "a": 0.21, "b": 0.34, "c": 0.49, "d": 0.76}
+CURVE_NAMES = ("a0", "a", "b", "c", "d")
+
+
+def alpha_of(curve):
+    """imperfection factor α of a buckling curve, from the register (EN 1993-1-1 Table 6.1 / 6.3)."""
+    return CF.get("steel.imp_alpha")[curve]
+
+
+def C1_end_moments(psi):
+    """C1 for a segment with linear moment (end-moment ratio ψ), k = kw = 1: linear interpolation in
+    NCCI SN003b Table 3.1 (register steel.C1_end_moments, computed with κ_wt = 0 → conservative)."""
+    t = CF.get("steel.C1_end_moments")
+    ps, cs = t["psi"], t["C1"]
+    psi = max(-1.0, min(1.0, psi))
+    for (p0, c0), (p1, c1) in zip(zip(ps, cs), zip(ps[1:], cs[1:])):
+        if p1 <= psi <= p0:
+            return c0 + (c1 - c0) * (p0 - psi) / (p0 - p1)
+    return cs[-1]
 
 
 # ------------------------------------------------------------ polygon tools
@@ -299,16 +316,18 @@ def effective_section(sec: Section, fy):
 
 def section_class(sec: Section, fy, NEd):
     eps = math.sqrt(235 / fy)
+    lims = CF.get("steel.class_limits")      # EN 1993-1-1 Table 5.2 (register)
     if sec.kind == "CHS":
         r = sec.D / sec.t
-        return (1 if r <= 50 * eps ** 2 else 2 if r <= 70 * eps ** 2 else 3 if r <= 90 * eps ** 2 else 4), f"d/t={r:.1f}"
+        c1, c2, c3 = (v * eps ** 2 for v in lims["chs"])
+        return (1 if r <= c1 else 2 if r <= c2 else 3 if r <= c3 else 4), f"d/t={r:.1f}"
     if sec.kind == "RHS":
         cls = 1
         info = []
         for c in (sec.h - 3 * sec.t, sec.b - 3 * sec.t):
             ct = c / sec.t
             # conservative: wall in compression unless N ≈ 0
-            lim = (33, 38, 42) if NEd > 0 else (72, 83, 124)
+            lim = lims["internal_compression"] if NEd > 0 else lims["internal_bending"]
             k = 1 if ct <= lim[0] * eps else 2 if ct <= lim[1] * eps else 3 if ct <= lim[2] * eps else 4
             cls = max(cls, k)
             info.append(f"c/t={ct:.1f}")
@@ -316,7 +335,8 @@ def section_class(sec: Section, fy, NEd):
     # I section: flange outstand + web with alpha from N
     cf = (sec.b - sec.tw - 2 * sec.r) / 2
     ctf = cf / sec.tf
-    kf = 1 if ctf <= 9 * eps else 2 if ctf <= 10 * eps else 3 if ctf <= 14 * eps else 4
+    o1, o2, o3 = (v * eps for v in lims["outstand_compression"])
+    kf = 1 if ctf <= o1 else 2 if ctf <= o2 else 3 if ctf <= o3 else 4
     cw = sec.h - 2 * sec.tf - 2 * sec.r
     ctw = cw / sec.tw
     alpha = min(1.0, max(0.0, 0.5 + max(NEd, 0) * 1e3 / (2 * cw * sec.tw * fy)))
@@ -331,16 +351,55 @@ def section_class(sec: Section, fy, NEd):
 
 
 def chi(lam, alpha):
+    """EN 1993-1-1 eq. (6.49): Φ = 0.5[1 + α(λ̄ − 0.2) + λ̄²], χ = 1/(Φ + √(Φ² − λ̄²)) ≤ 1."""
     if lam <= 0.2:
         return 1.0
     ph = 0.5 * (1 + alpha * (lam - 0.2) + lam ** 2)
     return min(1.0, 1 / (ph + math.sqrt(ph ** 2 - lam ** 2)))
 
 
+def plastic_NM(sec: Section, fy, NEd, MyRk, MzRk, gM0):
+    """EN 1993-1-1 6.2.9.1 reduced plastic moments for class 1–2 sections and the biaxial exponents.
+
+    NEd [N] (sign ignored), MyRk/MzRk [Nmm] (already reduced for shear 6.2.8). Returns MNy, MNz [Nmm], α, β.
+    I/H: (6.33)–(6.38); RHS: (6.39); CHS: M_N = M_pl·cos(πn/2), the exact plastic interaction of a thin tube
+    (within 0.3 % of strip integration of real CHS, see validation.md; the often quoted M_pl(1 − n^1.7) is up to
+    5 % unconservative for n > 0.7)."""
+    NplRd = sec.A * fy / gM0
+    n = abs(NEd) / NplRd
+    Mply, Mplz = MyRk / gM0, MzRk / gM0
+    if n >= 1.0:
+        return 0.0, 0.0, 2.0, 2.0
+    if sec.kind == "CHS":
+        f = math.cos(math.pi * n / 2)
+        return Mply * f, Mplz * f, 2.0, 2.0
+    if sec.kind == "RHS":
+        aw = min((sec.A - 2 * sec.b * sec.t) / sec.A, 0.5)
+        af = min((sec.A - 2 * sec.h * sec.t) / sec.A, 0.5)
+        ab = min(1.66 / (1 - 1.13 * n ** 2), 6.0)
+        return (min(Mply * (1 - n) / (1 - 0.5 * aw), Mply), min(Mplz * (1 - n) / (1 - 0.5 * af), Mplz), ab, ab)
+    hw = sec.h - 2 * sec.tf
+    a = min((sec.A - 2 * sec.b * sec.tf) / sec.A, 0.5)
+    if abs(NEd) <= min(0.25 * NplRd, 0.5 * hw * sec.tw * fy / gM0):          # (6.33), (6.34)
+        MNy = Mply
+    else:
+        MNy = min(Mply * (1 - n) / (1 - 0.5 * a), Mply)                       # (6.36)
+    if abs(NEd) <= hw * sec.tw * fy / gM0 or n <= a:                          # (6.35), (6.37)
+        MNz = Mplz
+    else:
+        MNz = Mplz * (1 - ((n - a) / (1 - a)) ** 2)                            # (6.38)
+    return MNy, MNz, 2.0, max(5 * n, 1.0)
+
+
 def check(sec: Section, fy, L, N, My=0.0, Mz=0.0, Vy=0.0, Vz=0.0, ky=1.0, kz=1.0, kLT=None,
-          psi_y=0.0, psi_z=0.0, psi_LT=0.0):
+          psi_y=0.0, psi_z=0.0, psi_LT=0.0, C1=None, sway_y=None, sway_z=None, Cmy=None, Cmz=None, CmLT=None):
+    """EN 1993-1-1 member check. Units: fy MPa, L m, N kN (+ compression), M kNm, V kN.
+
+    C1: LTB moment factor (default from ψ_LT via SN003b Table 3.1). sway_y/z: sway buckling mode about y/z
+    (Annex B Table B.3 note: Cm = 0.9); None = automatic (k ≥ 2). Cmy/Cmz/CmLT override the Table B.3 value
+    (e.g. members with transverse load). Returns (rows, info)."""
     E = CF.get("steel.E")
-    G = E / 2.6
+    G = CF.get("steel.G")
     gM0, gM1 = CF.get("steel.gM0"), CF.get("steel.gM1")
     cls, cinfo = section_class(sec, fy, N)
     Wy = sec.Wpl_y if cls <= 2 else sec.Wel_y
@@ -371,41 +430,65 @@ def check(sec: Section, fy, L, N, My=0.0, Mz=0.0, Vy=0.0, Vz=0.0, ky=1.0, kz=1.0
                     red = rho * shear_area_modulus(sec, "y")
                     MzRk = max(MzRk - red * fy, 0.0)
                 res["shear_note"] = f"V > 0.5 Vpl on {name}: bending resistance reduced (6.2.8, ρ={rho:.2f})"
+
+    def section_row(label_extra=""):
+        if cls <= 2:
+            MNy, MNz, a_, b_ = plastic_NM(sec, fy, NEd, MyRk, MzRk, gM0)
+            res.update({"MN_y_Rd": MNy / 1e6, "MN_z_Rd": MNz / 1e6, "biax_alpha": a_, "biax_beta": b_})
+            if MNy <= 0 or MNz <= 0:
+                u = math.inf
+            elif MzEd == 0:
+                u = max(MyEd / MNy, abs(NEd) / (NRk / gM0))
+            elif MyEd == 0:
+                u = max(MzEd / MNz, abs(NEd) / (NRk / gM0))
+            else:
+                u = (MyEd / MNy) ** a_ + (MzEd / MNz) ** b_      # (6.41), the value published in worked examples
+                res["biax_LHS"] = u
+                u = max(u, abs(NEd) / (NRk / gM0))
+            return (f"section N + My + Mz (6.2.9.1 plastic, M_N,y={MNy / 1e6:.1f} M_N,z={MNz / 1e6:.1f}){label_extra}",
+                    u, 1.0, "6.2.9.1")
+        u = abs(NEd) / (NRk / gM0) + MyEd / (MyRk / gM0) + MzEd / (MzRk / gM0)
+        return (f"section N + My + Mz (linear 6.2.1(7), class {cls}){label_extra}", u, 1.0, "6.2.1(7) / 6.2.9.2")
+
     if NEd < 0:  # tension
         rows.append(("tension N_t (gross)", -N, NRk / gM0 / 1e3, "6.2.3"))
-        u = -NEd / (NRk / gM0) + MyEd / (MyRk / gM0) + MzEd / (MzRk / gM0)
-        rows.append(("section N + My + Mz (linear)", u, 1.0, "6.2.1(7)"))
+        rows.append(section_row())
         return rows, res
-    u_sec = NEd / (NRk / gM0) + MyEd / (MyRk / gM0) + MzEd / (MzRk / gM0)
-    rows.append(("section N + My + Mz (linear, conservative)", u_sec, 1.0, "6.2.1(7)"))
+    rows.append(section_row())
     cy, cz, clt = sec.curves(fy)
     out = {}
     for ax, k, I, c in (("y", ky, sec.Iy, cy), ("z", kz, sec.Iz, cz)):
         Lcr = k * L * 1000
         Ncr = math.pi ** 2 * E * I / Lcr ** 2
         lam = math.sqrt(NRk / Ncr)
-        x = chi(lam, ALPHA[c])
-        out[ax] = (lam, x, c, Lcr / math.sqrt(I / sec.A))
+        x = chi(lam, alpha_of(c))
+        out[ax] = (lam, x, c, Lcr / math.sqrt(I / sec.A), Ncr)
         rows.append((f"flexural buckling {ax} (curve {c}, λ̄={lam:.2f}, χ={x:.3f})", N, x * NRk / gM1 / 1e3, "6.3.1"))
+    res.update({"chi_y": out["y"][1], "chi_z": out["z"][1], "lambda_y": out["y"][0], "lambda_z": out["z"][0]})
     # LTB
     chiLT = 1.0
     if sec.kind == "I" and MyEd > 0:
         Lb = (kLT if kLT is not None else kz) * L * 1000
-        C1 = min(1.88 - 1.40 * psi_LT + 0.52 * psi_LT ** 2, 2.7)
-        Mcr = C1 * math.pi ** 2 * E * sec.Iz / Lb ** 2 * math.sqrt(sec.Iw / sec.Iz + Lb ** 2 * G * sec.It /
-                                                                   (math.pi ** 2 * E * sec.Iz))
+        C1v = C1 if C1 is not None else C1_end_moments(psi_LT)
+        Mcr = C1v * math.pi ** 2 * E * sec.Iz / Lb ** 2 * math.sqrt(sec.Iw / sec.Iz + Lb ** 2 * G * sec.It /
+                                                                    (math.pi ** 2 * E * sec.Iz))
         lamLT = math.sqrt(Wy * fy / Mcr)
-        chiLT = chi(lamLT, ALPHA[clt])
-        rows.append((f"LTB (curve {clt}, C1={C1:.2f}, Mcr={Mcr / 1e6:.0f} kNm, λ̄LT={lamLT:.2f})",
+        chiLT = chi(lamLT, alpha_of(clt))
+        res.update({"Mcr_kNm": Mcr / 1e6, "C1": C1v, "lambda_LT": lamLT, "chi_LT": chiLT})
+        rows.append((f"LTB (curve {clt}, C1={C1v:.2f}, Mcr={Mcr / 1e6:.0f} kNm, λ̄LT={lamLT:.2f})",
                      abs(My), chiLT * MyRk / gM1 / 1e6, "6.3.2.2"))
-    # Annex B interaction
+    # Annex B interaction (method 2)
     lam_y, chi_y = out["y"][0], out["y"][1]
     lam_z, chi_z = out["z"][0], out["z"][1]
     ny = NEd / (chi_y * NRk / gM1)
     nz = NEd / (chi_z * NRk / gM1)
-    Cmy = max(0.4, 0.6 + 0.4 * psi_y)
-    Cmz = max(0.4, 0.6 + 0.4 * psi_z)
-    CmLT = max(0.4, 0.6 + 0.4 * psi_LT)
+    cmin, csw = CF.get("steel.Cm_min"), CF.get("steel.Cm_sway")
+    sway_y = (ky >= 2.0) if sway_y is None else sway_y
+    sway_z = (kz >= 2.0) if sway_z is None else sway_z
+    Cmy = Cmy if Cmy is not None else (csw if sway_y else max(cmin, 0.6 + 0.4 * psi_y))
+    Cmz = Cmz if Cmz is not None else (csw if sway_z else max(cmin, 0.6 + 0.4 * psi_z))
+    CmLT = CmLT if CmLT is not None else max(cmin, 0.6 + 0.4 * psi_LT)
+    res.update({"Cmy": Cmy, "Cmz": Cmz, "CmLT": CmLT, "sway_y": sway_y, "sway_z": sway_z})
     if cls <= 2:
         kyy = min(Cmy * (1 + (lam_y - 0.2) * ny), Cmy * (1 + 0.8 * ny))
         if sec.kind == "I":
@@ -417,17 +500,35 @@ def check(sec: Section, fy, L, N, My=0.0, Mz=0.0, Vy=0.0, Vz=0.0, ky=1.0, kz=1.0
         kyy = min(Cmy * (1 + 0.6 * lam_y * ny), Cmy * (1 + 0.6 * ny))
         kzz = min(Cmz * (1 + 0.6 * lam_z * nz), Cmz * (1 + 0.6 * nz))
         kyz = kzz
-    if sec.kind == "I" and MyEd > 0 and lam_z >= 0.4:  # torsionally flexible member
-        kzy = max(1 - 0.1 * lam_z * nz / (CmLT - 0.25), 1 - 0.1 * nz / (CmLT - 0.25)) if cls <= 2 else \
-            max(1 - 0.05 * lam_z * nz / (CmLT - 0.25), 1 - 0.05 * nz / (CmLT - 0.25))
-    else:
+    if sec.kind == "I" and MyEd > 0:   # Table B.2: member susceptible to torsional deformations
+        if cls <= 2:
+            kzy = max(1 - 0.1 * lam_z * nz / (CmLT - 0.25), 1 - 0.1 * nz / (CmLT - 0.25))
+            if lam_z < 0.4:
+                kzy = min(0.6 + lam_z, 1 - 0.1 * lam_z * nz / (CmLT - 0.25))
+        else:
+            kzy = max(1 - 0.05 * lam_z * nz / (CmLT - 0.25), 1 - 0.05 * nz / (CmLT - 0.25))
+    else:                              # Table B.1
         kzy = 0.6 * kyy if cls <= 2 else 0.8 * kyy
     e61 = ny + kyy * MyEd / (chiLT * MyRk / gM1) + kyz * MzEd / (MzRk / gM1)
     e62 = nz + kzy * MyEd / (chiLT * MyRk / gM1) + kzz * MzEd / (MzRk / gM1)
+    res.update({"kyy": kyy, "kyz": kyz, "kzy": kzy, "kzz": kzz, "eq661": e61, "eq662": e62})
     rows.append((f"interaction (6.61) kyy={kyy:.2f} kyz={kyz:.2f}", e61, 1.0, "6.3.3 / Annex B"))
     rows.append((f"interaction (6.62) kzy={kzy:.2f} kzz={kzz:.2f}", e62, 1.0, "6.3.3 / Annex B"))
     res.update({"slenderness_y": out["y"][3], "slenderness_z": out["z"][3]})
     return rows, res
+
+
+ASSUMPTIONS = """Assumptions / model limits:
+  - Section properties from the true outline (root/corner radii EN 10210 hot, EN 10219 cold); Iw = Iz(h−tf)²/4.
+  - Class from EN 1993-1-1 Table 5.2 under the given N (web α from N for I sections; RHS walls conservative).
+  - Section check: 6.2.9.1 plastic N+M interaction for class 1–2 (CHS M_N = M_pl·cos(πn/2)), linear 6.2.1(7)
+    for class 3, effective section (EN 1993-1-5 4.4, neutral-axis shift ignored) for class 4 I/RHS; class 4 CHS
+    is not designed (EN 1993-1-6).
+  - Flexural buckling 6.3.1 (curves Table 6.2), LTB general case 6.3.2.2 with M_cr for a doubly-symmetric
+    section, load at the shear centre, k = kw = 1 (fork supports); C1 from SN003b Table 3.1 (end moments).
+  - Interaction 6.3.3 Annex B (method 2); Cm from Table B.3 for a linear moment (ψ), 0.9 for sway modes
+    (auto when k ≥ 2). Use --Cmy/--Cmz/--CmLT for transverse loads. Torsion and warping stresses not checked.
+  - Loads must be ULS design values; second-order sway effects belong in the global analysis (frame2d/frame3d)."""
 
 
 def main(argv=None):
@@ -448,6 +549,13 @@ def main(argv=None):
     ap.add_argument("--psi-y", type=float, default=0.0, help="end-moment ratio for Cmy")
     ap.add_argument("--psi-z", type=float, default=0.0)
     ap.add_argument("--psi-LT", type=float, default=0.0, help="end-moment ratio for C1 / CmLT")
+    ap.add_argument("--C1", type=float, default=None, help="override C1 (e.g. from LTBeam / SN003 Table 3.2)")
+    ap.add_argument("--Cmy", type=float, default=None, help="override Cmy (Annex B Table B.3)")
+    ap.add_argument("--Cmz", type=float, default=None)
+    ap.add_argument("--CmLT", type=float, default=None)
+    ap.add_argument("--sway-y", dest="sway_y", action="store_true", default=None,
+                    help="sway buckling mode about y (Cmy = 0.9); default auto if ky >= 2")
+    ap.add_argument("--sway-z", dest="sway_z", action="store_true", default=None)
     ap.add_argument("--factors", default=None)
     a = ap.parse_args(argv)
     if a.factors:
@@ -465,9 +573,16 @@ def main(argv=None):
           f"Iy={sec.Iy / 1e4:.1f} Iz={sec.Iz / 1e4:.1f} cm⁴  Wpl,y={sec.Wpl_y / 1e3:.1f} Wpl,z={sec.Wpl_z / 1e3:.1f} cm³  "
           f"It={sec.It / 1e4:.2f} cm⁴" + (f"  Iw={sec.Iw / 1e6:.2f}e3 cm⁶" if sec.Iw else "") +
           f"  mass={sec.mass:.1f} kg/m")
-    print(f"Partial factors: {CF.tag('steel.gM0')}, {CF.tag('steel.gM1')};  fy={a.fy:g} MPa, L={a.L} m")
-    rows, res = check(sec, a.fy, a.L, a.N, a.My, a.Mz, a.Vy, a.Vz, a.ky, a.kz, a.kLT, a.psi_y, a.psi_z, a.psi_LT)
+    print(f"Factors: {CF.tag('steel.gM0')}, {CF.tag('steel.gM1')}, {CF.tag('steel.E')}, {CF.tag('steel.G')};  "
+          f"imperfection α [{CF.status('steel.imp_alpha')}], C1 table [{CF.status('steel.C1_end_moments')}];  "
+          f"fy={a.fy:g} MPa, L={a.L} m")
+    print(ASSUMPTIONS)
+    rows, res = check(sec, a.fy, a.L, a.N, a.My, a.Mz, a.Vy, a.Vz, a.ky, a.kz, a.kLT, a.psi_y, a.psi_z, a.psi_LT,
+                      C1=a.C1, sway_y=a.sway_y, sway_z=a.sway_z, Cmy=a.Cmy, Cmz=a.Cmz, CmLT=a.CmLT)
     print(f"Class {res['class']}  ({res['class_info']})")
+    if "Cmy" in res:
+        print(f"Cmy={res['Cmy']:.2f}{' (sway)' if res['sway_y'] else ''}  Cmz={res['Cmz']:.2f}"
+              f"{' (sway)' if res['sway_z'] else ''}  CmLT={res['CmLT']:.2f}")
     print(f"{'check':<62}{'demand':>9}{'capacity':>10}{'util':>7}  ref")
     worst = 0.0
     for name, d, c, ref in rows:

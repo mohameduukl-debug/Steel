@@ -11,6 +11,7 @@ For every cable:
   L_meas          = L0_ref · (1 + F_meas / EA)   if a measuring load is specified
   clamp marks     = scaled the same way (unstressed position from end A)
   F_Rd (EN)       = F_min · k_e / (1.5 γR)        util = F_ULS / F_Rd
+                    (γR = max(project γR, product 'gammaR_ETA'); bars also F_k/γR)
   ASCE 19         = 2.2 · T / (F_min · N_f)
   SLS             = F_SLS / (f_sls · F_uk)
   slack           = F_min_comb > 0
@@ -119,15 +120,16 @@ def compute(s):
         Lmeas = L0ref * (1 + Fmeas / EA) if Fmeas else None
         ke = 1.0 if p.get("ke_included") else p.get("ke", 1.0)
         Fuk = p["Fmin"] * ke
-        FRd = Fuk / (1.5 * gR)
+        gRc = max(gR, p.get("gammaR_ETA", 0.0))           # e.g. stainless strand ETAs use 1.1
+        FRd = Fuk / (1.5 * gRc)
         if p.get("Fk"):
-            FRd = min(FRd, p["Fk"] / gR)
+            FRd = min(FRd, p["Fk"] / gRc)
         uls = p.get("F_ULS")
         sls = p.get("F_SLS")
         marks = [round((x - p.get("deduct_A_mm", 0) / 1000) / (1 + strain) / (1 + alpha * (T_inst - T_ref)), 4)
                  for x in p.get("clamp_marks", [])]
         r = {"id": p["id"], "qty": p.get("qty", 1), "type": p.get("type", p.get("product", "")),
-             "d_mm": p.get("d"), "A_mm2": p["A"], "EA_kN": round(EA), "Fmin_kN": p["Fmin"], "ke": ke,
+             "d_mm": p.get("d"), "A_mm2": p["A"], "EA_kN": round(EA), "Fmin_kN": p["Fmin"], "ke": ke, "gammaR": gRc,
              "F_Rd_kN": round(FRd, 1), "F_prestress_kN": Fp, "F_ULS_kN": uls, "F_SLS_kN": sls,
              "util_EN": round(uls / FRd, 3) if uls else None,
              "util_ASCE": round(asce * (sls if sls else uls / 1.4) / (p["Fmin"] * p.get("Nf", 1.0)), 3) if uls else None,
@@ -221,6 +223,16 @@ def main(argv=None):
         with open(a.out + ".md", "a") as fh:
             fh.write("\nSensitivity (f_sls range):\n\n" + "\n".join(sens) + "\n")
     print(f"Wrote {a.out}.csv and {a.out}.md")
+    print("Assumptions:")
+    for ln in ("L0 = L_pin/(1 + F_prestress/EA) per cable: straight-member strain (sag and the force variation along "
+               "the cable are neglected; use cable_calc.py length for sagging cables)",
+               "L0(T_ref) = L0/(1 + α(T_install − T_ref)); α from the product or the register (EN 1993-1-11 3.3)",
+               "EA = E × metallic area of the product (prestretched); F_Rd = F_min·k_e/(1.5γR) (EN 1993-1-11 6.2), "
+               "γR = max(project, product ETA)",
+               "from --from-model: L_stressed = sum of node-to-node edge lengths of the group, F_prestress = "
+               "length-weighted mean; ULS/SLS forces are placeholders unless --envelope is given",
+               "creep allowance (EN 3.2.2(3) NOTE 1: 0.15 mm/m), clamp seating and fitting tolerances are NOT deducted"):
+        print(f"  - {ln}")
     return rows
 
 

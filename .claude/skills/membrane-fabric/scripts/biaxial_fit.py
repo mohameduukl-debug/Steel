@@ -16,6 +16,11 @@ Compensation (EN 17117-2 concept): strain the panel must be shrunk by so that it
 design prestress on site = residual strain after the test's prestress cycles + elastic strain
 at the prestress:   comp_w = ε_res,w + (a·n_w0 − c·n_f0),  comp_f = ε_res,f + (b·n_f0 − c·n_w0)
 
+Direct stiffness formulation (used by many membrane programs, JRC132615 eqs. 2.1-2.12):
+    n_w = Ed_w·ε_w + Ed_wf·ε_f ,  n_f = Ed_f·ε_f + Ed_fw·ε_w
+    Ed_w = E_w t/(1 − ν_wf ν_fw),  Ed_f = E_f t/(1 − ν_wf ν_fw),  Ed_wf = ν_fw·Ed_w = Ed_fw = ν_wf·Ed_f
+  (here ν_fw multiplies n_f in the warp strain = JRC ν_xy; ν_wf = JRC ν_yx). The fit prints both forms.
+
 Input CSV (header required):  ratio,n_w,n_f,eps_w,eps_f     (kN/m, kN/m, %, %)
 
 Examples
@@ -30,6 +35,24 @@ import csv
 import math
 import sys
 from collections import defaultdict
+
+
+def inverse_to_direct(Ew_t, Ef_t, nu_wf, nu_fw):
+    """inverse (E·t, ν) -> direct stiffness (Ed_w, Ed_f, Ed_wf, Ed_fw) [kN/m] (JRC132615 eqs. 2.5-2.8)."""
+    d = 1.0 - nu_wf * nu_fw
+    if d <= 0:
+        raise ValueError("ν_wf·ν_fw >= 1: no positive-definite direct stiffness")
+    Edw, Edf = Ew_t / d, Ef_t / d
+    return {"Ed_w": Edw, "Ed_f": Edf, "Ed_wf": nu_fw * Edw, "Ed_fw": nu_wf * Edf}
+
+
+def direct_to_inverse(Ed_w, Ed_f, Ed_wf, Ed_fw=None):
+    """direct stiffness (crimp-interchange Ed_wf, symmetric if Ed_fw None) -> E_w t, E_f t, ν_wf, ν_fw
+    (JRC132615 eqs. 2.9-2.12)."""
+    Ed_fw = Ed_wf if Ed_fw is None else Ed_fw
+    nu_fw, nu_wf = Ed_wf / Ed_w, Ed_fw / Ed_f
+    d = 1.0 - nu_wf * nu_fw
+    return {"Ew_t": Ed_w * d, "Ef_t": Ed_f * d, "nu_wf": nu_wf, "nu_fw": nu_fw}
 
 
 def solve3(M, v):
@@ -142,8 +165,21 @@ def main(argv=None):
         print(f"  warp {cw * 100:.2f} %   weft {cf * 100:.2f} %   (residual {a.residual[0]}/{a.residual[1]} % + elastic)")
         print("  -> use as --comp-warp / --comp-weft in cutting_pattern.py; decompensate fixed-length edges")
         out["compensation_%"] = (cw * 100, cf * 100)
+    try:
+        dd = inverse_to_direct(f_all["Ew_t"], f_all["Ef_t"], f_all["nu_wf"], f_all["nu_fw"])
+        print(f"\nDirect stiffness form (all ratios): Ed_w {dd['Ed_w']:.0f}, Ed_f {dd['Ed_f']:.0f}, "
+              f"crimp interchange Ed_wf = Ed_fw {dd['Ed_wf']:.0f} kN/m (for programs using the direct formulation)")
+        out["direct"] = dd
+    except ValueError as e:
+        print(f"\nDirect stiffness form not available: {e}")
     print("\nUse E·t in dynamic_relaxation.py / run_cases.py (--Et-u warp, --Et-v weft). A net model cannot use ν;"
           " use the CST membrane solver (membrane_dr.py) to include ν and shear.")
+    print("\nAssumptions:\n  - linear orthotropic plane stress with reciprocity (one ν_wf/E_w t = ν_fw/E_f t), fitted to the "
+          "stabilised-cycle increments given in the CSV; real fabrics are non-linear, load-history dependent and "
+          "show crimp interchange, so constants depend on the ratios and stress range included (JRC132615 §2.2.2.5)"
+          "\n  - shear stiffness is not identified by biaxial tests on warp/weft axes (needs a bias / shear test)"
+          "\n  - compensation = residual + elastic strain at the prestress (EN 17117-2 concept); confirm on the "
+          "delivered batch")
     return out
 
 

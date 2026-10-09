@@ -326,7 +326,7 @@ class TestMemberCheck(unittest.TestCase):
     def test_ltb_mcr_ipe300(self):
         rows, _ = memb.check(memb.Section("IPE300"), 355, 6.0, 0.0, 80, psi_LT=0.0)
         ltb = [r for r in rows if r[0].startswith("LTB")][0]
-        self.assertIn("Mcr=169", ltb[0])
+        self.assertIn("Mcr=160", ltb[0])   # C1 = 1.77 (SN003b Table 3.1, psi = 0)
 
 
 class TestFrame2D(unittest.TestCase):

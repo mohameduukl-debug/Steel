@@ -32,7 +32,9 @@ python3 "$S/membrane-fabric/scripts/membrane_check.py" --material PVC-III --nw 7
 python3 "$S/membrane-fabric/scripts/membrane_check.py" --material PVC-III --prestress 2 2 --flutter 5 5 \
         --f-target 2.0 --sensitivity | sed -n '/Panel frequency/,$p'
 python3 "$S/membrane-fabric/scripts/membrane_check.py" --material PVC-III --case wind --corner 30 90 0.35 \
-        --layers 3 | sed -n '/Corner/,$p'
+        --layers 3 --neff-basis french | sed -n '/Corner/,$p'
+python3 "$S/membrane-fabric/scripts/membrane_check.py" --material Sattler-Atlas-760-IV --nw 35.55 --nf 12.75 --case snow \
+        --method ts19102 | tail -12
 
 echo; echo "== 4. Cables: edge-cable check + schedule =="
 python3 "$S/cable-tension-members/scripts/cable_calc.py" edge --chord 10.44 --sag 1.17 --n 8.0
@@ -69,6 +71,8 @@ python3 "$S/tensile-connections/scripts/steel_joint_checks.py" weld --F 210 --an
 python3 "$S/tensile-connections/scripts/steel_joint_checks.py" baseplate --col CHS --D 168.3 --tc 8 --B 350 --H 350 \
         --tp 25 --Nc 300 --Nt 60 --V 25 --anchors 4 --anchor-d 20 --edge 55
 
+python3 "$S/steel-supports/scripts/frame3d.py" mast --H 6 --section CHS:219.1x10 --tie=-5,-5,0:60000:10 \
+        --tie=-6,1,0:60000:10 --tie=1,-6,0:60000:10 --reactions sail_snow.json --node 0 --check | tail -15
 python3 "$S/steel-supports/scripts/frame2d.py" arch --L 20 --f 4 --n 20 --section CHS:219.1x8 --q 3.5 --check --Lz 5
 python3 "$S/tensile-connections/scripts/steel_joint_checks.py" anchor --n1 2 --n2 2 --s1 200 --s2 200 --c1 400 \
         --c2 400 --hef 250 --d 24 --N 60

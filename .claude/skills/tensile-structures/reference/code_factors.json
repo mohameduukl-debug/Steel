@@ -23,34 +23,53 @@
     },
     "japan_long_divisor": {
       "value": 8.0,
-      "status": "U",
-      "source": "MLIT Notification 666 (reported); ETFE paper (PMC9735748) quotes Japanese K = 8 long-term (single source); unclear whether K applies to ETFE or to fabric",
-      "range": [
-        7.0,
-        8.0
-      ],
-      "range_source": "earlier ETFE rule 7, Japanese K = 8 (PMC9735748)"
+      "status": "V",
+      "source": "MLIT Notification No. 666 (2002, amended 2007/2011), 第六 一 table, row (一) (no joint, or joint/weld width >= 40 mm; >= 75 mm for glass/PTFE class (一)): long-term allowable tensile stress = Fm/(80 t) N/mm2 with Fm in N/cm and t in mm, i.e. n_allow = Fm/8 per unit width. Fm = ministerially designated standard strength (第八). https://www.mlit.go.jp/notice/noticedata/pdf/201703/00006526.pdf"
     },
     "japan_short_divisor": {
       "value": 4.0,
-      "status": "U",
-      "source": "MLIT Notification 666 (reported); ETFE paper (PMC9735748) quotes Japanese K = 4 short-term (single source)",
-      "range": [
-        3.5,
-        4.0
-      ],
-      "range_source": "earlier ETFE rule 3.5, Japanese K = 4"
+      "status": "V",
+      "source": "MLIT Notification No. 666, 第六 一 table, row (一), membrane NOT folded (折りたたみを行わない場合): short-term = Fm/(40 t) -> Fm/4 per unit width. Same URL as japan_long_divisor"
+    },
+    "japan_short_divisor_folded": {
+      "value": 5.0,
+      "status": "V",
+      "source": "MLIT Notification No. 666, 第六 一 table, row (一), membrane folded (折りたたみを行う場合): short-term = Fm/(50 t) -> Fm/5 (long-term unchanged Fm/80t)"
+    },
+    "japan_long_divisor_narrow": {
+      "value": 10.0,
+      "status": "V",
+      "source": "MLIT Notification No. 666, 第六 一 table, row (二) (joint/weld narrower than 40 mm, or 75 mm for glass/PTFE): long-term Fm/(100 t) -> Fm/10"
+    },
+    "japan_short_divisor_narrow": {
+      "value": 5.0,
+      "status": "V",
+      "source": "MLIT Notification No. 666, 第六 一 table, row (二): short-term Fm/(50 t) -> Fm/5"
+    },
+    "japan_anchorage_long": {
+      "value": 6.0,
+      "status": "V",
+      "source": "MLIT Notification No. 666, 第六 二: allowable capacity of membrane anchorages (定着部) Fj/6 long-term, Fj = tensile strength from a test of the actual anchorage"
+    },
+    "japan_anchorage_short": {
+      "value": 3.0,
+      "status": "V",
+      "source": "MLIT Notification No. 666, 第六 二: anchorage Fj/3 short-term (第七 二: ultimate capacity also Fj/3)"
     },
     "seam_efficiency": {
       "value": 0.8,
       "status": "V",
-      "source": "PVC HF 0.80-0.90, PTFE heat-seal 0.70-0.80 (tensilecraft); use test value"
+      "source": "PVC HF 0.80-0.90, PTFE heat-seal 0.70-0.80 (tensilecraft); JRC132615 (2023) Eurocode Outlook No. 5 (PES/PVC seam strength at 23 °C >= 90 % Types I-IV, >= 80 % Type V; at 70 °C >= 70/70/70/60/55 %) and No. 7 (glass/PTFE >= 80-90 % at 23 °C, >= 60-70 % at 70 °C). 0.8 is the lower value at 23 °C; use the seam test value",
+      "url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
     },
     "partial": {
       "status": "U",
-      "source": "German A-factor practice (Bautechnik 'Materialprüfung und Bemessung im Zelt- und Membranbau'; Knippers, Construction Manual for Polymers + Membranes): fabric γM 1.4 (connections 1.5), A0 1.0–1.2, A1 1.6–1.7, A2 1.1–1.2, A3 1.1–1.25 (connections 1.4–1.95). NOT CEN/TS 19102:2023 values (Annex C / NA not retrieved) — placeholder",
+      "source": "German A-factor practice, JRC Science for Policy report JRC132615 (2023, re-edition of JRC100166 2016) 'Prospect for European Guidance for the Structural Design of Tensile Membrane Structures', Code Review No. 20 (DIN 4134 + Minte): 'fd = fk,23 / (γf · γM · Ai)', 'γM = 1.4 within the fabric surface, γM = 1.5 for connections', 'A0 = 1.0 – 1.2 (1.2)', 'A1 = 1.6 – 1.7 (1.5 – 3.4)', 'A2 = 1.1 – 1.2 (1.2)', 'A3 = 1.1 – 1.25 (1.4 – 1.95)' (brackets = connections); winter storm uses γM·A0·A2, maximum snow γM·A0·A1·A2, permanent γM·A0·A1·A2·A3. PES/PVC subtable = values inside these published ranges -> V. glass/PTFE and 'other' subtables are NOT from that source -> U (top-level status U because of them). NOT CEN/TS 19102 values (see ts19102)",
+      "url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf",
       "PES/PVC": {
+        "status": "V",
         "gM": 1.4,
+        "gM_joint": 1.5,
         "A0": 1.2,
         "A1_long": 1.7,
         "A1_short": 1.0,
@@ -58,7 +77,13 @@
         "A3": 1.1
       },
       "glass/PTFE": {
+        "status": "U",
+        "range": [
+          0.78,
+          1.24
+        ],
         "gM": 1.4,
+        "gM_joint": 1.5,
         "A0": 1.2,
         "A1_long": 1.4,
         "A1_short": 1.0,
@@ -66,7 +91,13 @@
         "A3": 1.05
       },
       "other": {
+        "status": "U",
+        "range": [
+          0.78,
+          1.24
+        ],
         "gM": 1.4,
+        "gM_joint": 1.5,
         "A0": 1.2,
         "A1_long": 1.7,
         "A1_short": 1.0,
@@ -77,7 +108,59 @@
         0.78,
         1.24
       ],
-      "range_source": "product A0·A1·A2·A3 over the reported German ranges relative to the table values (1.936 … 3.06 vs 2.47 for PES/PVC)"
+      "range_source": "product A0·A1·A2·A3 over the JRC Code Review 20 fabric ranges relative to the PES/PVC table values (1.936 … 3.06 vs 2.47) = published material spread; the A-factors are material-specific test values"
+    },
+    "ts19102": {
+      "status": "V",
+      "source": "CEN/TS 19102 format fd = fk,23/(γM·kbiax·kage·kdur·ktemp·ksize) with values 'modification factors according prCEN/TS 19102' for PES/PVC Type IV (Sattler Atlas) in the JRC workshop worked example: Mollaert & Stimpfle, 'CEN/TS 19102 Design of tensioned membrane structures', The second-generation Eurocodes workshop, 3-5 June 2025, slide 112 (γM 1.5 used, 'mat.: γM0 = 1.4, det.: γM2 = 1.5'; kbiax 1.00; kage 1.40; kdur,P 1.80; kdur,L 1.70; kdur,M 1.20; ktemp,70 2.00; ksize 1.00; situation 1 prestress fk/(γM kbiax kage kdur,P ktemp,70 ksize), situation 4 snow <= 1000 m fk/(γM kbiax kage kdur,M ksize), situation 5 wind fk/(γM kbiax kage ksize)). Single published source of prCEN values; the published TS Annex C.3 table was not accessible -> confirm against CEN/TS 19102:2023 Annex C and the NA",
+      "url": "https://eurocodes.jrc.ec.europa.eu/sites/default/files/2025-08/D1_Mollaert-Stimpfle_website.pdf",
+      "PES/PVC": {
+        "gM0": 1.4,
+        "gM2": 1.5,
+        "kbiax": 1.0,
+        "kage": 1.4,
+        "kdur_P": 1.8,
+        "kdur_L": 1.7,
+        "kdur_M": 1.2,
+        "ktemp70": 2.0,
+        "ksize": 1.0
+      }
+    },
+    "prestress_min": {
+      "status": "V",
+      "source": "JRC132615 (2023) §3 quoting the TensiNet Design Guide [FM04] rule of thumb: 'for PVC coated polyester fabrics not less than 1.3% of the short term tensile strength', 'for PTFE coated glass fibre fabrics not less than 2.5% of the short term tensile strength, but not less than 2.0 kN/m'; French recommendations (Code Review No. 6): 'initial prestress of at least 1.5 kN/m'; practice 1.8-3.5 kN/m",
+      "url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf",
+      "pct_PES/PVC": 1.3,
+      "pct_glass/PTFE": 2.5,
+      "abs_glass/PTFE_kN_m": 2.0,
+      "abs_french_kN_m": 1.5
+    },
+    "fractile_kn": {
+      "value": 1.64,
+      "status": "C",
+      "source": "EN 1990 Annex D Table D1, 5 % fractile, Vx known, n -> infinity; fk,23 = n23·(1 − kn·Vx) as in JRC132615 eq. (6-1) and the JRC 2025 worked example (Vx 0.12 -> 0.803)"
+    },
+    "french_gamma_t": {
+      "status": "V",
+      "source": "French recommendations (Code Review No. 21 in JRC132615): TD = kq·ke·Trm/γt, Table 6-2 γt = 4 (medium pollution) / 4.5 (heavy pollution) for polyester and glass fibre fabrics; Trm = mean uniaxial strength",
+      "url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf",
+      "medium": 4.0,
+      "heavy": 4.5
+    },
+    "french_kq_uncontrolled": {
+      "value": 0.8,
+      "status": "V",
+      "source": "French recommendations (JRC132615 Code Review No. 21): quality factor kq = min(kt, ks) = 1 with external-lab-validated self-control or ISO 9001, otherwise 0.8"
+    },
+    "french_ke_area_ref": {
+      "value": 50.0,
+      "status": "V",
+      "source": "French recommendations (JRC132615 Code Review No. 21) eq. (3a)/(3b): ke = 1 for S <= 50 m2, ke = (50/S)^(1/15) for S > 50 m2 (Table 6-1: 0.9 for 50-200 m2, 0.86 for 250-500 m2)"
+    },
+    "french_gamma_tloc": {
+      "value": 5.0,
+      "status": "V",
+      "source": "French recommendations (JRC132615 Code Review No. 21) eq. (4): attachment areas TD = kq·neff·Trm/γtloc, γtloc = 5; edges: safety factor >= 2.5 on the lowest of >= 3 edge tests"
     },
     "gamma_prestress": {
       "value": 1.0,
@@ -97,7 +180,7 @@
     "tear_factor": {
       "value": 2.0,
       "status": "U",
-      "source": "no code value found; practice: design stress ≤ critical-slit (tear propagation) resistance / ≥ 2 — agree with the checking engineer; second search: codes check tensile strength only, tear strength treated as a material property (Han Bao et al. 2022, J. Ind. Textiles)",
+      "source": "no code value found; practice: design stress ≤ critical-slit (tear propagation) resistance / ≥ 2 — agree with the checking engineer; second search: codes check tensile strength only, tear strength treated as a material property (Han Bao et al. 2022, J. Ind. Textiles). 2026 search: JRC132615 §7.7 'Tear control' gives no factor ('The calculation of tear propagation using the methods of fracture mechanics ... is currently a topic of research'); CEN/TS 19102 §9.5 'Tear control' content not accessible. See membrane-fabric/reference/verification-log.md",
       "range": [
         1.5,
         3.0
@@ -106,90 +189,109 @@
     },
     "etfe_gamma": {
       "value": 1.1,
-      "status": "U",
-      "source": "CEN/TS 19102 ETFE base material γM0 = 1.10 (f_u23 = 40 MPa -> f_Rd 36.4 MPa; SLS elastic limit f_el23 = 15 MPa; welds γM1 1.15–1.45 by quality level) — Stranghöner TexComp 2021, IASS 2024 paper 247 (one paper line seen in 3 searches). Tool applies it to the first-yield stress (conservative)",
-      "range": [
-        1.0,
-        1.4
-      ],
-      "range_source": "γM0 1.10 (TS, single source) … conservative 1.4"
+      "status": "V",
+      "source": "JRC132615 (2023) Eurocode Outlook No. 44 (ETFE foil): 'The recommended value for foil structures is γM= 1.1'; also Moritz concept Table 6-7 γm,ULS = 1.1. Used with the characteristic elastic limit fy10%,23 and the k factors in etfe_k (design proposal; confirm against CEN/TS 19102 §8.3 / Annex C.5 and the NA)",
+      "url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
+    },
+    "etfe_k": {
+      "status": "V",
+      "source": "JRC132615 (2023) Eurocode Outlook No. 44 recommended values (no project tests): kage 1.05, klong 1.2, kperm 1.8 (3.5 for single-layer foil with no regulation in the attachment details), ktemp0 0.7, ktemp50 1.2, ktemp70 1.7, fy10%,23 = 21 N/mm2; fPM,d = fy/(γM·kage·kperm), fLTL,d = fy/(γM·kage·klong·ktemp0), fLTR,d = fy/(γM·kage·klong), fST,d = fy/(γM·kage), fSTH,d = fy/(γM·kage·ktemp50); worked: 'fPM,d = 21 / (1.1 · 1.05 · 1.8) = 10.1 N/mm²'",
+      "url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf",
+      "kage": 1.05,
+      "klong": 1.2,
+      "kperm": 1.8,
+      "kperm_single_unregulated": 3.5,
+      "ktemp0": 0.7,
+      "ktemp50": 1.2,
+      "ktemp70": 1.7,
+      "fy10_23_MPa": 21.0
     },
     "rho_air": {
       "value": 1.25,
       "status": "C",
       "source": "EN 1991-1-4 4.5(1) Note 2 recommended air density 1.25 kg/m³"
     },
-    "added_mass_coeff": {
-      "value": 0.67,
+    "added_mass_model": {
+      "value": 1.0,
       "status": "U",
-      "source": "Lamb (1920) added virtual mass of a clamped circular plate vibrating in one fluid side: 0.6689·ρ·r; used per side for a membrane panel with r = equivalent-area radius (approximation, mode shape differs)",
+      "source": "scale on the added air mass that membrane_check.py computes per panel (Rayleigh integral of the baffled flat rectangular panel, fundamental sine mode, per air side; C_a = 0.726 square, 0.704 for 2:1, 0.646 for 4:1, normalised by r_eq = sqrt(AB/π)). The same integral reproduces Lamb (1920) 0.6689 for the clamped circular plate and 8/(3π) for the rigid piston; circular membrane mode 0.746, consistent with Zhao & Yu (2012, World J. Mech. 2, Table 2) NAVMI rising from 0.654 (plate) to 0.739 at tension parameter 1e4. 1.0 = baffled panel (largest added mass -> lowest, conservative f)",
       "range": [
-        0.55,
-        0.9
+        0.5,
+        1.0
       ],
-      "range_source": "membrane vs plate mode shapes, panel aspect ratio; wind-tunnel added-mass studies scatter"
+      "range_source": "unbaffled isolated canopy: air flows round the edges; for the rigid disk the two-sided unbaffled added mass (8/3)ρa³ is half the baffled two-sided value (Lamb), so 0.5 is the lower bound; curvature and wind flow not covered"
     },
     "corner_ply_eff": {
       "value": 0.8,
       "status": "U",
-      "source": "load share of each welded reinforcement ply taken = seam efficiency (practice assumption; confirm by corner test)",
+      "source": "load share of each welded reinforcement ply (linear model n_eff = 1 + (k−1)·η), used only with membrane_check.py --neff-basis eta. With η = 0.8 it gives n_eff 1.8 / 2.6 / 3.4 for 1 / 2 / 3 reinforcement plies; published n_eff tables are in reinforcement_neff",
       "range": [
-        0.6,
+        0.5,
         0.9
       ],
-      "range_source": "weld/transfer efficiency of reinforcement plies"
+      "range_source": "JRC132615 §6.5: French recs 1.9/2.6/3.1 (η 0.9 then 0.7, 0.5), German practice 1.75/2.6 (η 0.75, 0.5×1.75), Eurocode Outlook 38 safe-sided 1.5 (η 0.5)"
+    },
+    "reinforcement_neff": {
+      "status": "V",
+      "source": "JRC132615 (2023) §6.5 'Membrane reinforcement': French recommendations 'fabric + 1 reinforcement: neff = 1.9, + 2: 2.6, + 3: 3.1'; German practice 'one reinforcement layer calculated with 75%: neff = 1.75, second reinforcement layer calculated with 50%: neff = 1.75·1.5 = 2.6'; Eurocode Outlook No. 38 (CEN/TC 250 WG5 safe-sided): 'the design resistance is increased by 50% unless a more precise evaluation by tests has been performed. NOTE For more than 1 reinforcement layer tests have to be performed.' Lists index = total plies − 1",
+      "url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf",
+      "ts": [
+        1.0,
+        1.5
+      ],
+      "french": [
+        1.0,
+        1.9,
+        2.6,
+        3.1
+      ],
+      "german": [
+        1.0,
+        1.75,
+        2.6
+      ]
     }
   },
   "cable": {
     "gammaR": {
       "value": 1.0,
       "status": "V",
-      "source": "EN 1993-1-11 Table 6.2 (NDP): 1.00; 0.90 only where measures at the anchorages reduce bending from cable rotation (7.1(4)) [NF EN 1993-1-11 full text (French edition, pdfcoffee.com) via search snippet]; ETAs (Fatzer ETA-15/0917, Pfeifer, Teufelberger; DIBt Z-14.7-759) use 1.0, values < 1.0 not permitted by DIBt"
+      "source": "EN 1993-1-11:2006 + AC:2009 full text Table 6.2 (recommended, NDP): 'Measures to minimise bending stresses at the anchorage: Yes 0,90 / No 1,00'; ETAs (Fatzer ETA-15/0917, Pfeifer, Teufelberger-Redaelli ETA-18/1122) use 1.0; DIBt does not permit < 1.0. Stainless strand ETAs may use 1.1 (Carl Stahl ETA-10/0358 γM = 1.1; Redaelli OSX F_Rd = F_uk/1.65)"
     },
     "resistance_div": {
       "value": 1.5,
       "status": "V",
-      "source": "EN 1993-1-11 6.2 / EAD (F_uk/1.5)"
+      "source": "EN 1993-1-11:2006 + AC:2009 full text eq. (6.2): F_Rd = min{F_uk/(1,5 γR); F_k/γR}"
     },
     "ke_socket": {
       "value": 1.0,
       "status": "V",
-      "source": "EN 1993-1-11 Table 6.3 / EAD 200001-00-0602: metal/resin sockets 1.0 (Teufelberger, Fatzer ETA)"
+      "source": "EN 1993-1-11:2006 + AC:2009 full text Table 6.3: 'Metal filled socket 1,0 / Resin filled socket 1,0'"
     },
     "ke_swaged": {
       "value": 0.9,
       "status": "V",
-      "source": "EN 1993-1-11 Table 6.3 / EAD 200001-00-0602: swaged 0.9 (Teufelberger, Fatzer ETA, Ronstan)"
+      "source": "EN 1993-1-11:2006 + AC:2009 full text Table 6.3: 'Swaged socket 0,9'. Product ETAs can be lower (Carl Stahl ETA-10/0358 stainless swaged: 0.9 (6–10 mm), 0.82 (12–14), 0.78 (1x61))"
     },
     "ke_ferrule": {
       "value": 0.9,
-      "status": "U",
-      "source": "EN 13411-3 ferrule-secured eye terminal efficiency 0.9 (product standard); EN 1993-1-11 Table 6.3 value not confirmed",
-      "range": [
-        0.85,
-        0.9
-      ],
-      "range_source": "EN 13411-3 efficiency 0.9; margin"
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text Table 6.3: 'Ferrule-secured eye 0,9' (EN 13411-3 terminal)"
     },
     "ke_ubolt": {
       "value": 0.8,
-      "status": "U",
-      "source": "EN 13411-5 U-bolt grip must hold ≥ 80 % MBF (product standard); Fatzer ETA lists rope clamps at 0.85 (single source); EN 1993-1-11 Table 6.3 value not confirmed",
-      "range": [
-        0.75,
-        0.85
-      ],
-      "range_source": "EN 13411-5 ≥ 0.8; Fatzer ETA 0.85"
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text Table 6.3: 'U-bolt grip 0,8 *)  *) For U-bolt grip a reduction of preload is possible.' (EN 13411-5; not for primary members)"
     },
     "f_sls": {
       "value": 0.45,
-      "status": "C",
-      "source": "EN 1993-1-11 Table 7.2: f_SLS = 0.45 σ_uk where fatigue incl. bending stresses is not verified; 0.50 σ_uk when it is (use f_sls_bending_checked) [NF EN 1993-1-11 full text (French edition, pdfcoffee.com) via search snippet; condition wording from a snippet: confirm]. Teufelberger fatigue tests use σ_sup = 0.45 σ_uk",
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text Table 7.2 (recommended, NA may change): 'Fatigue design without bending stresses 0,45 σuk'; 'Fatigue design including bending stresses 0,50 σuk'. NOTE 4: 0,45 σuk is used for testing (Annex A)",
       "range": [
         0.45,
         0.5
       ],
-      "range_source": "the two Table 7.2 values (condition wording from a single snippet)"
+      "range_source": "not an uncertainty: the two Table 7.2 values; which one applies depends on whether the fatigue design includes bending stresses (use --bending-checked for 0.50)"
     },
     "asce19_factor": {
       "value": 2.2,
@@ -198,78 +300,113 @@
     },
     "alpha_carbon": {
       "value": 1.2e-05,
-      "status": "C",
-      "source": "EN 1993-1-1 / typical steel"
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text 3.3(1) eq. (3.1): αT = 12 x 10^-6 per °C for steel wires"
     },
     "alpha_stainless": {
       "value": 1.6e-05,
-      "status": "C",
-      "source": "EN 1993-1-4 austenitic"
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text 3.3(1) eq. (3.1): αT = 16 x 10^-6 per °C for stainless steel wires"
     },
     "clamp_mu": {
       "value": 0.1,
       "status": "U",
-      "source": "EN 1993-1-11 gives NO default μ: determine by test (clamp slip test). 0.1 is a conservative placeholder; literature uses 0.15–0.2 (Ruan 2019, Adv. Civ. Eng. doi:10.1155/2019/1438754)",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text 6.4.1 defines μ but gives NO value: determine by slip test (Annex A). 0.1 is a conservative placeholder (also used with EN eq. (6.9) by Sun et al. 2025, Sci. Rep. 15, s41598-025-89571-3, https://www.nature.com/articles/s41598-025-89571-3); T/CECS 1010-2022 'comprehensive friction coefficient ... outer bare sealing cable is 0.2' and JTG/T D65-05-2015 0.15 (both as quoted by Sun et al. 2025); Ruan 2019 (Adv. Civ. Eng. doi:10.1155/2019/1438754): cast-steel clamps 0.30–0.46",
       "range": [
         0.08,
         0.2
       ],
-      "range_source": "placeholder 0.1 … literature 0.15–0.2"
+      "range_source": "below the placeholder … T/CECS 1010-2022 value 0.2 (bare sealing cable, per Sun et al. 2025)"
     },
     "clamp_gamma": {
       "value": 1.65,
       "status": "V",
-      "source": "EN 1993-1-11 γM,fr = 1.65 recommended [NF EN 1993-1-11 full text (French edition, pdfcoffee.com) via search snippet]; Ruan 2019 (Adv. Civ. Eng.); Sci. Rep. 2025 s41598-025-89571-3. Check: F∥ ≤ μ(F⊥ + F_r)/γM,fr"
+      "source": "EN 1993-1-11:2006 + AC:2009 full text 6.4.1 NOTE 1: 'γM,fr = 1,65 is recommended' (same value for saddle slip, 6.3.2 NOTE). Check (6.9): F_Ed,∥ ≤ (F_Ed,⊥ + F_r)μ/γM,fr"
+    },
+    "clamp_preload_factor": {
+      "value": 0.7,
+      "status": "V",
+      "source": "EN 1993-1-8:2005 3.9.1(2) eq. (3.7): preloading force of class 8.8/10.9 bolts with controlled tightening F_p,C = 0,7·f_ub·A_s (full text); used for clamp bolts by cable_calc.py clamp"
     },
     "clamp_loss": {
       "value": 0.8,
       "status": "U",
-      "source": "residual clamping force after losses F_r (EN 1993-1-11 lists creep, diameter reduction under tension, compaction/ovalisation, bolt relaxation, temperature); 0.8 is a practice placeholder — re-tighten after stressing",
+      "source": "retained fraction of the bolt preload in F_r. EN 1993-1-11:2006 6.3.2(3) lists the losses (creep, diameter reduction under tension, bedding/ovalisation, external forces, temperature) but gives no value. 0.8 assumes the bolts are re-tightened after stressing (SKILL rule). Without re-tightening the literature is much lower: T/CECS 1010-2022 'P_e = (1 − φ_B)P_0', 'φ_B ... take 0.25–0.55', and 'the loss rate of the initial tightening force of high-strength bolts is 49%' (both quoted by Sun et al. 2025, Sci. Rep., https://www.nature.com/articles/s41598-025-89571-3)",
       "range": [
-        0.7,
-        0.9
+        0.45,
+        0.8
       ],
-      "range_source": "preload retention after stressing/creep"
+      "range_source": "T/CECS 1010-2022 φ_B = 0.55 (retained 0.45, no re-tightening) … 0.8 (re-tightened placeholder)"
     },
     "saddle_p_lim_FLC": {
       "value": 40.0,
-      "status": "C",
-      "source": "EN 1993-1-11 Table 6.4 transverse pressure q_Rk without tests, full locked coil on steel [NF EN 1993-1-11 full text (French edition, pdfcoffee.com) via search snippet; single snippet: confirm]"
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text Table 6.4 q_Rk (no tests), fully locked coil rope, steel clamps and saddles: 40 N/mm². Applies to the pressure from the radial clamping force F_r, q_Ed = F_r/(d'·L2) (6.8); 6.3.3 NOTE: the pressure from F_Ed is covered by the radius rules of 6.3.1"
     },
     "saddle_p_lim_OSS": {
       "value": 25.0,
-      "status": "C",
-      "source": "EN 1993-1-11 Table 6.4 transverse pressure q_Rk without tests, spiral strand on steel [NF EN 1993-1-11 full text (French edition, pdfcoffee.com) via search snippet; single snippet: confirm]"
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text Table 6.4 q_Rk (no tests), spiral strand rope, steel clamps and saddles: 25 N/mm² (clamping pressure, see saddle_p_lim_FLC)"
     },
     "saddle_min_R_over_d": {
+      "value": 30.0,
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text 6.3.1(2): 'The radius r1 of the saddle should not be less than the greater of 30d or r1 ≥ 400⌀' (d cable, ⌀ wire); then wire curvature stresses may be neglected (Fig. 6.1 NOTE: breaking resistance reduced ≤ 3 %). 6.3.1(4): smaller radii for spiral ropes only where justified by tests"
+    },
+    "saddle_min_R_over_d_lined": {
       "value": 20.0,
-      "status": "U",
-      "source": "practice minimum saddle radius ~20–30 d (OSS) / 20–40 d (FLC); below: strength reduction per supplier / ASCE 19 N_d; EN 1993-1-11 designs saddles for k·F_uk (k NDP, value not found)",
-      "range": [
-        15.0,
-        30.0
-      ],
-      "range_source": "practice 20–30 d"
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text 6.3.1(3): 'r1 may be reduced to 20d when the bedding of the rope on at least 60% of the diameter is coated with soft metal or zinc spray with a minimum thickness of 1 mm'"
+    },
+    "saddle_min_R_over_wire": {
+      "value": 400.0,
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text 6.3.1(2): r1 ≥ 400⌀ (⌀ = wire diameter); the tool keeps it with a lining too (conservative reading of 6.3.1(3))"
+    },
+    "saddle_k": {
+      "value": 1.1,
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text 6.3.4(1) NOTE: saddles designed for k·F_uk, 'The value of k = 1,10 is recommended' (NDP)"
+    },
+    "saddle_k_clamp": {
+      "value": 2.0,
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text 6.3.2(2) eq. (6.7): k 'normally 2,0 where there is full friction developed between the saddle grooves and the clamp ... otherwise k = 1,0'"
+    },
+    "saddle_gamma_bed": {
+      "value": 1.0,
+      "status": "C",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text 6.3.3 Table 6.4 NOTE 1: 'The use of the limiting values qRk with γM,bed = 1,00 should lead to a reduction of not more than 3 % of the breaking strength' (γM,bed not given as an NDP value; NA may set one)"
     },
     "f_sls_bending_checked": {
       "value": 0.5,
-      "status": "C",
-      "source": "EN 1993-1-11 Table 7.2: 0.50 σ_uk when the fatigue check includes bending stresses [NF EN 1993-1-11 full text (French edition, pdfcoffee.com) via search snippet; confirm condition wording]"
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text Table 7.2: 'Fatigue design including bending stresses 0,50 σuk' (recommended, NA may change)"
     },
     "f_const_install": {
       "value": 0.6,
-      "status": "C",
-      "source": "EN 1993-1-11 Table 7.1 f_const = 0.60 / 0.55 σ_uk depending on the installation phase [NF EN 1993-1-11 full text (French edition, pdfcoffee.com) via search snippet; confirm which phase takes which value]"
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text Table 7.1: 'First tension components for only a few hours 0,60 σuk'; 'After instalment of other tension components 0,55 σuk' (see f_const_after)"
+    },
+    "f_const_after": {
+      "value": 0.55,
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text Table 7.1: 'After instalment of other tension components 0,55 σuk'"
     },
     "saddle_p_lim_FLC_lined": {
       "value": 100.0,
-      "status": "C",
-      "source": "EN 1993-1-11 Table 6.4 transverse pressure q_Rk without tests, full locked coil with soft lining [NF EN 1993-1-11 full text (French edition, pdfcoffee.com) via search snippet; single snippet: confirm]"
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text Table 6.4 q_Rk (no tests), fully locked coil rope, cushioned clamps and saddles (soft metal or sprayed zinc ≥ 1 mm, NOTE 2): 100 N/mm²"
     },
     "saddle_p_lim_OSS_lined": {
       "value": 60.0,
-      "status": "C",
-      "source": "EN 1993-1-11 Table 6.4 transverse pressure q_Rk without tests, spiral strand with soft lining [NF EN 1993-1-11 full text (French edition, pdfcoffee.com) via search snippet; single snippet: confirm]"
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text Table 6.4 q_Rk (no tests), spiral strand rope, cushioned clamps and saddles: 60 N/mm²"
+    },
+    "creep_shortening_mm_per_m": {
+      "value": 0.15,
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text 3.2.2(3) NOTE 1: 'In the absence of more accurate values this effect [creep of long cables vs short test samples] may be taken into account for cutting to length by applying an additional shortening of 0,15 mm/m'"
     }
   },
   "steel": {
@@ -321,6 +458,99 @@
       "value": 0.9,
       "status": "C",
       "source": "EN 1993-1-1 6.2.3(2)b N_u,Rd = 0.9 A_net f_u / gM2"
+    },
+    "G": {
+      "value": 81000,
+      "status": "C",
+      "source": "EN 1993-1-1 3.2.6(1) shear modulus G = E/(2(1+nu)) ~ 81000 N/mm2 (nu = 0.3)"
+    },
+    "imp_alpha": {
+      "status": "C",
+      "source": "EN 1993-1-1 Table 6.1 imperfection factors for buckling curves (also 6.3.2.2 Table 6.3 for LTB curves a-d)",
+      "a0": 0.13,
+      "a": 0.21,
+      "b": 0.34,
+      "c": 0.49,
+      "d": 0.76
+    },
+    "e0_elastic": {
+      "status": "C",
+      "source": "EN 1993-1-1 Table 5.1 design value of initial local bow imperfection e0/L, elastic analysis",
+      "a0": 0.002857142857142857,
+      "a": 0.0033333333333333335,
+      "b": 0.004,
+      "c": 0.005,
+      "d": 0.006666666666666667
+    },
+    "phi0": {
+      "value": 0.005,
+      "status": "C",
+      "source": "EN 1993-1-1 5.3.2(3)a basic global sway imperfection phi0 = 1/200 (before alpha_h, alpha_m)"
+    },
+    "alpha_cr_min_elastic": {
+      "value": 10.0,
+      "status": "C",
+      "source": "EN 1993-1-1 5.2.1(3) eq. (5.1): first-order analysis may be used if alpha_cr >= 10 (elastic analysis; 15 for plastic)"
+    },
+    "class_limits": {
+      "status": "C",
+      "source": "EN 1993-1-1 Table 5.2 c/t limits for class 1/2/3 (multiplied by eps; CHS d/t by eps^2)",
+      "internal_bending": [
+        72,
+        83,
+        124
+      ],
+      "internal_compression": [
+        33,
+        38,
+        42
+      ],
+      "outstand_compression": [
+        9,
+        10,
+        14
+      ],
+      "chs": [
+        50,
+        70,
+        90
+      ]
+    },
+    "C1_end_moments": {
+      "status": "V",
+      "source": "SCI/Access Steel NCCI SN003b-EN-EU Table 3.1 'Values of C1 for end moment loading (for k = 1)', psi = +1..-1: 1,00 1,14 1,31 1,52 1,77 2,05 2,33 2,57 2,55 (https://www.steelconstruction.info/images/0/0f/SN003b.pdf); values computed with kappa_wt = 0, 'conservative'",
+      "psi": [
+        1.0,
+        0.75,
+        0.5,
+        0.25,
+        0.0,
+        -0.25,
+        -0.5,
+        -0.75,
+        -1.0
+      ],
+      "C1": [
+        1.0,
+        1.14,
+        1.31,
+        1.52,
+        1.77,
+        2.05,
+        2.33,
+        2.57,
+        2.55
+      ]
+    },
+    "Cm_min": {
+      "value": 0.4,
+      "status": "C",
+      "source": "EN 1993-1-1 Annex B Table B.3 linear moment: Cm = 0.6 + 0.4 psi >= 0.4"
+    },
+    "Cm_sway": {
+      "value": 0.9,
+      "status": "C",
+      "source": "EN 1993-1-1 Annex B Table B.3 note: members with sway buckling mode Cmy = 0.9 (Cmz = 0.9)"
     }
   },
   "aisc": {
@@ -359,7 +589,17 @@
     "gamma_R_h": {
       "value": 1.1,
       "status": "C",
-      "source": "EN 1997-1 Table A.4 R2 sliding resistance (Design Approach 2)"
+      "source": "EN 1997-1 Table A.5 (spread foundations) R2 sliding resistance gamma_R;h = 1.1 (Design Approach 2)"
+    },
+    "gamma_G_sup": {
+      "value": 1.35,
+      "status": "C",
+      "source": "EN 1997-1 Table A.3 set A1 (= EN 1990 Table A1.2(B)) unfavourable permanent action, used for the bearing check (DA2)"
+    },
+    "gamma_G_inf": {
+      "value": 1.0,
+      "status": "C",
+      "source": "EN 1997-1 Table A.3 set A1 favourable permanent action, used for the bearing check (DA2)"
     },
     "gamma_conc": {
       "value": 24.0,
@@ -367,24 +607,23 @@
       "source": "EN 1991-1-1 Table A.1 plain concrete ~24 kN/m3"
     },
     "helical_Kt_per_m": {
-      "value": 33.0,
-      "status": "U",
-      "source": "Hubbell/CHANCE torque correlation Kt ≈ 10 ft^-1 for 1.5-1.75 in square shafts; use manufacturer / load test",
-      "range": [
-        23.0,
-        40.0
-      ],
-      "range_source": "torque factor spread by shaft size (Hubbell)"
+      "value": 32.8,
+      "status": "V",
+      "source": "ICC-ES ESR-2794 (Hubbell CHANCE, reissued May 2026) sec. 4.1.5: 'Kt = Torque correlation factor of 10 ft-1 (32.8 m-1) for the CHANCE Model SS5 (1.5-inch) and SS175 (1.75-inch) square shaft piles' (https://www.icc-es.org/wp-content/uploads/report-directory/ESR-2794.pdf); default = square shaft"
+    },
+    "helical_Kt_by_shaft": {
+      "status": "V",
+      "source": "ICC-ES ESR-2794 sec. 4.1.5: 10 ft-1 (32.8 m-1) SS5/SS175 square shafts, 9 ft-1 (30 m-1) RS2875.203/.276 (2-7/8 in pipe), 7 ft-1 (23 m-1) RS3500 and SS175/RS3500 combo, 5.5 ft-1 (18.0 m-1) RS4500 [m-1]",
+      "SS5": 32.8,
+      "SS175": 32.8,
+      "RS2875": 30.0,
+      "RS3500": 23.0,
+      "RS4500": 18.0
     },
     "helical_FS": {
       "value": 2.0,
-      "status": "U",
-      "source": "common allowable-load factor of safety on torque-correlated ultimate capacity; verify with local code",
-      "range": [
-        2.0,
-        2.5
-      ],
-      "range_source": "allowable-load FS"
+      "status": "V",
+      "source": "ICC-ES ESR-2794 sec. 4.1.5 eq. 4 'Qall = 0.5 Qult' and 'F.S. = an appropriate factor of safety for the project, not less than 2.0' (2.5 under the IRC without a geotechnical investigation); IBC 1810.3.3.1.9"
     }
   },
   "anchor_EN1992_4": {
@@ -510,43 +749,58 @@
   "fatigue_cables": {
     "dsC_spiral_socket": {
       "value": 150.0,
-      "status": "U",
-      "source": "EN 1993-1-11 Section 9 category NOT confirmed (150 recalled); German NA route uses Δσc = 112 N/mm² for full-locked hangers (BASt Leitfaden Hänger)",
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text Table 9.1 (with Fig. 9.1): 'Fully locked coil rope with metal or resin socketing 150'; 'Spiral strands with metal or resin socketing 150' (exposure classes 3 and 4; valid only with Annex A sockets, 6 and 8 detailing, corrosion protection, 9.2(2)). Lower national practice: BASt hanger guideline Δσc = 112 N/mm² for full-locked hangers",
       "range": [
         112.0,
-        160.0
+        150.0
       ],
-      "range_source": "German NA 112 (FLC hangers) … 160"
+      "range_source": "not an uncertainty in the EN value: BASt/German practice 112 (FLC hangers) … EN Table 9.1 150; prEN 1993-1-11 revises the FLC S-N curve (Steel Construction 2021, doi:10.1002/stco.202100009)"
     },
     "dsC_parallel_wire": {
       "value": 160.0,
-      "status": "U",
-      "source": "EN 1993-1-11 Section 8 (recalled; not confirmed)",
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text Table 9.1: 'Parallel wire strands with epoxy socketing 160'; 'Bundle of parallel strands 160'; 'Bundle of parallel wires 160'",
       "range": [
-        140.0,
+        160.0,
         160.0
       ],
-      "range_source": "parallel wire / strand"
+      "range_source": "degenerate range (no evidence for another value); kept because fatigue_check.py --sensitivity reads it"
     },
     "dsC_threaded_bar": {
       "value": 50.0,
-      "status": "U",
-      "source": "EN 1993-1-11 / EN 1993-1-9 threaded bolts in tension category 50 (recalled)",
+      "status": "V",
+      "source": "EN 1993-1-9:2005 full text Table 8.1 detail 14: 'Bolts and rods with rolled or cut threads in tension' category 50, Δσ on the tensile stress area; size effect for φ > 30 mm: ks = (30/φ)^0.25. (EN 1993-1-11 Table 9.1 gives 105 for prestressing bars, not for threaded tension rods)",
       "range": [
-        36.0,
+        37.0,
         50.0
       ],
-      "range_source": "threaded bars/bolts in tension (EN 1993-1-9 cat 50, reduced for large Ø)"
+      "range_source": "EN 1993-1-9 size factor (30/φ)^0.25 × 50: 50 (≤ M30) … 37 (M100)"
+    },
+    "dsC_prestressing_bar": {
+      "value": 105.0,
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text Table 9.1 group A: 'Prestressing bars 105'"
     },
     "m_rope": {
       "value": 4.0,
-      "status": "U",
-      "source": "current EN 1993-1-11 uses m1 = 4, m2 = m1 + 2 = 6 for full-locked coil ropes (Maljaars, Steel Construction stco.202100009); tool uses m = 4 with no knee (conservative)",
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text Figure 9.1 (fatigue strength curves for tension components): slope m = 4 down to Δσc at 2×10^6 cycles, m = 6 beyond (see m2_rope, N_knee_rope); fatigue_check.py uses m = 4 for all N (conservative beyond 2×10^6)",
       "range": [
-        3.5,
-        5.0
+        4.0,
+        6.0
       ],
-      "range_source": "rope S-N slope spread (FLC research m1 = 4)"
+      "range_source": "the two slopes of EN 1993-1-11 Fig. 9.1 (m = 4 for N ≤ 2×10^6, m = 6 beyond)"
+    },
+    "m2_rope": {
+      "value": 6.0,
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text Figure 9.1: second slope 1:6 beyond 2×10^6 cycles (no cut-off drawn)"
+    },
+    "N_knee_rope": {
+      "value": 2000000.0,
+      "status": "V",
+      "source": "EN 1993-1-11:2006 + AC:2009 full text Figure 9.1: knee of the tension-component curve at 2×10^6 cycles (= Δσc)"
     }
   },
   "fabrication": {

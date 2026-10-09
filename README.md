@@ -8,12 +8,13 @@ the fabric, the cables and the structural steel, and how the three connect.
 .claude/skills/
 ├── tensile-structures/     HUB: load path, interactions, workflow, standards map, JSON schema, code-factor register
 │   └── scripts/factors.py, report.py
-├── membrane-fabric/        materials (PVC, PTFE, silicone, ETFE, ePTFE), prestress, stress checks, seams
+├── membrane-fabric/        materials (PVC, PTFE, silicone, ETFE, ePTFE; JRC class tables + datasheets), prestress,
+│                           stress checks (factor, FM, MLIT 666, A-factors, CEN/TS 19102, French), corners, tear, panel modes
 │   └── scripts/membrane_check.py, material_select.py, biaxial_fit.py
 ├── cable-tension-members/  spiral strand / FLC / stainless / bars; EN 1993-1-11, ASCE 19; lengths; schedules
 │   └── scripts/cable_calc.py, cable_schedule.py
 ├── steel-supports/         masts, struts, arches, rings, bases, foundations/anchors
-│   └── scripts/member_check.py, frame2d.py, foundation_check.py, mast_check.py
+│   └── scripts/member_check.py, frame2d.py, frame3d.py, foundation_check.py, mast_check.py
 ├── connection-precedents/  FIRST step for any connection: Pinterest precedent search, image review, board, gate
 │   └── scripts/precedent_search.py, pinterest_fetch.py
 ├── tensile-connections/    fabric↔cable, fabric↔steel, cable↔steel; pins/lugs; corner plates; mast heads

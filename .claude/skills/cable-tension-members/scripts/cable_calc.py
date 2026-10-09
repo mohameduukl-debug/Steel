@@ -106,6 +106,15 @@ class Catenary:
         s = f(0) + f(L) + sum((4 if k % 2 else 2) * f(k * hstep) for k in range(1, n))
         return s * hstep / 3
 
+    def unstretched(self, EA: float, n: int = 400) -> float:
+        """unstressed length ∫ ds/(1 + T/EA) of the stressed geometry (Simpson): exact for linear-elastic strain,
+        L/(1 + F/EA) for a straight member; S − ∫T/EA ds is its first-order approximation."""
+        L = self.L
+        f = lambda x: math.cosh((x - self.x0) / self.a) / (1 + self.T(x) / EA)  # noqa: E731
+        hstep = L / n
+        s = f(0) + f(L) + sum((4 if k % 2 else 2) * f(k * hstep) for k in range(1, n))
+        return s * hstep / 3
+
 
 def solve_H(L, h, w, target, kind):
     """find H such that sag_mid (kind='f') or length (kind='S') equals target."""
@@ -125,6 +134,15 @@ def solve_H(L, h, w, target, kind):
     return math.sqrt(lo * hi)
 
 
+def parabola_length(L, h, f):
+    """exact arc length of the parabola through (0,0) and (L,h) with mid-span sag f below the chord."""
+    if f == 0:
+        return math.hypot(L, h)
+    B = 8 * f / (L * L)                       # du/dx of the slope u = y'(x)
+    G = lambda u: 0.5 * (u * math.sqrt(1 + u * u) + math.asinh(u))  # noqa: E731  ∫√(1+u²)du
+    return (G(h / L + 4 * f / L) - G(h / L - 4 * f / L)) / B
+
+
 def parabola(L, h, w, H=None, f=None):
     """parabolic cable, w per unit horizontal length."""
     if H is None:
@@ -135,9 +153,16 @@ def parabola(L, h, w, H=None, f=None):
     VB = w * L / 2 + H * h / L
     TA, TB = math.hypot(H, VA), math.hypot(H, VB)
     n = f / L
-    S = math.hypot(L, h) + 8 * f * f / (3 * math.hypot(L, h))  # chord approx
+    Lc = math.hypot(L, h)
     return {"H": H, "f": f, "V_low": VA, "V_high": VB, "T_low": TA, "T_high": TB, "Tmax": max(TA, TB),
-            "length": S, "sag_ratio": n}
+            "length": parabola_length(L, h, f), "length_approx": Lc + 8 * f * f / (3 * Lc), "sag_ratio": n}
+
+
+def assumptions(*lines):
+    """print the modelling assumptions of a sub-command (CLAUDE.md: every tool prints its assumptions)."""
+    print("Assumptions:")
+    for ln in lines:
+        print(f"  - {ln}")
 
 
 KE_KEY = {"socket": "cable.ke_socket", "swaged": "cable.ke_swaged", "ferrule": "cable.ke_ferrule",
@@ -182,11 +207,16 @@ def cmd_sag(a):
     print(f"  support B (x=L):  V = {VB:9.3f} kN (up)   T = {c.T(a.L):9.3f} kN")
     print(f"  Tmax = {max(c.T(0), c.T(a.L)):.3f} kN")
     p = parabola(a.L, a.h, a.w, H=H)
-    print(f"  parabola check (w per horizontal m): f = {p['f']:.4f} m, Tmax = {p['Tmax']:.3f} kN, "
-          f"S = {p['length']:.4f} m")
+    print(f"  parabola check (same H, w per horizontal m): f = {p['f']:.4f} m, Tmax = {p['Tmax']:.3f} kN, "
+          f"S = {p['length']:.4f} m (exact parabola arc)")
     if a.EA:
         st = c.stretch(a.EA)
-        print(f"  elastic stretch ∫T/EA ds = {st * 1000:.2f} mm  -> unstressed length {c.length - st:.4f} m")
+        print(f"  elastic stretch ∫T/EA ds = {st * 1000:.2f} mm  -> unstressed length ∫ds/(1+T/EA) = "
+              f"{c.unstretched(a.EA):.4f} m")
+    assumptions("w is per unit ARC length (self-weight): exact catenary; pinned supports; geometry of the loaded cable",
+                "the parabola line uses w per HORIZONTAL length (membrane/roof load) with the same H — it is a "
+                "different load case, so H, f and Tmax differ by O(n²) (see reference/validation.md)",
+                "unstressed length = ∫ds/(1 + T/EA) over the loaded geometry (linear-elastic, prestretched cable)")
     return c
 
 
@@ -195,17 +225,27 @@ def cmd_length(a):
     c = Catenary(a.L, a.h, a.w, H)
     S = c.length
     st = c.stretch(a.EA)
-    S0_inst = S - st
+    S0_inst = c.unstretched(a.EA)
     S0_ref = S0_inst / (1 + a.alpha * (a.T_install - a.T_ref))
     print(f"Stressed geometric length S          = {S:.4f} m  (H = {H:.2f} kN, Tmax = {c.T(0 if c.T(0) > c.T(a.L) else a.L):.2f} kN)")
     print(f"Elastic stretch ∫T/EA ds             = {st * 1000:.2f} mm  (EA = {a.EA:.0f} kN)")
     print(f"Unstressed length at {a.T_install:>5.1f} °C        = {S0_inst:.4f} m")
-    print(f"Unstressed length at ref {a.T_ref:>5.1f} °C    = {S0_ref:.4f} m   (alpha = {a.alpha:.1e}/K)")
+    print(f"Unstressed length at ref {a.T_ref:>5.1f} °C    = {S0_ref:.4f} m   (alpha = {a.alpha:.1e}/K [{a.alpha_st}])")
+    if getattr(a, "creep", False):
+        cr = F.get("cable.creep_shortening_mm_per_m")
+        S0_ref -= cr * S0_ref / 1000
+        print(f"Creep allowance {cr} mm/m [{F.status('cable.creep_shortening_mm_per_m')}] (EN 1993-1-11 3.2.2(3) NOTE 1) "
+              f"-> cut length {S0_ref:.4f} m")
     if a.fittings:
         print(f"Cable length excl. fittings          = {S0_ref - a.fittings / 1000:.4f} m "
               f"(pin-to-pin minus {a.fittings:.0f} mm of fittings)")
     print("Note: specify on the cable schedule: length is pin-to-pin, unstressed (or under the "
           "stated reference load), at the reference temperature; prestretched cable.")
+    assumptions("catenary geometry with w per arc length; unstressed length S0 = ∫ds/(1 + T/EA) (exact for "
+                "linear-elastic strain; = L/(1 + F/EA) for a straight member)",
+                "uniform temperature, linear thermal strain α·ΔT on the unstressed length (EN 1993-1-11 3.3)",
+                "prestretched cable with stable E (EN 1993-1-11 3.2.2(2)); EN 3.4(2) also lists creep, clamp "
+                "seating and first-loading set — add them (e.g. --creep) or use the supplier's measured values")
     return S0_ref
 
 
@@ -223,6 +263,10 @@ def cmd_edge(a):
     if not 0.07 <= ratio <= 0.13:
         print("  NOTE: typical edge-cable sag is ~8–12 % of chord (≈10 % common). Flatter -> higher T "
               "and anchor forces; deeper -> fabric loss, softer edge.")
+    assumptions("uniform membrane stress n normal to the cable, in the plane of the edge: the cable is a circular "
+                "arc with constant T = n·R (hoop equilibrium)",
+                "no tangential (shear) load from the membrane; cable self-weight neglected",
+                "T is characteristic unless n is a factored (design) stress; use the analysis for non-uniform n")
     return T
 
 
@@ -247,6 +291,11 @@ def cmd_resist(a):
     if a.Fmin_force is not None:
         print(f"  No-slack check: minimum force under all combinations = {a.Fmin_force:.1f} kN "
               + ("OK (>0)" if a.Fmin_force > 0 else "SLACK -> increase prestress / revise geometry"))
+    assumptions(f"k_e = {a.ke:.2f} [{getattr(a, 'ke_st', '?')}] (EN 1993-1-11 Table 6.3); give --Fk for components "
+                "that need the proof-strength term of eq. (6.2) (bars; not needed for ropes with F_k ≥ F_uk/1.5)",
+                "F_Ed is the ULS design force from a geometrically non-linear analysis; F_ser the characteristic force",
+                "ASCE 19 line: T = --T-asce, else F_Ed/1.4 as a rough unfactored force (give --T-asce)",
+                "group A tension rods are designed to EN 1993-1-1/1-8 (EN 1993-1-11 6.1): use the 'rod' sub-command")
     if getattr(a, "sensitivity", False):
         resist_sensitivity(a)
     return FRd_en
@@ -267,17 +316,18 @@ def resist_sensitivity(a):
     """re-check at the ends of the range of each [U] factor used (register values only)."""
     out = []
     print("Sensitivity to uncertain factors:")
-    if getattr(a, "termination", None) and F.status(KE_KEY[a.termination]) == "U":
+    if getattr(a, "termination", None):
         key = KE_KEY[a.termination]
         res = F.sensitivity(lambda k: max(u for u in resist_utils(a, ke=k) if u is not None), key)
         print(F.sens_line(f"k_e ({a.termination}) on max(ULS, SLS)", res))
-        out.append(res)
+        if res["lo"] is not None:
+            out.append(res)
     if a.Fser is not None and a.fsls_st != "user" and F.frange(a.fsls_key):
         res = F.sensitivity(lambda f: resist_utils(a, fsls=f)[1], a.fsls_key)
         print(F.sens_line("f_sls on SLS", res))
         out.append(res)
     if not out:
-        print("  no factor with an uncertainty range used in this check (γR, 1.5 and ASCE 2.2 are [V]; "
+        print("  no factor with an uncertainty range used in this check (γR, 1.5, k_e and ASCE 2.2 are [V]; "
               "user values are yours)")
     return out
 
@@ -306,29 +356,52 @@ def cmd_irvine(a):
     print(f"  initial  H0 = {H0:.2f} kN, sag f0 = {f0:.4f} m (f/L = {f0 / L:.4f})")
     print(f"  final    H  = {H:.2f} kN, sag f  = {f:.4f} m, Tmax ≈ {H * math.sqrt(1 + 16 * (f / L) ** 2):.2f} kN")
     print(f"  Irvine parameter λ² = {lam2:.2f}  ({'taut-string like' if lam2 < 1 else 'sag-dominated'})")
+    assumptions("Irvine (1981) cable equation: parabolic profile, level supports, w per horizontal length, "
+                "uniformly distributed load before and after",
+                "L_e = L(1 + 8n²) from the initial state; unstressed length constant (no slip, no support movement)",
+                "small sag (f/L ≲ 1/8); error vs the exact elastic catenary < 1 % at f/L = 1/20 "
+                "(reference/validation.md)")
     return H
 
 
-def clamp_frd(a, mu=None, gfr=None, kl=None):
-    """slip resistance [kN] of a bolted cable clamp (EN 1993-1-8 preload F_p,C = 0.7·f_ub·A_s)."""
+def bolt_preload(a):
+    """F_p,C = 0.7·f_ub·A_s [kN] (EN 1993-1-8 eq. (3.7), factor from the register), or the user's --Fp per bolt."""
+    if getattr(a, "Fp", None):
+        return a.Fp
     AS = {10: 58, 12: 84.3, 16: 157, 20: 245, 24: 353, 27: 459, 30: 561}
     fub = {"8.8": 800, "10.9": 1000, "A4-70": 700, "A4-80": 800}[a.grade]
     As = AS.get(int(a.bolt_d), 0.78 * math.pi * a.bolt_d ** 2 / 4)
-    Fp = 0.7 * fub * As / 1e3
-    mu = F.get("cable.clamp_mu") if mu is None else mu
+    return F.get("cable.clamp_preload_factor") * fub * As / 1e3
+
+
+def clamp_factor(a, attr, key):
+    """user value (--mu / --retained) or register value."""
+    v = getattr(a, attr, None)
+    return (v, "user") if v is not None else (F.get(key), F.status(key))
+
+
+def clamp_frd(a, mu=None, gfr=None, kl=None):
+    """slip resistance [kN] of a bolted cable clamp, EN 1993-1-11 eq. (6.9):
+    F_Rd = μ·(n_s·n_b·F_p·k_ret + F_Ed,⊥)/γM,fr  (n_s friction surfaces, F_r = n_b·F_p·k_ret)."""
+    Fp = bolt_preload(a)
+    mu = clamp_factor(a, "mu", "cable.clamp_mu")[0] if mu is None else mu
     gfr = F.get("cable.clamp_gamma") if gfr is None else gfr
-    kl = F.get("cable.clamp_loss") if kl is None else kl
-    return a.surfaces * mu * a.nb * Fp * kl / gfr, Fp
+    kl = clamp_factor(a, "retained", "cable.clamp_loss")[0] if kl is None else kl
+    Fperp = getattr(a, "Fperp", 0.0) or 0.0
+    return mu * (a.surfaces * a.nb * Fp * kl + Fperp) / gfr, Fp
 
 
 def cmd_clamp(a):
     """slip resistance of a bolted cable clamp (cross clamp, edge clamp, saddle clamp)."""
     FRd, Fp = clamp_frd(a)
-    mu, gfr, kl = F.get("cable.clamp_mu"), F.get("cable.clamp_gamma"), F.get("cable.clamp_loss")
-    print(f"Cable clamp: {a.nb} bolts M{a.bolt_d:g} {a.grade}, F_p,C = 0.7·f_ub·A_s = {Fp:.1f} kN each, "
-          f"{a.surfaces} friction surfaces")
-    print(f"  μ = {mu} [{F.status('cable.clamp_mu')}], preload retained {kl} [{F.status('cable.clamp_loss')}], "
-          f"γM,fr = {gfr} [{F.status('cable.clamp_gamma')}]")
+    (mu, mu_st), (kl, kl_st) = clamp_factor(a, "mu", "cable.clamp_mu"), clamp_factor(a, "retained", "cable.clamp_loss")
+    gfr = F.get("cable.clamp_gamma")
+    Fperp = getattr(a, "Fperp", 0.0) or 0.0
+    src = "given (--Fp)" if getattr(a, "Fp", None) else f"0.7·f_ub·A_s, M{a.bolt_d:g} {a.grade}"
+    print(f"Cable clamp: {a.nb} bolts, F_p = {Fp:.1f} kN each ({src}), {a.surfaces} friction surfaces"
+          + (f", F_Ed,⊥ = {Fperp:g} kN" if Fperp else ""))
+    print(f"  μ = {mu} [{mu_st}], preload retained {kl} [{kl_st}], γM,fr = {gfr} [{F.status('cable.clamp_gamma')}]")
+    print(f"  F_r = n_b·F_p·k = {a.nb * Fp * kl:.1f} kN;  F_Rd = μ(n_s·F_r + F_Ed,⊥)/γM,fr  (EN 1993-1-11 eq. 6.9)")
     u = a.dT / FRd
     print(f"  slip resistance F_Rd = {FRd:.1f} kN  vs  force to hold {a.dT:.1f} kN  -> util {u:.2f}"
           + ("  <-- FAIL" if u > 1 else "  OK"))
@@ -336,48 +409,111 @@ def cmd_clamp(a):
     if getattr(a, "sensitivity", False):
         print("Sensitivity to uncertain factors (one at a time, others at register value):")
         worst = {}
-        for key, name, kw, bad in (("cable.clamp_mu", "μ", "mu", 0), ("cable.clamp_gamma", "γM,fr", "gfr", 1),
-                                   ("cable.clamp_loss", "preload retained", "kl", 0)):
+        for key, name, kw, bad, attr in (("cable.clamp_mu", "μ", "mu", 0, "mu"), ("cable.clamp_gamma", "γM,fr", "gfr", 1, None),
+                                         ("cable.clamp_loss", "preload retained", "kl", 0, "retained")):
+            if attr and getattr(a, attr, None) is not None:
+                print(f"  sensitivity {name}: user value {getattr(a, attr)} (no range)")
+                continue
             print(F.sens_line(name, F.sensitivity(lambda v, kw=kw: a.dT / clamp_frd(a, **{kw: v})[0], key)))
             if F.frange(key):
                 worst[kw] = F.frange(key)[bad]
         uw = a.dT / clamp_frd(a, **worst)[0]
         print(f"  all ranged factors at their unfavourable ends: util {uw:.2f} -> "
               + ("still OK" if uw <= 1 else "NOT OK: test the clamp (slip test, EN 1993-1-11 has no default μ) or add bolts"))
+    assumptions("EN 1993-1-11 6.4.1 eq. (6.9); μ has NO code value (slip test, Annex A) — register 0.1 is a placeholder",
+                "clamping force F_r = bolts × preload × retained fraction; the retained fraction covers creep, diameter "
+                "reduction under tension, bedding and temperature (6.3.2(3)) — 0.8 assumes re-tightening after stressing",
+                "n_s = 2 for a two-half clamp gripping the cable (friction on both halves); F_Ed,⊥ counted once",
+                "transverse pressure of F_r to 6.3.3 / Table 6.4 is checked with 'saddle --Fr' (not here)")
     return u
 
 
+def saddle_checks(a, mu=None):
+    """EN 1993-1-11 6.3 checks of a cable over a saddle -> dict of results (forces kN, lengths mm)."""
+    lined = getattr(a, "lined", False)
+    rd_key = "cable.saddle_min_R_over_d_lined" if lined else "cable.saddle_min_R_over_d"
+    Rmm = a.R * 1000
+    Rmin = max(F.get(rd_key) * a.d, F.get("cable.saddle_min_R_over_wire") * a.delta)
+    r = {"Rmin": Rmin, "u_radius": Rmin / Rmm, "rd_key": rd_key, "sigma_b": a.E * 1000 * a.delta / (2 * Rmm)}
+    T2, wrap = getattr(a, "T2", None), getattr(a, "wrap", None)
+    if T2 and wrap:
+        mu = F.get("cable.clamp_mu") if mu is None else mu
+        g = F.get("cable.clamp_gamma")
+        alpha = math.radians(wrap)
+        T1, T2 = max(a.T, T2), min(a.T, T2)
+        Fr = getattr(a, "Fr", None) or 0.0
+        k = F.get("cable.saddle_k_clamp") if getattr(a, "k_clamp", None) is None else a.k_clamp
+        r["u_slip"] = (T1 - k * Fr * mu / g) / (T2 * math.exp(mu * alpha / g))      # eq. (6.6) / (6.7)
+        r["L2"] = Rmm * alpha
+    Fr, L2 = getattr(a, "Fr", None), getattr(a, "L2", None) or r.get("L2")
+    if Fr and L2:
+        dp = getattr(a, "dprime", None) or a.d
+        if not 0.6 * a.d - 1e-9 <= dp <= a.d + 1e-9:
+            raise SystemExit("EN 1993-1-11 6.3.3: 0.6·d ≤ d' ≤ d")
+        key = ("cable.saddle_p_lim_FLC" if a.type == "FLC" else "cable.saddle_p_lim_OSS") + ("_lined" if lined else "")
+        q = Fr * 1e3 / (dp * L2)
+        r["q"], r["qRd"] = q, F.get(key) / F.get("cable.saddle_gamma_bed")
+        r["u_pressure"] = q / r["qRd"]
+    return r
+
+
 def cmd_saddle(a):
-    """cable over a saddle / deviator: transverse pressure, radius ratio, wire bending stress."""
+    """cable over a saddle / deviator: EN 1993-1-11 6.3 radius, slip, clamping pressure; groove pressure; wire bending.
+
+    Returns p/q_Rk with p = T/(R·d) (indicative groove pressure, kept for API compatibility); the EN checks are printed."""
     p = a.T * 1e3 / (a.R * 1000 * a.d)                             # N/mm² on projected width d
     lined = getattr(a, "lined", False)
     key = ("cable.saddle_p_lim_FLC" if a.type == "FLC" else "cable.saddle_p_lim_OSS") + ("_lined" if lined else "")
     plim = F.get(key)
-    Rd = a.R * 1000 / a.d
-    Rmin = F.get("cable.saddle_min_R_over_d")
-    sb = a.E * 1000 * a.delta / (2 * a.R * 1000)                   # MPa, outer wire bending
-    print(f"Saddle: T = {a.T} kN, R = {a.R} m, cable Ø{a.d:g} mm ({a.type}), wire δ = {a.delta} mm")
-    print(f"  transverse pressure p = T/(R·d) = {p:.1f} N/mm²  vs limit {plim} [{F.status(key)}]  -> util {p / plim:.2f}"
-          + ("  <-- FAIL" if p > plim else ""))
-    print(f"  R/d = {Rd:.1f}  vs minimum {Rmin} [{F.status('cable.saddle_min_R_over_d')}]"
-          + ("  <-- below: apply strength reduction (supplier / ASCE 19 N_d)" if Rd < Rmin else "  OK"))
-    print(f"  outer-wire bending stress σ_b = E·δ/(2R) = {sb:.0f} MPa (Reuleaux upper bound — inter-wire slip lowers it; relevant for fatigue; use a liner)")
-    print("  Limit = q_Rk of EN 1993-1-11 Table 6.4 (no tests); apply any partial factor the clause / NA requires. "
-          "The saddle itself is designed for k·F_uk (k: NDP) and cable slip over it per EN 1993-1-11 (μ, γM,fr).")
+    r = saddle_checks(a)
+    sb = r["sigma_b"]                                              # MPa, outer wire bending (Reuleaux)
+    print(f"Saddle: T = {a.T} kN, R = {a.R} m, cable Ø{a.d:g} mm ({a.type}), wire δ = {a.delta} mm"
+          + (", soft-metal / zinc-spray bedding ≥ 1 mm" if lined else ", steel groove"))
+    print(f"  EN 6.3.1 radius: R ≥ max({F.get(r['rd_key']):g}d, {F.get('cable.saddle_min_R_over_wire'):g}δ) = "
+          f"{r['Rmin']:.0f} mm [{F.status(r['rd_key'])}]  vs  R = {a.R * 1000:.0f} mm  -> util {r['u_radius']:.2f}"
+          + ("  OK: wire curvature stresses may be neglected (≤ 3 % strength loss)" if r["u_radius"] <= 1 else
+             "  <-- below: curvature stresses NOT covered — reduce the strength per tests/supplier (6.3.1(4))"))
+    if "u_slip" in r:
+        print(f"  EN 6.6/6.7 slip: (F1 − k·F_r·μ/γ)/F2 ≤ e^(μα/γM,fr), μ = {F.get('cable.clamp_mu')} "
+              f"[{F.status('cable.clamp_mu')}], α = {a.wrap:g}° -> util {r['u_slip']:.2f}" + ("  <-- FAIL" if r["u_slip"] > 1 else "  OK"))
+    if "u_pressure" in r:
+        print(f"  EN 6.8 clamping pressure q = F_r/(d'·L2) = {r['q']:.1f} N/mm² vs q_Rk/γM,bed = {r['qRd']:.0f} "
+              f"[{F.status(key)}] -> util {r['u_pressure']:.2f}" + ("  <-- FAIL" if r["u_pressure"] > 1 else "  OK"))
+    if getattr(a, "Fuk", None):
+        print(f"  EN 6.3.4 saddle design force k·F_uk = {F.get('cable.saddle_k')} × {a.Fuk:g} = "
+              f"{F.get('cable.saddle_k') * a.Fuk:.0f} kN [{F.status('cable.saddle_k')}]")
+    print(f"  groove pressure p = T/(R·d) = {p:.1f} N/mm² (indicative vs q_Rk {plim:g}: util {p / plim:.2f}; EN 6.3.3 "
+          "NOTE: the pressure from F_Ed is covered by the radius rule, q_Rk applies to F_r)")
+    print(f"  outer-wire bending stress σ_b = E·δ/(2R) = {sb:.0f} MPa (Reuleaux upper bound — inter-wire slip lowers it; "
+          "relevant for fatigue; use a liner)")
     if getattr(a, "sensitivity", False):
         print("Sensitivity to uncertain factors:")
-        print(F.sens_line(f"p_lim ({a.type}{', lined' if lined else ''})", F.sensitivity(lambda v: p / v, key)))
-        print(F.sens_line("min R/d (util = R_min/R)", F.sensitivity(lambda v: v / Rd,
-                                                                      "cable.saddle_min_R_over_d")))
+        if "u_slip" in r:
+            print(F.sens_line("μ on saddle slip", F.sensitivity(lambda v: saddle_checks(a, mu=v)["u_slip"], "cable.clamp_mu")))
+        print(F.sens_line(f"radius rule ({r['rd_key'].split('.')[-1]})",
+                          F.sensitivity(lambda v: max(v * a.d, F.get('cable.saddle_min_R_over_wire') * a.delta) / (a.R * 1000),
+                                        r["rd_key"])))
+    assumptions("EN 1993-1-11 6.3: radius rule (6.3.1), slip (6.6/6.7, needs --T2 and --wrap), clamping pressure "
+                "(6.8, needs --Fr and --L2 or --wrap), saddle force k·F_uk (6.3.4, needs --Fuk)",
+                "μ cable/saddle has no code value: register placeholder (slip test); γM,fr = 1.65; γM,bed = 1.0",
+                "the 400δ wire term is kept with a lined groove (conservative reading of 6.3.1(3))",
+                "σ_b = E·δ/(2R) assumes no inter-wire slip (upper bound)")
     return p / plim
 
 
 def cmd_freq(a):
     print(f"Taut cable L={a.L} m, T={a.T} kN, m={a.m} kg/m")
     c = math.sqrt(a.T * 1000 / a.m)
-    for n in range(1, a.modes + 1):
-        print(f"  mode {n}: f = {n * c / (2 * a.L):.2f} Hz")
+    freqs = [n * c / (2 * a.L) for n in range(1, a.modes + 1)]
+    for n, fn in enumerate(freqs, 1):
+        print(f"  mode {n}: f = {fn:.2f} Hz")
     print("Keep f1 clear of vortex-shedding / rain-wind ranges; add dampers or helical fillets on long stays.")
+    print("EN 1993-1-11 8.3: provide for dampers (damping ratio > 0.5 %) on stays > 80 m; keep the stay frequency "
+          "> 20 % away from the structure's ω and 2ω; amplitude ≤ L/500 at 15 m/s wind.")
+    assumptions("taut string f_n = n/(2L)·√(T/m): pinned ends, no bending stiffness, no sag",
+                "sag raises the symmetric modes (Irvine λ²): check with 'freq-tension --EA' or keep λ² ≪ 1",
+                "m includes coating, sheath and fittings spread along L")
+    return freqs
 
 
 def metric_pitch(d):
@@ -399,7 +535,7 @@ def stress_area(d, P):
 def cmd_rod(a):
     """group A tension rod (EN 1993-1-11 group A: design to EN 1993-1-1 / 1-8)."""
     P = a.pitch or metric_pitch(a.d)
-    As = stress_area(a.d, P)
+    As = getattr(a, "As", None) or stress_area(a.d, P)
     dg = a.d_shank or a.d
     Ag = math.pi * dg * dg / 4
     gM0, gM2, gR = F.get("steel.gM0"), F.get("steel.gM2"), F.get("cable.gammaR")
@@ -428,6 +564,10 @@ def cmd_rod(a):
         print("  NOTE: f_y/f_u > 0.9 — little ductility reserve: the thread governs; check the product ETA.")
     print("  Notes: f_y/f_u depend on the diameter (EN 10025 thickness steps; bar products per ETA). Rolled "
           "threads improve fatigue, not static A_s. Rods need prestress so they never go slack (no compression).")
+    assumptions("EN 1993-1-11 6.1: tension rod systems to EN 1993-1-1 / 1-8 (gross yield + thread k2·f_u·A_s/γM2)",
+                "A_s = " + ("supplier value (--As)" if getattr(a, "As", None) else
+                            "ISO 898-1 π/4·(d − 0.9382P)² for an ISO metric thread (give --As for rolled/upset threads)"),
+                "f_y, f_u are product values (e.g. Macalloy 460: 460/610 MPa); fatigue: EN 1993-1-9 detail 14 (cat. 50)")
     return min(NRd, a.fitting_Rd or math.inf)
 
 
@@ -519,8 +659,11 @@ def cmd_freq_tension(a):
     if spread > 0.05:
         print(f"  WARNING: modes disagree by {spread * 100:.0f} % — check mode numbering, end fixity, L and m "
               "(include sockets/dampers in m and L).")
-    print("  Assumes pinned ends, uniform cable, level chord, T ≈ H (small sag); clamped ends raise f "
-          "(the fitted EI absorbs part of it).")
+    assumptions("pinned ends, uniform cable, level chord, T ≈ H (small sag); clamped ends raise f "
+                "(the fitted EI absorbs part of it)",
+                "f_n² = n²T/(4mL²) + n⁴π²EI/(4mL⁴) (hinged beam-string); symmetric modes corrected with Irvine's "
+                "equation when --EA is given (in-plane modes; out-of-plane modes are not affected by sag)",
+                "L = free vibrating length between the fittings; m incl. coating/sheath")
     return T
 
 
@@ -542,6 +685,10 @@ def cmd_stress_turns(a):
     print(f"  thread pitch {a.pitch} mm, {a.thread} ({'left+right hand' if a.thread == 'double' else 'one end'}) "
           f"-> lead {lead:g} mm/turn -> {turns:.1f} turns")
     print("  Verify force by measurement (load cell, jack pressure or freq-tension); relieve torsion; lock nuts.")
+    assumptions("ΔL = ΔF·(L/EA_sec + 1/k_sup): cable linear-elastic, supports elastic (k_sup) or rigid",
+                "with --w: Ernst secant modulus for the sag change between F1 and F2 (level chord, w per length); "
+                "validated against the exact elastic catenary in reference/validation.md",
+                "lead = pitch (single) or 2·pitch (left/right-hand turnbuckle); thread friction/torsion ignored")
     return turns
 
 
@@ -570,6 +717,8 @@ def main(argv=None):
     s.add_argument("--T-install", type=float, default=20.0)
     s.add_argument("--T-ref", type=float, default=20.0)
     s.add_argument("--fittings", type=float, default=0.0, help="total fitting length both ends [mm]")
+    s.add_argument("--creep", action="store_true",
+                   help="subtract the EN 1993-1-11 3.2.2(3) creep allowance (register, 0.15 mm/m) from the cut length")
 
     s = sp.add_parser("edge")
     s.add_argument("--chord", type=float, required=True)
@@ -608,6 +757,10 @@ def main(argv=None):
     s.add_argument("--bolt-d", type=float, default=16.0)
     s.add_argument("--grade", default="8.8", choices=["8.8", "10.9", "A4-70", "A4-80"])
     s.add_argument("--surfaces", type=int, default=2, help="friction surfaces (clamp halves on the cable)")
+    s.add_argument("--Fp", type=float, default=None, help="bolt preload per bolt [kN] (else 0.7·f_ub·A_s)")
+    s.add_argument("--mu", type=float, default=None, help="friction coefficient from a slip test (else register)")
+    s.add_argument("--retained", type=float, default=None, help="retained preload fraction (else register)")
+    s.add_argument("--Fperp", type=float, default=0.0, help="external design load pressing the cable into the clamp [kN]")
     s.add_argument("--sensitivity", action="store_true")
 
     s = sp.add_parser("saddle")
@@ -617,7 +770,15 @@ def main(argv=None):
     s.add_argument("--type", choices=["FLC", "OSS"], default="OSS")
     s.add_argument("--delta", type=float, default=5.0, help="outer wire diameter [mm]")
     s.add_argument("--E", type=float, default=160.0, help="cable modulus [kN/mm²]")
-    s.add_argument("--lined", action="store_true", help="soft lining (EN 1993-1-11 Table 6.4 lined values)")
+    s.add_argument("--lined", action="store_true",
+                   help="soft metal / zinc spray ≥ 1 mm bedding (EN 1993-1-11 6.3.1(3) 20d, Table 6.4 cushioned)")
+    s.add_argument("--T2", type=float, default=None, help="cable force on the other side of the saddle [kN] (slip)")
+    s.add_argument("--wrap", type=float, default=None, help="deviation angle of the cable over the saddle [deg]")
+    s.add_argument("--Fr", type=float, default=None, help="radial clamping force of saddle clamps [kN]")
+    s.add_argument("--k-clamp", type=float, default=None, help="k of eq. (6.7) (register 2.0 full friction, else 1.0)")
+    s.add_argument("--L2", type=float, default=None, help="contact length between tangent points [mm] (else R·α)")
+    s.add_argument("--dprime", type=float, default=None, help="contact width d' [mm], 0.6d ≤ d' ≤ d (default d)")
+    s.add_argument("--Fuk", type=float, default=None, help="characteristic breaking strength -> saddle force k·F_uk")
     s.add_argument("--sensitivity", action="store_true")
 
     s = sp.add_parser("freq")
@@ -637,6 +798,7 @@ def main(argv=None):
     s.add_argument("--d", type=float, required=True, help="thread nominal diameter [mm]")
     s.add_argument("--pitch", type=float, default=None, help="thread pitch [mm] (default ISO coarse, 6 above M64)")
     s.add_argument("--d-shank", type=float, default=None, help="shank diameter if different (upset ends) [mm]")
+    s.add_argument("--As", type=float, default=None, help="thread tensile stress area from the supplier [mm²]")
     s.add_argument("--fy", type=float, required=True, help="yield / 0.2%% proof strength [MPa] (product data)")
     s.add_argument("--fu", type=float, required=True, help="tensile strength [MPa] (product data)")
     s.add_argument("--FEd", type=float, required=True)
