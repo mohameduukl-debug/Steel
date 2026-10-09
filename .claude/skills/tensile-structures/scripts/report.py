@@ -10,6 +10,8 @@ Inputs (any subset; sections without data are skipped):
   --patterns  cutting-pattern CSV (cutting_pattern.py)
   --nest      nesting CSV (nest_panels.py) — listed only
   --extra     free text / Markdown file appended (e.g. steel, connection, foundation tool outputs)
+  --precedents  precedents.json files of the connection-precedents skill (gate status, concept, verification)
+  --validation  append the validation matrix of the tool set (validate_all.py)
 
 Always included: design basis with every code factor and its V/C/U status, a list of the
 unverified factors, model limitations and the governing utilisations found in the data.
@@ -158,9 +160,35 @@ def build(a):
         rows_n = read_csv(a.nest)
         md += [f"Nesting: {len(rows_n)} panels placed (see nested DXF).", ""]
 
+    if a.precedents:
+        sys.path.insert(0, os.path.join(HERE, "..", "..", "connection-precedents", "scripts"))
+        import precedent_search as PS  # noqa: E402
+        md += ["## 7a. Connection precedents (searched before design)", ""]
+        rows = []
+        for f in a.precedents:
+            with open(f) as fh:
+                d = json.load(fh)
+            ok, res = PS.gate(d, base_dir=os.path.dirname(os.path.abspath(f)))
+            viewed = sum(1 for p in d.get("precedents", []) if p.get("viewed"))
+            rows.append((d.get("node", "?"), len(d.get("precedents", [])), viewed, "PASS" if ok else "FAIL",
+                         (d.get("concept") or {}).get("summary", "")[:120]))
+            if not ok:
+                governing.append((f"precedent gate {d.get('node', '?')}", 9.99))
+        md += [table(["node", "pins", "viewed", "gate", "concept"], rows), ""]
+        for f in a.precedents:
+            with open(f) as fh:
+                d = json.load(fh)
+            if d.get("verification"):
+                md += [f"Verification ({d.get('node', '?')}):", ""] + [f"- {v}" for v in d["verification"]] + [""]
+
     if a.extra:
         with open(a.extra) as fh:
             md += ["## 7. Further checks (steel, connections, foundations)", "", "```", fh.read().rstrip(), "```", ""]
+
+    if a.validation:
+        import validate_all as VA  # noqa: E402
+        vm = VA.render(VA.matrix())
+        md += ["## 8. Validation of the tools", ""] + vm.split("\n")[2:] + [""]
 
     md += ["## Governing utilisations", ""]
     md += [table(["item", "max utilisation", "status"], [(k, v, "OK" if v <= 1 else "NOT OK") for k, v in governing])
@@ -225,6 +253,8 @@ def main(argv=None):
     ap.add_argument("--patterns")
     ap.add_argument("--nest")
     ap.add_argument("--extra")
+    ap.add_argument("--precedents", nargs="*", help="precedents.json files (connection-precedents skill)")
+    ap.add_argument("--validation", action="store_true", help="append the validation matrix")
     ap.add_argument("--factors", default=None)
     ap.add_argument("--out", default="report")
     a = ap.parse_args(argv)

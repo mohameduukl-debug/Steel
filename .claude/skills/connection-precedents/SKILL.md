@@ -25,7 +25,9 @@ our forces and the tools give the dimensions. Project hooks enforce this (see En
    It saves `NN_<pin>.jpg` and `precedents.json`. Shop listings go last. Pinterest search pages need a login, so use the
    WebSearch results. **Open every image you judge with the Read tool.** Never judge a pin from its title.
    If fewer than 5 relevant pins, use the fallback domains (Architen, Birdair, TensiNet, Fabritecture, Pfeifer, Macalloy …).
-   In mode B, give the user the Pinterest URLs and read the screenshots they send.
+   In mode B, give the user the Pinterest URLs, read the screenshots they send and register them with
+   `python3 scripts/pinterest_fetch.py ingest <folder> --node corner-plate [--links links.json]`.
+   `fetch` retries network errors and 429/5xx with backoff (2, 4, 8 s) and de-duplicates by pin id and image signature.
 5. **Review** each viewed image with `reference/precedent-review.md`. Set `viewed`, `kind` (photo, shop_drawing,
    manufacturer, sketch, render, product, infographic, ai_generated), `scale`, `relevant`, the `ideas`, and the features
    yes / no / ? / n/a. Mark off-topic pins `relevant: false`.
@@ -45,7 +47,8 @@ our forces and the tools give the dimensions. Project hooks enforce this (see En
 
    A pass is recorded in `.claude/state/precedent_gate.json`.
 9. **Design and verify** with `tensile-connections` (`corner_plate.py`, `pin_connection.py`, `steel_joint_checks.py`,
-   `fatigue_check.py`), then draw with `fabrication-drawings`. Keep the board `.md` with the calculation report.
+   `fatigue_check.py`), then draw with `fabrication-drawings`. Record the tool results that prove the concept in the
+   `verification` list of precedents.json; the board prints them. Keep the board `.md` with the calculation report.
 
 ## Enforcement (project hooks, `.claude/settings.json`)
 - `.claude/hooks/precedent_reminder.py` (UserPromptSubmit) adds this rule to connection-design prompts, English or Arabic.
@@ -63,9 +66,22 @@ our forces and the tools give the dimensions. Project hooks enforce this (see En
   drawings or reports. Proprietary hardware comes from the supplier's data.
 - Every script prints its assumptions. Pass them on, and state that this step finds ideas, not code compliance.
 
+## Limitations
+- Pinterest pages are parsed from their embedded data; if Pinterest changes its page format, `fetch` returns no pins.
+  Then switch to mode B (screenshots + `ingest`). Search pages need a login, so discovery relies on WebSearch.
+- The same drawing is often re-uploaded under different pins and image signatures (worked examples: corner #7 and
+  mast head #7). Duplicate images are not detected automatically without an image library; note them by hand.
+- Judging a feature from a photo is an engineering opinion. The board records every judgement next to its link so a
+  reviewer can check it. The gate checks that the work was done, not that every judgement is right.
+- Precedents never replace the checks: the concept is sized and verified with `tensile-connections`.
+
 ## References
 - `reference/search_keywords.json`: 14 node types, English/Arabic queries (Arabic tested 2026-10), variants, n/a features,
   checks, fallback domains with reachability.
 - `reference/precedent-review.md`: how to read a connection picture, image types, scale, feature weights, typical red flags.
-- `reference/worked-example-corner.md`: the board of a real search for the demo sail corner (20 pins, 13 viewed,
-  gate passed, concept verified with corner_plate.py at 0.3 mm eccentricity). Data: `examples/precedents_corner_example.json`.
+- `reference/worked-example-corner.md`: real search for the demo sail corner (20 pins, 15 viewed, gate passed, concept
+  verified with corner_plate.py: 0.3 mm eccentricity). Data: `examples/precedents_corner_example.json`.
+- `reference/worked-example-masthead.md`: real search for the demo mast head (20 pins, 11 viewed, gate passed, concept
+  verified in 3D: mast reaction along the axis, zero out-of-plane force on the ear plates). Data:
+  `examples/precedents_masthead_example.json`.
+- `reference/validation.md`: what is tested and how.

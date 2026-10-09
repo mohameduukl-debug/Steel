@@ -56,6 +56,12 @@ Two-part steel corner plate in the plane of the two edge cables: curved clamp st
 - single fork pinned at the apex on the bisector  (from #6, #8, #18)
 - all lines through one point (ring idea), but with a pinned plate, not marine hardware  (from #13)
 
+## Verification of the concept (tool output)
+
+- corner_plate.py --m EC1:15:83:180:48 --m EC2:105:83:-48:180 --m strap:60:6:100:173
+- anchor force 123.4 kN at -120 deg, on the edge-cable bisector (deviation 0.0 deg)
+- moment about the anchor pin from the hole layout 0.038 kNm -> eccentricity 0.3 mm: lines of action concurrent
+
 ## Design requirements for our node
 
 - [ ] Lines of action of all cables/straps meet at one point (pin, mast axis) (critical)

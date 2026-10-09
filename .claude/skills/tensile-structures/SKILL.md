@@ -64,12 +64,22 @@ Key couplings:
 Loop back as needed. Connection geometry changes the cable lengths (node-to-pin deductions); steel stiffness
 changes the stresses; patterning can move the seams (warp direction and stiffness).
 
+### Validation matrix
+```bash
+python3 .claude/skills/tensile-structures/scripts/validate_all.py --run-tests [--strict] [--out validation_matrix]
+```
+For every skill: number of cases validated against an independent reference (each skill's `reference/validation.md`),
+scripts not yet covered, [V]/[C]/[U] tags in the text and the V/C/U status of the register entries it owns. `--strict`
+fails when a script has no validation entry. Quote the matrix in a report with `report.py --validation`.
+
 ### Calculation report
 ```bash
 python3 .claude/skills/tensile-structures/scripts/report.py --title "Project X" --model sail.json \
         --cases sail_cases_envelope.json --material PVC-III --cables sail_cables.csv \
         --patterns sail_patterns.csv --extra steel_checks.txt --out project_report
 ```
+`--precedents prec_corner/precedents.json ...` adds the connection-precedents gate status, concept and verification
+(a failing gate is listed as governing); `--validation` appends the validation matrix.
 Sections: design basis (every factor with its V/C/U tag and the list of unverified ones), form finding, load cases
 and envelopes, membrane check per case, cable schedule, patterns, further checks (pasted tool output), governing
 utilisations and limitations.
@@ -99,11 +109,20 @@ python3 $S/tensile-structures/scripts/report.py --model sail.json --cases sail_c
 * Masts are normally pin-based and loaded near-axially. All cables at a head or plate should be concurrent.
 * Slope ≥ ~15° is often quoted for drainage and self-cleaning. Always check ponding on the deformed shape.
 
+## Limitations of the tool set
+* The tools are a design and checking aid. Each tool is validated against independent references (see the validation
+  matrix), but a project still needs the design and independent check of a qualified engineer and, for final design of
+  large or complex roofs, a commercial form-finding/analysis package (Easy, SOFiSTiK, ixForten …).
+* Code values come from the register. **U** values must be confirmed, or shown not to govern with `--sensitivity`.
+* Material, cable and hardware data are typical published values. Use the supplier's certified data for the project.
+* All tools are stdlib Python. Large meshes are slower than commercial solvers (see `tensile-analysis` timings).
+
 ## References in this skill
 * `reference/system-interconnections.md`: how each pair of components interacts, every interface, failure modes.
 * `reference/design-workflow-checklist.md`: stage-by-stage checklist with deliverables and hold points.
 * `reference/model-schema.md`: JSON model format shared by all tools.
 * `reference/standards-map.md`: which standard covers what (EU/US/JP), with verification status.
+* `reference/validation.md`: hub validation (chain statics, register, report, matrix).
 
 ## Code-factor register (one place for every code value)
 All tools read partial factors, stress factors, γR, k_e, SLS limits, ASCE factors and more from

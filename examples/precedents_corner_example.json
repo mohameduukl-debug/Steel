@@ -530,5 +530,10 @@
       "replaceable": "yes"
     }
   },
-  "_note": "Worked example, 2026-10-01: corner plate of the demo sail (examples/run_demo.sh). Searched with WebSearch (pinterest.com), fetched with pinterest_fetch.py, images viewed and judged by hand. Images are not stored; follow the pin links. The concept was then verified with corner_plate.py (eccentricity 0.3 mm)."
+  "_note": "Worked example, 2026-10-01: corner plate of the demo sail (examples/run_demo.sh). Searched with WebSearch (pinterest.com), fetched with pinterest_fetch.py, images viewed and judged by hand. Images are not stored; follow the pin links. The concept was then verified with corner_plate.py (eccentricity 0.3 mm).",
+  "verification": [
+    "corner_plate.py --m EC1:15:83:180:48 --m EC2:105:83:-48:180 --m strap:60:6:100:173",
+    "anchor force 123.4 kN at -120 deg, on the edge-cable bisector (deviation 0.0 deg)",
+    "moment about the anchor pin from the hole layout 0.038 kNm -> eccentricity 0.3 mm: lines of action concurrent"
+  ]
 }

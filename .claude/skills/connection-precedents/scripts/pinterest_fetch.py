@@ -9,6 +9,7 @@ CLI
   python3 pinterest_fetch.py probe                                     # what can be reached from here
   python3 pinterest_fetch.py fetch URL [URL ...] --node corner-plate --out prec_corner [--max 15] [--per-board 6]
           [--details] [--merge prec_corner/precedents.json]
+  python3 pinterest_fetch.py ingest screenshots/ --node corner-plate [--links links.json]   # mode B, no network
 
 Output: <out>/NN_<pinid>.jpg and <out>/precedents.json (the precedent_search.py format, features still "?").
 Consumer products (shop listings, "ft." kits) are pushed to the end and marked; they are rarely structural precedents.
@@ -37,10 +38,23 @@ def _ctx():
     return ssl.create_default_context(cafile=ca if ca and os.path.exists(ca) else None)
 
 
-def get(url, timeout=25):
+def get(url, timeout=25, retries=3, backoff=2.0, _sleep=None):
+    """GET with retries and exponential backoff on network errors and 429/5xx (not on 403/404)."""
+    import time
+    import urllib.error
+    sleep = _sleep or time.sleep
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "en,ar;q=0.8"})
-    with urllib.request.urlopen(req, context=_ctx(), timeout=timeout) as r:
-        return r.status, r.read()
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(req, context=_ctx(), timeout=timeout) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            if e.code not in (429, 500, 502, 503, 504) or attempt == retries:
+                raise
+        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError):
+            if attempt == retries:
+                raise
+        sleep(backoff * 2 ** attempt)
 
 
 def classify(url):
@@ -197,6 +211,27 @@ def fetch(urls, out, node="", max_n=15, per_board=6, details=False, merge=None, 
     return data
 
 
+IMG_EXT = (".jpg", ".jpeg", ".png", ".webp", ".gif")
+
+
+def ingest(folder, node="", merge=None, links=None):
+    """Mode B: precedents from screenshots/photos the user supplied (no network). links: {filename: url}."""
+    data = {"node": node, "searched": [], "precedents": []}
+    if merge and os.path.exists(merge):
+        with open(merge) as fh:
+            data = json.load(fh)
+    have = {os.path.basename(p.get("image", "")) for p in data["precedents"]}
+    links = links or {}
+    for fn in sorted(os.listdir(folder)):
+        if not fn.lower().endswith(IMG_EXT) or fn in have:
+            continue
+        data["precedents"].append({
+            "title": os.path.splitext(fn)[0], "url": links.get(fn) or f"user-supplied:{fn}", "source": "user",
+            "image": os.path.join(folder, fn), "viewed": False, "kind": "?", "scale": "?", "relevant": True,
+            "ideas": [], "features": {}, "notes": ""})
+    return data
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -209,6 +244,11 @@ def main(argv=None):
     f.add_argument("--per-board", type=int, default=6)
     f.add_argument("--details", action="store_true", help="also open each board pin for its title (slower)")
     f.add_argument("--merge", help="existing precedents.json to add to")
+    g = sub.add_parser("ingest", help="mode B: build precedents.json from screenshots the user supplied")
+    g.add_argument("folder")
+    g.add_argument("--node", default="")
+    g.add_argument("--out", help="precedents.json to write (default <folder>/precedents.json)")
+    g.add_argument("--links", help="JSON {filename: pin URL} if the user gave the links")
     a = ap.parse_args(argv)
     print("Assumptions: images are downloaded only for private design review; cite the pin URL, do not reuse the image.")
     if a.cmd == "probe":
@@ -221,6 +261,14 @@ def main(argv=None):
             print("Mode B: Pinterest not reachable from here. Use WebSearch titles, give the user the Pinterest URLs and")
             print("ask for screenshots, or allow pinterest.com and i.pinimg.com in the environment's network settings.")
         return rows
+    if a.cmd == "ingest":
+        out = a.out or os.path.join(a.folder, "precedents.json")
+        links = json.load(open(a.links)) if a.links else None
+        data = ingest(a.folder, a.node, merge=out if os.path.exists(out) else None, links=links)
+        with open(out, "w") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=2)
+        print(f"{len(data['precedents'])} precedents -> {out}. View each image, then fill kind/scale/features/ideas.")
+        return data
     return fetch(a.urls, a.out, a.node, a.max, a.per_board, a.details, a.merge)
 
 

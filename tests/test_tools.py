@@ -985,6 +985,71 @@ class TestPrecedents(unittest.TestCase):
         self.assertTrue(pfetch.is_consumer("COLOURTREE 12 ft. Stainless Steel Pole - The Home Depot"))
         self.assertFalse(pfetch.is_consumer("Membrane Plate and Anchor Point on Tensile Fabric"))
 
+    def test_masthead_example_and_verification_section(self):
+        with open(os.path.join(ROOT, "examples", "precedents_masthead_example.json")) as fh:
+            mh = json.load(fh)
+        ok, res = prec.gate(mh)
+        self.assertTrue(ok, [r for r in res if not r[1]])
+        md, summ = prec.make_board(mh)
+        self.assertIn("## Verification of the concept", md)
+        self.assertIn(7, [i for i, k in summ["red_flags"] if k == "concurrent"])   # eccentric tie-back drawing
+        # the verification claim in the example is reproduced by corner_plate (3D): resultant along the mast axis
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            corner.main(["--v", "corner:-0.6767:-0.6767:-0.2900:123.4", "--v", "tieback:0.4545:0.4545:-0.7660:183.9"])
+        self.assertIn("176.6", out.getvalue())
+        self.assertIn("(-0.000, -0.000, 1.000)", out.getvalue())
+
+    def test_ingest_mode_b(self):
+        d = tempfile.mkdtemp()
+        for fn in ("b.png", "a.jpg", "notes.txt"):
+            open(os.path.join(d, fn), "wb").close()
+        data = pfetch.ingest(d, "corner-plate", links={"a.jpg": "https://www.pinterest.com/pin/1/"})
+        self.assertEqual([p["title"] for p in data["precedents"]], ["a", "b"])
+        self.assertEqual(data["precedents"][0]["url"], "https://www.pinterest.com/pin/1/")
+        self.assertTrue(data["precedents"][1]["url"].startswith("user-supplied:"))
+        self.assertFalse(any(p["viewed"] for p in data["precedents"]))   # must still be viewed and judged
+
+    def test_fetch_retry_backoff(self):
+        import urllib.error
+        import urllib.request
+        calls, sleeps = [], []
+
+        class Resp:
+            status = 200
+
+            def read(self):
+                return b"ok"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def fake(req, context=None, timeout=None):
+            calls.append(1)
+            if len(calls) < 3:
+                raise urllib.error.URLError("reset")
+            return Resp()
+
+        orig = urllib.request.urlopen
+        urllib.request.urlopen = fake
+        try:
+            self.assertEqual(pfetch.get("https://x", _sleep=sleeps.append), (200, b"ok"))
+            self.assertEqual(sleeps, [2.0, 4.0])
+            calls.clear()
+
+            def forbidden(req, context=None, timeout=None):
+                calls.append(1)
+                raise urllib.error.HTTPError("https://x", 403, "no", {}, None)
+            urllib.request.urlopen = forbidden
+            with self.assertRaises(urllib.error.HTTPError):
+                pfetch.get("https://x", _sleep=sleeps.append)
+            self.assertEqual(len(calls), 1)                                # 403 is not retried
+        finally:
+            urllib.request.urlopen = orig
+
     def test_hooks(self):
         f = os.path.join(tempfile.mkdtemp(), "none.json")
         cmd = "python3 .claude/skills/tensile-connections/scripts/corner_plate.py --m a:0:1:1:0"

@@ -207,6 +207,9 @@ def make_board(data, lib=None):
         for x in c.get("ideas", []):
             if x.get("idea"):
                 L.append(f"- {x['idea']}  (from #{', #'.join(map(str, x.get('from', []))) or '?'})")
+    if data.get("verification"):
+        L += ["", "## Verification of the concept (tool output)", ""]
+        L += [f"- {v}" for v in data["verification"]]
     L += ["", "## Design requirements for our node", ""]
     for k, (w, good, _) in FEATURES.items():
         if k in na:
