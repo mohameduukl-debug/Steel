@@ -37,7 +37,7 @@ temperature (short-term, warm).
 | `fm` | f/SF on new-fabric strength | characteristic | FM DS 1-59 Table 2.2.6.1: P+D 8, others 5 [V]; `--fm-combo` |
 | `japan` | Fm/K | characteristic | MLIT 666: Fm/8 long-term, Fm/4 short-term, Fm/5 folded (`--folded`), Fm/10 and Fm/5 for narrow joints (`--japan-joint narrow`) [V, primary text]. Fm = designated standard strength. No extra seam efficiency (the joint class is in the divisor). |
 | `partial` | f_k/(γM·ΠA) | design (factored) | German A-factors by situation: long-term γM·A0·A1·A2·A3, wind γM·A0·A2, temperature γM·A0·A2·A3; γM 1.4 fabric, 1.5 seams. PES/PVC [V, JRC132615 Code Review 20]; glass/PTFE and other [U] |
-| `ts19102` | f_k/(γM·kbiax·kage·kdur·ktemp·ksize) | design (factored) | prCEN values for PES/PVC from the JRC 2025 worked example [V, single source]: γM0 1.4, γM2 1.5 (seams), kage 1.4, kdur P/L/M 1.8/1.7/1.2, ktemp,70 2.0. `--ts-snow L` for snow above 1000 m. Other families: add the values with `--factors`. |
+| `ts19102` | f_k/(γM·kbiax·kage·kdur·ktemp·ksize) | design (factored) | PES/PVC values from the JRC 2025 worked examples [V, quoted in the slides and in JRC report JRC144386; the TS Annex C.3 table itself not read]: γM0 1.4, γM2 1.5 (seams), kage 1.4, kdur P/L/M 1.8/1.7/1.2, ktemp,70 2.0 (the upper of two published sets). `--family alt_set_PES/PVC` = the lower set (kage 1.25, kdur 1.6/1.5/1.15, ktemp,70 1.5, γM 1.5); `--sensitivity` scales the k-product 0.6–1.0. `--ts-snow L` for snow above 1000 m. Other families: add the values with `--factors`. |
 | `french` | kq·ke·Trm/γt | per the French combinations | γt 4 / 4.5 (`--pollution`), ke = (50/S)^(1/15) (`--area` or `--ke`), kq 1 / 0.8 (`--kq`) [V, JRC132615 Code Review 21] |
 
 Strength input:
@@ -82,8 +82,9 @@ python3 membrane_check.py --material ETFE-250um --nw 2.5 --case snow            
   Eurocode Outlook 44 proposal].
 - `--sensitivity`: re-runs every check whose factor carries a range: partial (published spread 0.78–1.24; [U] for
   glass/PTFE), tear factor, added-mass model, and the corner n_eff bases. It prints ROBUST when the OK / NOT OK
-  decision holds over the range, or DEPENDS when it does not. The `factor`, `fm`, `japan`, `ts19102` and `french`
-  factors are [V] and carry no range.
+  decision holds over the range, or DEPENDS when it does not. `ts19102` carries the published spread between the two
+  JRC 2025 PES/PVC sets (0.6–1.0 on the k-product). The `factor`, `fm`, `japan` and `french` factors are [V] and
+  carry no range.
 - Every run ends with an **Assumptions** block: strength basis, method, model limits.
 
 ### `scripts/material_select.py`: filter and rank fabrics for a project
@@ -106,12 +107,20 @@ python3 material_select.py --n-design 40.2 --case wind --method ts19102 --family
 ### `scripts/biaxial_fit.py`: biaxial test → stiffness + compensation (EN 17117-1/-2 style)
 ```bash
 python3 biaxial_fit.py test.csv --per-ratio --prestress 2 2 --residual 0.45 1.10
+python3 biaxial_fit.py ../reference/data/biaxial_uhlemann2011_T2.csv --msaj                # MSAJ commentary, 8 paths
+python3 biaxial_fit.py test.csv --msaj --paths 10 --no-reciprocity --ratios 1:1,2:1
 ```
 - Least-squares fit of E_w·t, E_f·t, ν_wf and ν_fw with reciprocity over all load ratios (CSV:
   ratio,n_w,n_f,eps_w,eps_f; kN/m and %).
 - `--per-ratio`: stiffness per stress state, with ν fixed from the full fit.
 - Prints the **direct** stiffness form as well (Ed_w, Ed_f, crimp interchange Ed_wf), for programs that use it.
   `direct_to_inverse()` / `inverse_to_direct()` convert between the forms (JRC132615 eqs. 2.5–2.12).
+- `--msaj`: MSAJ/M-02-1995 commentary least squares (strain term). Each path is replaced by its regression line, and
+  the constants minimise the strain errors with the path intercepts. 8 paths by default (zero-load paths omitted),
+  `--paths 10` includes them; `--no-reciprocity` fits four constants; `--ratios` picks load ratios. Reproduces the
+  published constants of a real glass/PTFE test (Uhlemann et al. 2011, options 1–4 and 6, within 1.5 % on E·t).
+- The default fit (secant through the origin) and the MSAJ fit (path slopes) differ a lot on real data (778 vs
+  1312 kN/m warp on the published test). State which one you used.
 - Compensation = residual strain after the prestress cycles + elastic strain at the prestress, for `cutting_pattern.py`.
 
 ### Library `reference/materials.json`
@@ -174,8 +183,9 @@ deeper [U].
   classification). They are for screening and benchmarking only. Design with the supplier's certified 5 % fractile
   strength, seam strength at 23 °C and 70 °C, and the biaxial stiffness and compensation of the **delivered batch**.
   Entries marked `excerpt` or `typical` are not verified at source.
-- Code factors are project-specific. The `ts19102` values are prCEN values from one published worked example; the
-  published CEN/TS 19102:2023 Annex C table could not be read. Confirm every factor against the edition and National
+- Code factors are project-specific. The `ts19102` values come from the JRC 2025 worked examples, which publish two
+  different PES/PVC sets under the TS label; the tool uses the upper one. The published CEN/TS 19102:2023 Annex C table
+  could not be read, and a German NA (DIN CEN/TS 19102/NA:2025-12) exists. Confirm every factor against the edition and National
   Annex in force (CEN/TS 19102 is a Technical Specification, not yet an EN). glass/PTFE and "other" A-factors are [U].
 - Stress-factor methods expect characteristic load effects; `partial`/`ts19102` expect factored ones. Mixing them
   double counts or omits safety.
@@ -185,9 +195,10 @@ deeper [U].
   tear factor is [U]. Test near the design defect length.
 - Panel frequency: flat panel, small amplitude, still air, baffled added mass (upper bound). Curvature, wind flow and
   aeroelastic effects are not included and need wind-tunnel or CFD data for large flat panels.
-- `biaxial_fit.py` fits a linear orthotropic law with reciprocity. It does not identify shear stiffness or
-  non-linear, history-dependent behaviour. It has been validated against the published direct/inverse formulation,
-  not yet against a published raw test data set (see `reference/validation.md`).
+- `biaxial_fit.py` fits a linear orthotropic law (with or without reciprocity). It does not identify shear stiffness
+  or non-linear, history-dependent behaviour. It is validated against the published direct/inverse formulation and
+  against one published raw data set (glass/PTFE, Uhlemann et al. 2011, vector-extracted). Two of the paper's eight
+  options (7, 8) are not reproduced, and no open PES/PVC raw data set was found (see `reference/validation.md`).
 - ETFE: the ULS check uses the JRC Outlook 44 proposal on f_y10,23. SLS (strain, deformation) usually governs, and weld
   strength (about 30 MPa) must be checked separately.
 
@@ -196,6 +207,8 @@ deeper [U].
 - `reference/membrane-design-criteria.md`: verification formats (stress factor, FM, ASCE 55, Japan, German A-factors,
   CEN/TS 19102, French, ETFE), load cases, SLS, seams, reinforcement, fire and durability.
 - `reference/materials.json`: machine-readable library used by the tools.
+- `reference/data/biaxial_uhlemann2011_T2.csv`: published MSAJ biaxial test (glass/PTFE B18089, 10 paths) with
+  its source in the header; the reference data set for `biaxial_fit.py`.
 - `reference/validation.md`: validation table (tool, case, reference, expected, obtained, error, tolerance).
 - `reference/verification-log.md`: what was searched and changed for every register factor and material entry.
 

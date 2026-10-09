@@ -14,8 +14,9 @@ Methods (--method)
               short-term cold (wind, installation)     γM·A0·A2          ("winter storm")
               short-term warm (temperature)            γM·A0·A2·A3       ("summer storm")
            γM 1.4 fabric, 1.5 connections (seam rows). Input = DESIGN stress (factored loads, γf).
-  ts19102  CEN/TS 19102 format  f_d = f_k,23 / (γM·kbiax·kage·kdur·ktemp·ksize), prCEN values for PES/PVC
-           from the JRC 2025 worked example (γM0 1.4 fabric, γM2 1.5 joints):
+  ts19102  CEN/TS 19102 format  f_d = f_k,23 / (γM·kbiax·kage·kdur·ktemp·ksize), PES/PVC values = upper of
+           the two sets in the JRC 2025 worked examples (γM0 1.4 fabric, γM2 1.5 joints; --family
+           alt_set_PES/PVC = lower set; --sensitivity spans both):
               prestress/dead  kdur,P·ktemp,70 ; snow/live  kdur,M (--ts-snow L: kdur,L, > 1000 m altitude)
               wind/installation  -- ; temperature  ktemp,70.     Input = DESIGN stress (factored loads).
   french   French recommendations (JRC132615 Code Review 21): TD = kq·ke·Trm/γt, γt 4 (medium) / 4.5 (heavy
@@ -644,8 +645,10 @@ def _method_notes(a, notes):
                     "the notification also limits deformation (1/15, 1/20 of support spacing) and anchorages (Fj/6, Fj/3)",
            "partial": "German A-factor format on DESIGN (factored) stresses; A-factors are material-specific "
                       "(take them from the material approval / tests when available)",
-           "ts19102": "CEN/TS 19102 format on DESIGN stresses; prCEN factor values for PES/PVC from the JRC 2025 "
-                      "worked example — confirm against the published TS Annex C and the National Annex",
+           "ts19102": "CEN/TS 19102 format on DESIGN stresses; PES/PVC factors = the upper of two sets published "
+                      "in the JRC 2025 worked examples (hypar: kage 1.4, kdur 1.8/1.7/1.2, ktemp,70 2.0; Costa "
+                      "Diadema: 1.25, 1.6/1.5/1.15, 1.5 = --family alt_set_PES/PVC; --sensitivity covers the "
+                      "spread) — confirm against the published TS Annex C.3 and the National Annex",
            "french": "French recommendations; TC = stress under the recommendation's combinations (the JRC 2025 "
                      "example applies 1.5 to the characteristic stress); Trm = mean strength"}[a.method]
     notes.append(f"method: {txt}")

@@ -112,8 +112,26 @@
     },
     "ts19102": {
       "status": "V",
-      "source": "CEN/TS 19102 format fd = fk,23/(γM·kbiax·kage·kdur·ktemp·ksize) with values 'modification factors according prCEN/TS 19102' for PES/PVC Type IV (Sattler Atlas) in the JRC workshop worked example: Mollaert & Stimpfle, 'CEN/TS 19102 Design of tensioned membrane structures', The second-generation Eurocodes workshop, 3-5 June 2025, slide 112 (γM 1.5 used, 'mat.: γM0 = 1.4, det.: γM2 = 1.5'; kbiax 1.00; kage 1.40; kdur,P 1.80; kdur,L 1.70; kdur,M 1.20; ktemp,70 2.00; ksize 1.00; situation 1 prestress fk/(γM kbiax kage kdur,P ktemp,70 ksize), situation 4 snow <= 1000 m fk/(γM kbiax kage kdur,M ksize), situation 5 wind fk/(γM kbiax kage ksize)). Single published source of prCEN values; the published TS Annex C.3 table was not accessible -> confirm against CEN/TS 19102:2023 Annex C and the NA",
+      "source": "CEN/TS 19102 format fd = fk,23/(γM·kbiax·kage·kdur·ktemp·ksize) with values 'modification factors according prCEN/TS 19102' for PES/PVC Type IV (Sattler Atlas) in the JRC workshop worked example: Mollaert & Stimpfle, 'CEN/TS 19102 Design of tensioned membrane structures', The second-generation Eurocodes workshop, 3-5 June 2025, slide 112 (γM 1.5 used, 'mat.: γM0 = 1.4, det.: γM2 = 1.5'; kbiax 1.00; kage 1.40; kdur,P 1.80; kdur,L 1.70; kdur,M 1.20; ktemp,70 2.00; ksize 1.00; situation 1 prestress fk/(γM kbiax kage kdur,P ktemp,70 ksize), situation 4 snow <= 1000 m fk/(γM kbiax kage kdur,M ksize), situation 5 wind fk/(γM kbiax kage ksize)). Second document (Oct 2026 search): JRC report JRC144386 (2025), 'The second-generation Eurocodes: key changes and benefits through design examples', doi:10.2760/3056713, ch. 13 (same authors, references 'CEN/TS 19102:2023'): §13.4.1 Table 50 'Eurocode 12 (TS 19102)' utilisations 65 %/24 % (snow) and 58 %/63 % (wind) for the same hypar = this set (kage·kdur,M 1.68, kage 1.40). The SAME report, §13.3.2 'Membrane verification according to TS 19102' (Costa Diadema, PES/PVC Type III, γM 1.5), Table 49 = slide 103 uses a LOWER set: kbiax 1.00, kage 1.25, kdur,P 1.60, kdur,L 1.50, kdur,M 1.15, ktemp,70 1.50, ksize 1.00 (fRd1 19.99, fRd5 47.98, fRd6 31.99 kN/m for fk 89.96) -> stored as alt_set_PES/PVC; the factor product of that set is 0.595 (permanent) to 0.893 (wind) of this one -> range. Asadi, Diss. Univ. Duisburg-Essen 2021 (duepublico_derivate_00075028): prCEN/TS 19102:2021-04 proposes kage 'between 1.1 and 1.4 for PET-PVC and 1.1 for glass-PTFE' (a range, consistent with both sets). No public source quoting the PUBLISHED CEN/TS 19102:2023 Annex C.3 table was found; a German National Annex DIN CEN/TS 19102/NA:2025-12 exists -> confirm against Annex C and the NA",
       "url": "https://eurocodes.jrc.ec.europa.eu/sites/default/files/2025-08/D1_Mollaert-Stimpfle_website.pdf",
+      "url_2": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC144386/JRC144386_01.pdf",
+      "range": [
+        0.6,
+        1.0
+      ],
+      "range_source": "scale on the factor product: the second PES/PVC set published under the TS 19102 label in the same JRC 2025 sources (alt_set_PES/PVC) gives 0.595 (permanent: kage·kdur,P·ktemp,70 3.00 vs 5.04), 0.67 (warm), 0.79/0.86 (snow L/M) and 0.89 (wind) of the default set; the default set is the upper (safe-sided) one",
+      "alt_set_PES/PVC": {
+        "note": "JRC144386 Table 49 / JRC 2025 slide 103 (Costa Diadema, Type III Ferrari 1202 S2); not used unless selected with --family alt_set_PES/PVC or a project factor file",
+        "gM0": 1.5,
+        "gM2": 1.5,
+        "kbiax": 1.0,
+        "kage": 1.25,
+        "kdur_P": 1.6,
+        "kdur_L": 1.5,
+        "kdur_M": 1.15,
+        "ktemp70": 1.5,
+        "ksize": 1.0
+      },
       "PES/PVC": {
         "gM0": 1.4,
         "gM2": 1.5,

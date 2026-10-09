@@ -95,22 +95,31 @@ Limit states to EN 1990; Eurocode Outlooks 32–37 [JRC23]:
 * Annex A of the TS: material classes. Annex B (normative): procedures for the modification factors. Annex C
   (informative): typical modification factors (C.3 PES-PVC, C.4 glass-PTFE, C.5/C.6 ETFE) [V, TS contents page].
 
-prCEN values for PES/PVC used in the [JRC25] worked example [V, single source; confirm against the TS Annex C and the NA]:
+PES/PVC values published in the JRC 2025 worked examples [V for the quotes; the published TS Annex C.3 table itself
+was not readable, so confirm against it and the NA]. The same slides and the written JRC report JRC144386
+(doi:10.2760/3056713, ch. 13) contain **two** sets:
 
-| Factor | Value |
-|---|---|
-| γM0 (material) / γM2 (joint) | 1.4 / 1.5 |
-| kbiax | 1.0 |
-| kage | 1.4 |
-| kdur,P / kdur,L / kdur,M | 1.8 / 1.7 / 1.2 |
-| ktemp,70 | 2.0 |
-| ksize | 1.0 |
+| Factor | Register (hypar, Type IV) | `alt_set_PES/PVC` (Costa Diadema, Type III) |
+|---|---|---|
+| γM0 (material) / γM2 (joint) | 1.4 / 1.5 (1.5 used) | 1.5 / 1.5 |
+| kbiax | 1.0 | 1.0 |
+| kage | 1.4 | 1.25 |
+| kdur,P / kdur,L / kdur,M | 1.8 / 1.7 / 1.2 | 1.6 / 1.5 / 1.15 |
+| ktemp,70 | 2.0 | 1.5 |
+| ksize | 1.0 | 1.0 |
+| Source | slide 112 ("according prCEN/TS 19102"); JRC144386 Table 50 utilisations | slide 103 and JRC144386 Table 49 ("according to TS 19102") |
+
+* The tool uses the upper (safe-sided) set. `--family alt_set_PES/PVC` uses the other one. `--sensitivity` scales the
+  k-product over 0.6–1.0: the lower set is 0.595 (permanent) to 0.89 (wind) of the upper one.
+* The 2021 draft proposed kage 1.1–1.4 for PES-PVC and 1.1 for glass-PTFE (Asadi, Diss. UDE 2021, quoting
+  prCEN/TS 19102:2021-04), so both sets lie inside the draft range.
+* A German National Annex, DIN CEN/TS 19102/NA:2025-12, exists. The TS is being converted to prEN 19102-1-1 (Eurocode 12).
 
 Situations:
 * prestress (1): kdur,P·ktemp,70.
 * snow ≤ 1000 m (4): kdur,M. Use `--ts-snow L` above 1000 m.
 * wind (5): no kdur or ktemp.
-* temperature: ktemp,70.
+* temperature (6, wind at elevated temperature): ktemp,70 [V, JRC144386 Table 49: f_Rd6 = f_k/(γM·kage·ktemp,70)].
 
 Prestress partial factors γP,inf 0.9 and γP,sup 1.25: check the prestress level that is most unfavourable (×1, ×0.9 or
 ×1.25) [V, JRC25 slide 49].

@@ -167,6 +167,7 @@ At 50 °C the strength drops to 0.67–0.75 of the 23 °C value, and at 70 °C t
 | PES/PVC Type III, project example (direct form EAX 1000, EAY 800, EAP 400, G 40) | 800 (inverse) | 640 (inverse) | 0.4 / 0.5 | 40 [V, JRC25 slide 99] |
 | PES/PVC (design practice) | 500–1200 | 300–900 | 0.2–0.6 | 10–50 [U] |
 | glass/PTFE (design practice) | 1000–2000 | 600–1500 | 0.3–0.9 | 20–100 [U] |
+| glass/PTFE B18089 (type G6), one MSAJ test (T2), 8 determination options | 500–1600 | 610–924 | ν_xy 0.48–1.40, ν_yx 0.69–1.24 | – [V, Uhlemann et al. 2011 Table 2; options 1–4, 6 reproduced by `biaxial_fit.py --msaj`] |
 | ETFE (isotropic) | 660–1000 MPa × t | same | 0.42 | E/(2(1+ν)) [V] |
 
 Notes:
@@ -176,6 +177,10 @@ Notes:
   strength and tends to give stiffer values than project load ranges (formTL) [V, JRC23 Annex B4].
 * Keep **direct** (Ed, crimp interchange) and **inverse** (E, ν) stiffness apart: `biaxial_fit.py` prints both
   (JRC23 eqs. 2.5–2.12).
+* One test gives very different constants depending on the evaluation option: 8 or 10 paths, reciprocity or not,
+  which ratios, secant through the origin or path slopes. On test T2 of Uhlemann et al. (2011) E_x·t ranges from 500
+  to 1600 kN/m; `biaxial_fit.py` gives 778 kN/m for the secant fit and 1312 kN/m for the MSAJ commentary fit on the same
+  data [V]. Always state the option with the constants.
 * Choose the set that matches the governing load state (prestress 1:1, snow, wind). Use upper and lower bound sets to
   check sensitivity [V, JRC23].
 

@@ -97,6 +97,41 @@ class TestTS19102WorkedExample(unittest.TestCase):
             self.assertAlmostEqual(1.5 * mw / aw, util[case][0], delta=0.0006, msg=case)
             self.assertAlmostEqual(1.5 * mf / af, util[case][1], delta=0.0006, msg=case)
 
+    def test_written_report_table50(self):
+        # JRC144386 (2025, doi:10.2760/3056713) §13.4.1 Table 50, 'Eurocode 12 (TS 19102)': 65 %, 24 %, 58 %, 63 %
+        fk = {"w": 138.15, "f": 134.94}
+        m = {"snow": (23.7, 8.5), "wind": (25.4, 26.8)}
+        pub = {"snow": (65, 24), "wind": (58, 63)}
+        for case, (mw, mf) in m.items():
+            aw, _ = mc.allowable(fk["w"], "ts19102", case, "PES/PVC", opts={"joint": True})
+            af, _ = mc.allowable(fk["f"], "ts19102", case, "PES/PVC", opts={"joint": True})
+            self.assertEqual((round(150 * mw / aw), round(150 * mf / af)), pub[case])
+
+    def test_second_published_set_costa_diadema(self):
+        """JRC144386 §13.3.2 Tables 48-49 = JRC 2025 slides 102-103 (Costa Diadema, Ferrari 1202 S2 Type III):
+        n23 112 kN/m, kn 1.64, Vx 0.12 -> fk,23 89.96; γM 1.5, kage 1.25, kdur,P 1.60, ktemp,70 1.50:
+        fRd1 (prestress) 19.99, fRd5 (wind) 47.98, fRd6 (wind at elevated temperature) 31.99 kN/m.
+        Checks the situation formulas 1, 5 and 6 ('warm', not covered by slide 112) with a second factor set."""
+        fk = mc.char_strength(112.0, 0.12)
+        self.assertAlmostEqual(fk, 89.96, delta=0.005)
+        fam = "alt_set_PES/PVC"
+        for case, pub in (("prestress", 19.99), ("wind", 47.98), ("temperature", 31.99)):
+            al, basis = mc.allowable(fk, "ts19102", case, fam)
+            self.assertAlmostEqual(al, pub, delta=0.006, msg=case)
+        # the sensitivity range of the default set covers this second published set in every situation
+        lo, hi = CF.frange("membrane.ts19102")
+        self.assertEqual(hi, 1.0)
+        for case in ("prestress", "snow", "wind", "temperature"):
+            for joint in (False, True):
+                a_def, _ = mc.allowable(100.0, "ts19102", case, "PES/PVC", opts={"joint": joint})
+                a_alt, _ = mc.allowable(100.0, "ts19102", case, fam, opts={"joint": joint})
+                g = CF.get("membrane.ts19102")
+                gd = g["PES/PVC"]["gM2" if joint else "gM0"]
+                ga = g[fam]["gM2" if joint else "gM0"]
+                ratio = (a_def / a_alt) * (gd / ga)        # ratio of the k-products (γM is not part of the range)
+                self.assertGreaterEqual(ratio, lo - 0.005, msg=case)
+                self.assertLessEqual(ratio, hi + 1e-9, msg=case)
+
     def test_cli_mean_to_characteristic(self):
         _, out = run(mc.main, ["--fw", "172", "--ff", "168", "--vx", "0.12", "--family", "PES/PVC",
                                "--nw", "35.55", "--nf", "12.75", "--case", "snow", "--method", "ts19102"])
@@ -401,6 +436,90 @@ class TestBiaxial(unittest.TestCase):
         self.assertAlmostEqual(cw, 100 * (Ey - Exy) * 2 / det, places=6)
         self.assertAlmostEqual(cf, 100 * (Ex - Exy) * 2 / det, places=6)
         self.assertIn("Assumptions:", out)
+
+
+class TestBiaxialPublishedTestData(unittest.TestCase):
+    """Published RAW biaxial data with the authors' fitted constants.
+
+    Uhlemann, Stranghöner, Schmidt, Saxe, "Effects on elastic constants of technical membranes applying the
+    evaluation methods of MSAJ/M-02-1995", Structural Membranes 2011, CIMNE, pp. 648-659 (open access,
+    https://hdl.handle.net/2117/186360). MSAJ test T2 on glass/PTFE B18089 (type G6): 10 load-strain paths,
+    71 points each, extracted from the vector plot of Fig. 5 (Fig. 6 repeats the data: agreement 0.0085 % strain,
+    0.036 kN/m). Table 2 gives the constants of 8 determination options, fitted by the authors' MATLAB routine
+    (least squares, strain term, grid search) together with the residual sum S_ε [%²].
+    Notation: paper ν_xy (n_y in ε_x) = tool ν_fw, paper ν_yx = tool ν_wf."""
+
+    CSV = os.path.join(SK, "membrane-fabric", "reference", "data", "biaxial_uhlemann2011_T2.csv")
+    # option: (ratios, 10 paths?, reciprocity) -> published (E_x t, E_y t, ν_xy, ν_yx, S_ε) for test T2
+    TABLE2 = {1: ((None, False, True), (1292, 816, 0.57, 0.90, 32.72)),
+              2: ((None, False, False), (1188, 864, 0.73, 0.69, 23.09)),
+              3: ((None, True, True), (914, 610, 0.83, 1.24, 637.19)),
+              4: ((None, True, False), (860, 634, 0.94, 1.08, 625.49)),
+              5: ((["1:1", "2:1"], False, True), (1600, 924, 0.48, 0.83, 2.14)),
+              6: ((["1:1", "1:2"], False, True), (1336, 824, 0.60, 0.97, 4.42))}
+
+    @classmethod
+    def setUpClass(cls):
+        cls.data = bx.read(cls.CSV)
+
+    def test_data_set(self):
+        self.assertEqual(sorted(self.data), ["0:1", "1:0", "1:1", "1:2", "2:1"])
+        for pts in self.data.values():
+            self.assertEqual(len(pts), 71)
+            lead = [max(nw, nf) for nw, nf, _, _ in pts]
+            self.assertAlmostEqual(lead[0], 2.15, delta=0.05)      # MSAJ glass/PTFE paths start at 2 kN/m
+            self.assertAlmostEqual(lead[-1], 30.15, delta=0.05)    # max test load 30 kN/m (paper §5)
+
+    def test_objective_matches_published_residuals(self):
+        # S_ε of the PUBLISHED constants on the extracted data = the published S_ε: same objective, same data
+        for opt, ((ratios, ten, _), (Ex, Ey, nxy, nyx, S)) in self.TABLE2.items():
+            got = bx.msaj_objective(self.data, Ex, Ey, nxy, nyx, ratios, include_zero=ten)
+            tol = 0.025 if ten else 0.01
+            self.assertAlmostEqual(got / S, 1.0, delta=tol, msg=f"option {opt}: {got:.2f} vs {S}")
+
+    def test_reproduces_table2_options(self):
+        for opt in (1, 2, 3, 4, 6):
+            (ratios, ten, rec), (Ex, Ey, nxy, nyx, S) = self.TABLE2[opt]
+            f = bx.fit_msaj(self.data, ratios, include_zero=ten, reciprocal=rec)
+            msg = f"option {opt}: {f['Ew_t']:.0f}/{f['Ef_t']:.0f}/{f['nu_fw']:.3f}/{f['nu_wf']:.3f}/{f['S_eps']:.2f}"
+            self.assertAlmostEqual(f["Ew_t"] / Ex, 1.0, delta=0.02, msg=msg)
+            self.assertAlmostEqual(f["Ef_t"] / Ey, 1.0, delta=0.01, msg=msg)
+            self.assertAlmostEqual(f["nu_fw"], nxy, delta=0.015, msg=msg)
+            self.assertAlmostEqual(f["nu_wf"], nyx, delta=0.015, msg=msg)
+            # on the same data the exact least squares is at least as good as the published (grid-search) set;
+            # with reciprocity the paper accepts |E_x/E_y - ν_yx/ν_xy| < 0.005 (eq. 6), the tool enforces it exactly
+            S_pub = bx.msaj_objective(self.data, Ex, Ey, nxy, nyx, ratios, include_zero=ten)
+            self.assertLessEqual(f["S_eps"], S_pub * (1.005 if rec else 1.0) + 1e-9, msg=msg)
+            self.assertAlmostEqual(f["S_eps"] / S, 1.0, delta=0.025, msg=msg)
+            if rec:
+                self.assertAlmostEqual(f["Ew_t"] / f["Ef_t"], f["nu_wf"] / f["nu_fw"], places=9)
+
+    def test_option5_published_value_is_on_search_bound(self):
+        # Table 2 option 5 has E_x t = 1600 for T2 (T1 1580, option 6 T1 1600): the upper limit of the grid.
+        (ratios, ten, rec), (Ex, Ey, nxy, nyx, S) = self.TABLE2[5]
+        free = bx.fit_msaj(self.data, ratios, include_zero=ten, reciprocal=rec)
+        self.assertGreater(free["Ew_t"], Ex)           # the unbounded optimum lies above the bound ...
+        self.assertLess(free["S_eps"], S)             # ... with a smaller residual
+        f = bx.fit_msaj(self.data, ratios, include_zero=ten, reciprocal=rec, fix_Ew_t=Ex)
+        self.assertAlmostEqual(f["Ef_t"] / Ey, 1.0, delta=0.005)
+        self.assertAlmostEqual(f["nu_fw"], nxy, delta=0.01)
+        self.assertAlmostEqual(f["nu_wf"], nyx, delta=0.01)
+        self.assertAlmostEqual(f["S_eps"] / S, 1.0, delta=0.01)
+
+    def test_cli_msaj_and_option_sensitivity(self):
+        res, out = run(bx.main, [self.CSV, "--msaj"])
+        self.assertIn("8 load-strain paths", out)
+        self.assertIn("reciprocity applied", out)
+        self.assertIn("evaluation option", out)
+        # the paper's point: secant-through-origin and slope (MSAJ) evaluations differ strongly on real data
+        self.assertLess(res["all"]["Ew_t"], 0.7 * res["msaj"]["Ew_t"])
+        res2, out2 = run(bx.main, [self.CSV, "--msaj", "--no-reciprocity"])        # Table 2 option 2
+        self.assertIn("NOT applied", out2)
+        self.assertIn("not symmetric", out2)
+        self.assertAlmostEqual(res2["msaj"]["Ew_t"] / 1188, 1.0, delta=0.02)
+        _, out10 = run(bx.main, [self.CSV, "--msaj", "--paths", "10"])                 # option 3: ν_wf·ν_fw > 1
+        self.assertIn("10 load-strain paths", out10)
+        self.assertIn("Direct stiffness form not available", out10)
 
 
 # --------------------------------------------------------------------------------------------- material data
