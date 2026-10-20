@@ -19,6 +19,7 @@ Every script exchanges this format, so the tools chain together:
   ],
   "faces": [[0, 1, 18, 17]],               // quads or triangles (node ids)
   "loads": {"57": [0, 0, -1.2]},           // optional nodal loads for FDM [kN]
+  "warp_dir": [1, 0, 0],                  // optional: warp direction for TRIANGLE faces in membrane_dr.py (default global x)
 
   // ---- written by the tools ----
   "reactions": [{"node": 0, "pull": [Fx, Fy, Fz], "magnitude": F}],   // force FROM structure ON support
@@ -29,7 +30,16 @@ Every script exchanges this format, so the tools chain together:
 ```
 
 Edge results added by the tools: `length` [m], `force` [kN], `width` (tributary
-width of a membrane link, m), `stress_kN_m`, `L0` and `EA` (after DR), node `disp`.
+width of a membrane link, m), `stress_kN_m`, `L0` and `EA` (after DR), node `disp`,
+`analysis.tol` (DR tolerance), `solver.uniform_stress` {iterations, status, converged, normal_move, move,
+stress_dev} (form_find_fdm.py --uniform-stress). Shape `type` may also be `arch`, `multibay`, `rings`
+(support groups RING-B / RING-T).
+Optional node key `fix`: [bool, bool, bool] = support per component x/y/z (symmetry planes, rollers);
+`fixed: true` = all three. Honoured by membrane_dr.py only.
+`solver.uniform_stress` may also hold `method` ("cst" | "width"), `residual_kN`, `normal_residual_kN`,
+`cable_forces` {group: kN}, `halvings`, `free_iterations`, `energy`, `min_q`.
+`analysis.solver` ("dr" | "newton") and `analysis.newton` {newton_iterations, factorizations, modified_steps,
+load_steps, step_cuts, shifts, line_search_cuts, dr_iterations, fallback_dr, equations, skyline_profile}.
 
 Conventions
 * `kind`: `membrane` (net link representing fabric), `edge_cable`, `cable`, `strut` (not in FDM).

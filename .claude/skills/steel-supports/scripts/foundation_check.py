@@ -6,7 +6,8 @@ Sub-commands
            (uplift V, horizontal H at height h_a above the base): uplift (EQU), sliding (GEO),
            overturning about the toe (EQU) and bearing with effective width B' = B − 2e
   helical  helical (screw) anchor: ultimate tension from installation torque Q_u = K_t·T,
-           allowable = Q_u / FS; compares with the design pull (proof-load test required)
+           allowable = Q_u / FS; compares with the design pull (proof-load test required).
+           K_t by shaft (--shaft SS5|SS175|RS2875|RS3500|RS4500) from ICC-ES ESR-2794; FS ≥ 2.0 (ESR-2794 / IBC).
 
 Loads are DESIGN values from the factored combination unless you give --unfactored (then
 γ_G,dst / γ_Q,dst from the factor register are applied to the pull). Resisting self-weight is
@@ -36,6 +37,9 @@ def us_stab_factor(code):
 
 def block(B, L, D, V, H, ha, mu, qRd, cover=0.0, gamma_soil=18.0, unfactored=False, var_share=1.0, code="EU",
           phi_sl=None):
+    """rows (uplift, sliding, overturning, bearing, eccentricity) and info. Pull V up, H horizontal at height D + ha
+    above the base, applied on the block axis. EU bearing: worst of γ_G,sup and γ_G,inf on the self-weight (DA2);
+    US/SA: LRFD 0.9D + 1.0W (strength-level wind) for stability and bearing."""
     if code == "EU":
         gs = CF.get("geotech.gamma_G_stb")
         gd = CF.get("geotech.gamma_Q_dst") if var_share >= 0.5 else CF.get("geotech.gamma_G_dst")
@@ -59,25 +63,42 @@ def block(B, L, D, V, H, ha, mu, qRd, cover=0.0, gamma_soil=18.0, unfactored=Fal
     Mdst = H * (D + ha) + V * B / 2
     Mstb = Wd * B / 2
     rows.append(("overturning about toe: M_dst ≤ M_stb  [kNm]", Mdst, Mstb, ref[0]))
-    if N > 0:
-        e = (H * (D + ha) + V * B / 2 - V * B / 2) / N  # moment of the pull about base centre / N
+    # bearing: EU (GEO, DA2) self-weight unfavourable (γ_G,sup) or favourable (γ_G,inf), whichever governs;
+    # US/SA the 0.9D + 1.0W combination. Effective width B' = B − 2e (EN 1997-1 Annex D, Meyerhof)
+    worst = None
+    gammas = (CF.get("geotech.gamma_G_sup"), CF.get("geotech.gamma_G_inf")) if code == "EU" else (gs,)
+    for g in gammas:
+        Nb = g * W - V
+        if Nb <= 0:
+            continue
+        e = H * (D + ha) / Nb          # V acts on the block axis: only H gives a moment about the base centre
         Bp = B - 2 * e
-        q = N / (max(Bp, 1e-6) * L) if Bp > 0 else math.inf
-        rows.append((f"bearing: q on B'={Bp:.2f} m (e={e:.2f} m)  [kPa]", q, qRd,
+        q = Nb / (Bp * L) if Bp > 0 else math.inf
+        if worst is None or q > worst[0]:
+            worst = (q, e, Bp, g, Nb)
+    info = {"W_kN": W, "N_kN": N}
+    if worst:
+        q, e, Bp, g, Nb = worst
+        rows.append((f"bearing: q on B'={Bp:.2f} m (e={e:.2f} m, γ_G={g})  [kPa]", q, qRd,
                      "EN 1997 GEO (q_Rd from GI)" if code == "EU" else "φq_n from the GI (factored)"))
         rows.append(("eccentricity e ≤ B/3 (EN 1997-1 6.5.4, else special precautions)  [m]", e, B / 3,
                      "EN 1997-1 6.5.4" if code == "EU" else "B/3 limit (EN 1997-1 6.5.4, used as practice)"))
+        info.update({"q_kPa": q, "e_m": e, "B_eff_m": Bp, "N_bearing_kN": Nb})
         if e > B / 6:
             print(f"NOTE: e = {e:.2f} m > B/6 = {B / 6:.2f} m: base partly lifts off under this combination "
                   "(acceptable for transient wind; avoid for permanent loads)")
-    return rows, {"W_kN": W, "N_kN": N}
+    return rows, info
 
 
-def helical(T, pull, Kt=None, FS=None):
-    Kt = CF.get("geotech.helical_Kt_per_m") if Kt is None else Kt
-    FS = CF.get("geotech.helical_FS") if FS is None else FS
+def helical(T, pull, shaft=None, FS=None, Kt=None):
+    """T installation torque [kNm] (average of the last three readings for tension), pull design tension [kN].
+    Kt: explicit override (sensitivity runs); shaft: CHANCE shaft type (ESR-2794)."""
+    if Kt is None:
+        Kt = CF.get("geotech.helical_Kt_by_shaft")[shaft] if shaft else CF.get("geotech.helical_Kt_per_m")
+    FS = CF.get("geotech.helical_FS") if FS is None else max(FS, CF.get("geotech.helical_FS"))
     Qu = Kt * T
-    return [("helical anchor: pull ≤ Q_u/FS  [kN]", pull, Qu / FS, f"Q_u = K_t·T = {Qu:.0f} kN")], {"Qu": Qu}
+    return ([("helical anchor: pull ≤ Q_u/FS  [kN]", pull, Qu / FS, f"Q_u = K_t·T = {Kt}·{T} = {Qu:.0f} kN, FS {FS}")],
+            {"Qu": Qu, "Kt": Kt, "FS": FS, "Qall": Qu / FS})
 
 
 def report(rows):
@@ -111,23 +132,35 @@ def main(argv=None):
     h = sp.add_parser("helical")
     h.add_argument("--T", type=float, required=True, help="final installation torque [kNm]")
     h.add_argument("--pull", type=float, required=True, help="design tension [kN]")
-    h.add_argument("--sensitivity", action="store_true", help="re-check over the ranges of the [U] K_t and FS")
+    h.add_argument("--shaft", choices=["SS5", "SS175", "RS2875", "RS3500", "RS4500"], default=None,
+                   help="CHANCE shaft type for K_t (ESR-2794); default square shaft 32.8 m^-1")
+    h.add_argument("--FS", type=float, default=None, help="factor of safety (not below the register value 2.0)")
+    h.add_argument("--sensitivity", action="store_true", help="re-check over the ranges of K_t and FS if they have one")
     a = ap.parse_args(argv)
     if a.factors:
         os.environ["TENSILE_FACTORS"] = a.factors
     if a.cmd == "block":
         code = CF.code(a.code)
         if code == "EU":
-            print(f"Factors: {CF.tag('geotech.gamma_G_stb')}, {CF.tag('geotech.gamma_R_h')}, {CF.tag('geotech.gamma_conc')}")
+            print(f"Factors: {CF.tag('geotech.gamma_G_stb')}, {CF.tag('geotech.gamma_R_h')}, {CF.tag('geotech.gamma_conc')}, "
+                  f"{CF.tag('geotech.gamma_G_sup')}, {CF.tag('geotech.gamma_G_inf')}")
         else:
             print(f"Code {code}: 0.9D + 1.0W (strength-level wind), sliding {CF.tag('geotech.phi_sliding_US')}; "
                   "q_Rd = factored bearing resistance from the GI" + ("; SBC 303 soils (sabkha, collapsible, expansive) "
                                                                       "need the geotechnical report" if code == "SA" else ""))
+        print("Assumptions: rigid block, pull applied on the block axis at height D + ha above the base; EQU γ_G,stb on\n"
+              "  the self-weight for uplift, overturning about the toe and (conservatively) sliding; sliding R = (γW − V)·μ/γ_R,h\n"
+              "  (drained, μ = tan δ from GI, passive earth pressure ignored); bearing with B' = B − 2e (EN 1997-1 Annex D)\n"
+              "  against q_Rd from the GI; no soil cover shear, no suction, no embedment. Concrete unit weight from register.")
         rows, info = block(a.B, a.L, a.D, a.V, a.H, a.ha, a.mu, a.qRd, a.cover, unfactored=a.unfactored, code=code)
         print(f"Block {a.B}x{a.L}x{a.D} m: self-weight {info['W_kN']:.1f} kN; net base force {info['N_kN']:.1f} kN")
     else:
         print(f"Factors: {CF.tag('geotech.helical_Kt_per_m')}, {CF.tag('geotech.helical_FS')} — proof-load test required")
-        rows, info = helical(a.T, a.pull)
+        print("Assumptions: torque correlation Q_u = K_t·T (ICC-ES AC358 / ESR-2794), T = average of the last three\n"
+              "  torque readings (1 ft increments) for tension; K_t is product specific (other makes: use their ESR);\n"
+              "  ESR-2794 also caps Q_u per product (e.g. SS5 248.6 kN, SS175 255.3 kN in tension) — check the shaft and\n"
+              "  the anchor head; Q_all = Q_u/FS is an allowable (service) load: compare with the unfactored pull.")
+        rows, info = helical(a.T, a.pull, a.shaft, a.FS)
     w = report(rows)
     if a.cmd == "helical" and a.sensitivity:
         helical_sensitivity(a.T, a.pull)
@@ -135,17 +168,19 @@ def main(argv=None):
 
 
 def helical_sensitivity(T, pull):
-    """utilisation over the K_t and FS ranges, one at a time and both unfavourable."""
+    """utilisation over the K_t and FS ranges, one at a time and both unfavourable (skipped for verified values)."""
+    keys = [k for k in ("geotech.helical_Kt_per_m", "geotech.helical_FS") if CF.frange(k)]
+    if not keys:
+        print("Sensitivity: K_t and FS are verified register values (ESR-2794) without an uncertainty range; "
+              "the proof-load test remains the check.")
+        return [], None
     u = lambda **kw: pull / helical(T, pull, **kw)[0][0][2]   # noqa: E731
-    out = [CF.sensitivity(lambda v: u(Kt=v), "geotech.helical_Kt_per_m"),
-           CF.sensitivity(lambda v: u(FS=v), "geotech.helical_FS")]
+    arg = {"geotech.helical_Kt_per_m": "Kt", "geotech.helical_FS": "FS"}
+    out = [CF.sensitivity(lambda v, k=k: u(**{arg[k]: v}), k) for k in keys]
     print("Sensitivity to uncertain factors:")
-    print(CF.sens_line("K_t", out[0]))
-    print(CF.sens_line("FS", out[1]))
-    uw = u(Kt=CF.frange("geotech.helical_Kt_per_m")[0], FS=CF.frange("geotech.helical_FS")[1])
-    print(f"  both unfavourable: util {uw:.2f} -> " + ("still OK" if uw <= 1 else
-          "NOT OK: proof-load test the anchors (or raise the torque / helix size)"))
-    return out, uw
+    for k, r in zip(keys, out):
+        print(CF.sens_line(arg[k], r))
+    return out, None
 
 
 if __name__ == "__main__":

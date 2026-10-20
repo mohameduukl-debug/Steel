@@ -18,14 +18,18 @@ Seam modes (--seams)
 Pipeline (per panel)
   1. structured panel grid (stations along the panel × rungs across)
   2. flatten: unfold triangle-by-triangle + least-squares edge-length relaxation;
-     residual strain reported (> ~0.5 % -> narrower panels)
+     residual strain reported (max, RMS, p95, distribution) and flat-vs-3D area error;
+     warning above the register threshold fabrication.flatten_strain_warn_pct (0.5 % [U])
+     -> narrower panels. Exact for developable panels (cone, cylinder; see reference/validation.md)
   3. orient: warp = panel long axis (principal axis) -> DXF x
   4. compensate: warp cw %, weft cf % (biaxial tests of the batch, EN 17117-2)
   5. DECOMPENSATE (optional): at the panel ends (edge cables / clamp lines of
      fixed length) the weft compensation grades linearly from cf to
      --decomp-ends over --decomp-length; along boundary SIDES (not seams) the
      warp compensation grades to --decomp-sides the same way
-  6. offset: seam allowance on seams, edge allowance on boundaries -> CUT line
+  6. offset: seam allowance on seams, edge allowance on boundaries -> CUT line (exact parallel
+     offsets; convex corners beyond --miter-limit x allowance are bevelled)
+  7. checks: roll fit, mating-seam compensated lengths (fabrication.mating_seam_tol_mm_per_m)
 
 DXF layers:  CUT (red) cutting line incl. allowances, NET (cyan) compensated
 net/seam line, TEXT (green), WARP (yellow) warp arrow, DIM (grey) chord dims.
@@ -47,6 +51,9 @@ from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dxf_writer import DXF  # noqa: E402
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tensile-structures", "scripts"))
+import factors as CF  # noqa: E402  central register (practice thresholds tagged V/C/U)
 
 
 def d3(a, b):
@@ -71,8 +78,9 @@ def place_third(pa, pb, la, lb, side=1.0):
 
 
 # ------------------------------------------------------------- flattening
-def flatten(quads, X, iters=6000, tol=1e-4):
-    """Flatten a set of quads (4-node index tuples into X). Returns 2D dict, max and RMS strain."""
+def flatten(quads, X, iters=6000, tol=1e-4, return_strains=False):
+    """Flatten a set of quads (4-node index tuples into X). Returns 2D dict, max and RMS strain
+    (+ the list of signed edge strains (L2D - L3D)/L3D of all quad edges and diagonals if return_strains)."""
     verts = sorted({v for q in quads for v in q})
     P: dict[int, list[float]] = {}
     edges = set()
@@ -135,6 +143,8 @@ def flatten(quads, X, iters=6000, tol=1e-4):
             break
     strains = [(d2(P[u], P[v]) - L) / L for (u, v), L in L3.items() if L > 1e-9]
     rms = math.sqrt(sum(s * s for s in strains) / len(strains))
+    if return_strains:
+        return P, max(abs(s) for s in strains), rms, strains
     return P, max(abs(s) for s in strains), rms
 
 
@@ -148,8 +158,15 @@ def principal_axis(pts):
     return 0.5 * math.atan2(2 * sxy, sxx - syy), cx, cy
 
 
-def offset_polygon(poly, dists):
-    """Mitre offset of a CCW polygon; dists[i] = outward offset of edge i (poly[i]->poly[i+1])."""
+def offset_polygon(poly, dists, miter_limit=4.0):
+    """Offset of a CCW polygon; dists[i] = outward offset of edge i (poly[i]->poly[i+1]).
+
+    Every offset edge is the exact parallel line at dists[i]. Corners: the two neighbouring
+    offset lines are intersected (mitre). At a CONVEX corner whose mitre point lies further than
+    miter_limit * max(d) from the net corner, the corner is BEVELLED: the mitre is cut by a line
+    perpendicular to the bisector at that distance, giving two vertices. This keeps the cut line at
+    least the allowance away from the net line everywhere (a mitre point merely pulled back towards
+    the corner would eat into the allowance). Reflex corners keep the exact line intersection."""
     n = len(poly)
     lines = []
     for i in range(n):
@@ -163,18 +180,35 @@ def offset_polygon(poly, dists):
     for i in range(n):
         (p1, r1), (p2, r2) = lines[i - 1], lines[i]
         den = r1[0] * r2[1] - r1[1] * r2[0]
-        if abs(den) < 1e-12:
+        if abs(den) < 1e-12 * (math.hypot(*r1) * math.hypot(*r2) + 1e-30):
             out.append(p2)
             continue
         t = ((p2[0] - p1[0]) * r2[1] - (p2[1] - p1[1]) * r2[0]) / den
         q = (p1[0] + t * r1[0], p1[1] + t * r1[1])
         corner = poly[i]
-        lim = 4 * max(dists[i - 1], dists[i], 1e-9)
+        lim = miter_limit * max(dists[i - 1], dists[i], 1e-9)
         dq = math.hypot(q[0] - corner[0], q[1] - corner[1])
-        if dq > lim:
-            q = (corner[0] + (q[0] - corner[0]) * lim / dq, corner[1] + (q[1] - corner[1]) * lim / dq)
+        if dq > lim and den > 0:            # convex corner (left turn of a CCW polygon): bevel
+            u = ((q[0] - corner[0]) / dq, (q[1] - corner[1]) / dq)
+            for (pp, rr) in ((p1, r1), (p2, r2)):
+                ru = rr[0] * u[0] + rr[1] * u[1]
+                tt = (lim - ((pp[0] - corner[0]) * u[0] + (pp[1] - corner[1]) * u[1])) / (ru or 1e-12)
+                out.append((pp[0] + tt * rr[0], pp[1] + tt * rr[1]))
+            continue
         out.append(q)
     return out
+
+
+def poly_dist(p, poly):
+    """shortest distance from point p to the boundary of a closed polygon."""
+    best = math.inf
+    for i in range(len(poly)):
+        a, b = poly[i], poly[(i + 1) % len(poly)]
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        L2 = dx * dx + dy * dy
+        t = 0.0 if L2 == 0 else max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2))
+        best = min(best, math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy))
+    return best
 
 
 def area(poly):
@@ -480,7 +514,18 @@ def process_panel(pan, cw, cf, dec_end, dec_side, dec_len):
     Xl = [p for row in grid for p in row]
     idx = lambda s, k: s * nx + k
     quads = [(idx(s, k), idx(s, k + 1), idx(s + 1, k + 1), idx(s + 1, k)) for s in range(ns - 1) for k in range(nx - 1)]
-    P2, emax, erms = flatten(quads, Xl)
+    P2, emax, erms, strains = flatten(quads, Xl, return_strains=True)
+    # area check: 3D area of the triangulated panel vs flat area (before compensation)
+    def tri3(a, b, c):
+        u = [Xl[b][i] - Xl[a][i] for i in range(3)]
+        v = [Xl[c][i] - Xl[a][i] for i in range(3)]
+        return 0.5 * math.hypot(u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+
+    def tri2(a, b, c):
+        return 0.5 * ((P2[b][0] - P2[a][0]) * (P2[c][1] - P2[a][1]) - (P2[b][1] - P2[a][1]) * (P2[c][0] - P2[a][0]))
+    a3 = sum(tri3(q[0], q[1], q[2]) + tri3(q[0], q[2], q[3]) for q in quads)
+    a2 = abs(sum(tri2(q[0], q[1], q[2]) + tri2(q[0], q[2], q[3]) for q in quads))
+    stats = {"area3d": a3, "area2d": a2, "strains": strains}
     th, cx, cy = principal_axis(list(P2.values()))
     c, s_ = math.cos(-th), math.sin(-th)
     R = {v: ((p[0] - cx) * c - (p[1] - cy) * s_, (p[0] - cx) * s_ + (p[1] - cy) * c) for v, p in P2.items()}
@@ -540,7 +585,7 @@ def process_panel(pan, cw, cf, dec_end, dec_side, dec_len):
     strip_w = max(math.hypot(N[idx(s, 0)][0] - N[idx(s, nx - 1)][0], N[idx(s, 0)][1] - N[idx(s, nx - 1)][1])
                   for s in range(ns))
     seam2d["strip_width"] = strip_w
-    return net, kinds, emax, erms, seam_len, seam2d
+    return net, kinds, emax, erms, seam_len, seam2d, stats
 
 
 _SPLIT_COUNTER = [0]
@@ -617,6 +662,27 @@ def notch_marks(poly2d, net, fractions, length):
     return marks
 
 
+STRAIN_BINS = (0.1, 0.3, 0.5, 1.0)   # % bins of the printed flattening-strain distribution (reporting only)
+
+
+def strain_histogram(strains):
+    """share of edges (in %) with |strain| in [0, 0.1), [0.1, 0.3), [0.3, 0.5), [0.5, 1.0), >= 1.0 %."""
+    edges = (0.0,) + STRAIN_BINS + (math.inf,)
+    n = max(len(strains), 1)
+    return [100.0 * sum(1 for s in strains if edges[k] <= abs(s) * 100 < edges[k + 1]) / n
+            for k in range(len(edges) - 1)]
+
+
+def percentile(vals, q):
+    v = sorted(vals)
+    if not v:
+        return 0.0
+    k = (len(v) - 1) * q
+    lo = int(math.floor(k))
+    hi = min(lo + 1, len(v) - 1)
+    return v[lo] + (v[hi] - v[lo]) * (k - lo)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("model")
@@ -633,16 +699,33 @@ def main(argv=None):
     ap.add_argument("--decomp-length", type=float, default=500.0, help="transition length [mm]")
     ap.add_argument("--seam", type=float, default=50.0, help="seam allowance (overlap width) [mm]")
     ap.add_argument("--edge", type=float, default=80.0, help="edge allowance for pocket/hem [mm]")
+    ap.add_argument("--miter-limit", type=float, default=4.0,
+                    help="convex allowance corners whose mitre exceeds this x allowance are bevelled")
     ap.add_argument("--roll-width", type=float, default=2500.0, help="usable fabric roll width [mm]")
     ap.add_argument("--scale", type=float, default=1000.0, help="model length unit -> mm (m->mm = 1000)")
     ap.add_argument("--prefix", default="P")
     ap.add_argument("--auto-split", action="store_true", help="split panels wider than the roll (extra seam)")
     ap.add_argument("--notch", type=float, default=1000.0, help="match-mark spacing along seams [mm]")
     ap.add_argument("--sheets", action="store_true", help="also write one shop sheet (DXF with title block) per panel")
+    ap.add_argument("--strain-warn", type=float, default=None,
+                    help="flattening-strain warning threshold [%%] (default: register fabrication.flatten_strain_warn_pct)")
+    ap.add_argument("--seam-tol", type=float, default=None,
+                    help="mating-seam length tolerance [mm/m] (default: register fabrication.mating_seam_tol_mm_per_m)")
     ap.add_argument("--project", default="Tensile structure")
     ap.add_argument("--material", default="(membrane material)")
     ap.add_argument("--out", default="patterns")
     a = ap.parse_args(argv)
+
+    strain_warn = a.strain_warn if a.strain_warn is not None else CF.get("fabrication.flatten_strain_warn_pct")
+    strain_tag = "user" if a.strain_warn is not None else CF.status("fabrication.flatten_strain_warn_pct")
+    seam_tol = a.seam_tol if a.seam_tol is not None else CF.get("fabrication.mating_seam_tol_mm_per_m")
+    seam_tag = "user" if a.seam_tol is not None else CF.status("fabrication.mating_seam_tol_mm_per_m")
+    print("Assumptions: model lengths x --scale -> mm; panels flattened by unfolding + least-squares edge-length "
+          "relaxation (a geometric method, no material stiffness; not an energy/FE patterning as in MPanel, Easy or "
+          "RFEM); compensation = shrink factor (1 - c) along the panel principal axes (warp = panel length); "
+          "decompensation graded linearly over --decomp-length; allowances = exact parallel offsets, convex corners "
+          f"bevelled beyond {a.miter_limit:g} x allowance; strain warning {strain_warn:g} % [{strain_tag}], mating-seam "
+          f"tolerance {seam_tol:g} mm/m [{seam_tag}] (practice values, confirm with the fabricator).")
 
     with open(a.model) as fh:
         model = json.load(fh)
@@ -652,6 +735,11 @@ def main(argv=None):
     surf = Surface(X, model["faces"]) if a.seams == "geodesic" else None
     panels, seam_curves, notes = build_panels(model, X, a.panels_along, a.strip, a.seams, surf)
     cw, cf = a.comp_warp / 100, a.comp_weft / 100
+    g = model["grid"]
+    per_nu = g["nu"] if (g.get("periodic_u") and a.panels_along == "v") else None
+
+    def line_id(k):
+        return f"L{k % per_nu if per_nu else k}"
 
     dxf = DXF()
     layers = (("CUT", "red"), ("NET", "cyan"), ("TEXT", "green"), ("WARP", "yellow"), ("DIM", "grey"),
@@ -661,6 +749,8 @@ def main(argv=None):
     rows, pjson = [], []
     xoff = 0.0
     surf_cache = {}
+    all_strains = []
+    seam_net = defaultdict(lambda: [0.0, 0.0])   # seam id -> [net length on its left panel(s), on its right panel(s)]
 
     def surf_fn():
         if "s" not in surf_cache:
@@ -668,19 +758,20 @@ def main(argv=None):
         return surf_cache["s"]
 
     _SPLIT_COUNTER[0] = 0
-    queue = [dict(p, ids=(f"L{p['lines'][0]}", f"L{p['lines'][1]}"), depth=0,
+    queue = [dict(p, ids=(line_id(p['lines'][0]), line_id(p['lines'][1])), depth=0,
                   seam_info={"left": (0.0, polylen([r[0] for r in p["grid"]])),
                              "right": (0.0, polylen([r[-1] for r in p["grid"]]))}) for p in panels]
     k = 0
     while queue:
         pan = queue.pop(0)
-        net, kinds, emax, erms, seam_len, seam2d = process_panel(pan, cw, cf, a.decomp_ends, a.decomp_sides,
-                                                                 a.decomp_length)
+        net, kinds, emax, erms, seam_len, seam2d, stats = process_panel(pan, cw, cf, a.decomp_ends, a.decomp_sides,
+                                                                        a.decomp_length)
+
         def is_seam(kd):
             return ((kd == "left" and pan["left_seam"]) or (kd == "right" and pan["right_seam"])
                     or (kd == "end0" and pan.get("end0_seam")) or (kd == "end1" and pan.get("end1_seam")))
         dists = [a.seam if is_seam(kd) else a.edge for kd in kinds]
-        cut = offset_polygon(net, dists)
+        cut = offset_polygon(net, dists, a.miter_limit)
         W = max(p[1] for p in cut) - min(p[1] for p in cut)
         if a.auto_split and W > a.roll_width and pan["depth"] < 6:
             across = seam2d["strip_width"] + 2 * a.seam < 0.9 * a.roll_width   # width comes from curvature
@@ -692,6 +783,7 @@ def main(argv=None):
             continue
         k += 1
         pid = f"{a.prefix}{k:02d}"
+        all_strains += stats["strains"]
         minx = min(p[0] for p in cut)
         miny = min(p[1] for p in cut)
         maxx = max(p[0] for p in cut)
@@ -700,8 +792,11 @@ def main(argv=None):
         loc = lambda p: (p[0] - minx, p[1] - miny)
         cut_l, net_l = [loc(p) for p in cut], [loc(p) for p in net]
         marks = []
+        net_seam = {}
         for side, sid in (("left", pan["ids"][0]), ("right", pan["ids"][1])):
+            net_seam[side] = sum(d2(seam2d[side][i - 1], seam2d[side][i]) for i in range(1, len(seam2d[side])))
             if (side == "left" and pan["left_seam"]) or (side == "right" and pan["right_seam"]):
+                seam_net[sid][0 if side == "right" else 1] += net_seam[side]
                 s0, Lfull = pan["seam_info"][side]
                 n_full = max(2, round(Lfull / a.notch))
                 sp = Lfull / n_full
@@ -723,9 +818,13 @@ def main(argv=None):
                      "seam_left_3d_mm": round(seam_len["left"], 1), "seam_right_3d_mm": round(seam_len["right"], 1),
                      "left": pan["ids"][0] if pan["left_seam"] else "boundary",
                      "right": pan["ids"][1] if pan["right_seam"] else "boundary",
-                     "cross_seams": ",".join(x for x in pan.get("end_ids", ("", "")) if x)})
+                     "cross_seams": ",".join(x for x in pan.get("end_ids", ("", "")) if x),
+                     "area_3d_m2": round(stats["area3d"] / 1e6, 4),
+                     "flatten_area_err_%": round((stats["area2d"] - stats["area3d"]) / stats["area3d"] * 100, 4),
+                     "flatten_strain_p95_%": round(percentile([abs(s) for s in stats["strains"]], 0.95) * 100, 3),
+                     "seam_left_net_mm": round(net_seam["left"], 1), "seam_right_net_mm": round(net_seam["right"], 1)})
         pjson.append({"panel": pid, "cut": cut_l, "net": net_l, "notches": marks, "L": L, "W": W,
-                      "net_area_m2": net_area, "note": note})
+                      "net_area_m2": net_area, "note": note, "x_offset_in_dxf": xoff})
         if a.sheets:
             sheet = DXF()
             for ly, col in layers + (("TITLE", "grey"),):
@@ -746,24 +845,41 @@ def main(argv=None):
         wr.writerows(rows)
     print(f"Seams: {a.seams}")
     print(f"{'panel':<7}{'L[mm]':>8}{'W[mm]':>7}{'roll':>6}{'net m2':>8}{'cut m2':>8}{'strain max%':>12}"
-          f"{'seamL 3D':>10}{'seamR 3D':>10}")
+          f"{'p95%':>7}{'area err%':>10}{'seamL 3D':>10}{'seamR 3D':>10}")
     for r in rows:
         print(f"{r['panel']:<7}{r['length_mm']:8d}{r['width_mm']:7d}{'ok' if r['fits_roll'] else 'NO':>6}"
               f"{r['net_area_m2']:8.2f}{r['cut_area_m2']:8.2f}{r['flatten_strain_max_%']:12.3f}"
+              f"{r['flatten_strain_p95_%']:7.3f}{r['flatten_area_err_%']:10.3f}"
               f"{r['seam_left_3d_mm']:10.0f}{r['seam_right_3d_mm']:10.0f}")
     tot_net = sum(r["net_area_m2"] for r in rows)
     tot_bb = sum(r["bbox_area_m2"] for r in rows)
-    print(f"Total net {tot_net:.2f} m2, fabric consumed (bounding boxes) {tot_bb:.2f} m2, "
+    tot_3d = sum(r["area_3d_m2"] for r in rows)
+    print(f"Total net {tot_net:.2f} m2, 3D panel area {tot_3d:.2f} m2"
+          + (f" (model surface_area_m2 {model['surface_area_m2']:.2f})" if "surface_area_m2" in model else "")
+          + f", fabric consumed (bounding boxes) {tot_bb:.2f} m2, "
           f"un-nested waste ~{(1 - tot_net / tot_bb) * 100:.0f}% (nesting on the roll reduces this)")
+    h = strain_histogram(all_strains)
+    lab = ["<0.1", "0.1-0.3", "0.3-0.5", "0.5-1.0", ">=1.0"]
+    print("Flattening strain distribution (all edges and diagonals, |strain| %): "
+          + ", ".join(f"{l_} {v:.1f}%" for l_, v in zip(lab, h)))
     if a.seams == "geodesic":
         gl = [polylen(c) for kk, c in seam_curves.items()]
         print(f"Geodesic seams: {len(seam_curves)} lines, lengths {min(gl):.0f}–{max(gl):.0f} mm")
+    for sid, (lft, rgt) in sorted(seam_net.items()):
+        if lft > 0 and rgt > 0:
+            dev = abs(lft - rgt) / max(lft, rgt) * 1000
+            if dev > seam_tol:
+                notes.append(f"seam {sid}: compensated lengths {lft:.0f} / {rgt:.0f} mm differ by {dev:.1f} mm/m "
+                             f"> {seam_tol:g} mm/m (decompensation or flattening) -> check before cutting")
     for n_ in notes:
         print("  NOTE:", n_)
     if any(not r["fits_roll"] for r in rows):
         print("WARNING: some panels exceed the roll width -> reduce --strip or use --auto-split")
-    if any(r["flatten_strain_max_%"] > 0.5 for r in rows):
-        print("WARNING: flattening strain > 0.5% -> panels too wide for this curvature; reduce --strip")
+    if any(r["flatten_strain_max_%"] > strain_warn for r in rows):
+        print(f"WARNING: flattening strain > {strain_warn:g}% -> panels too wide for this curvature; reduce --strip")
+    if any(r["flatten_strain_max_%"] > 0.5 * min(a.comp_warp, a.comp_weft) for r in rows) and min(cw, cf) > 0:
+        print("NOTE: flattening strain exceeds half the smaller compensation value; the pattern error is of the "
+              "same order as the compensation itself")
     print(f"Wrote {a.out}.dxf, {a.out}.csv, {a.out}.json" + (f" and {len(rows)} panel sheets" if a.sheets else ""))
     return rows
 

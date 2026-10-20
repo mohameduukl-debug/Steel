@@ -17,7 +17,7 @@
 * Fixings A2/A4-70/80 (EN ISO 3506).
 * Bimetallic isolation: washers + sleeves + tape; see `fabric-steel-connections.md`.
 
-## Hardware suppliers (verified to exist via search)
+## Hardware suppliers (verified to exist via search) [V]
 | Supplier | Products |
 |---|---|
 | PFEIFER (DE) | open spelter sockets, adjustable open spelter socket AOSS, AOTS, tension rods (type 860, now UMIX, up to 2900 kN), PG/PV/PE cables |

@@ -7,7 +7,7 @@ cable connections, wind on the mast and base fixity if any.
 
 Checks
   * cross-section class (Table 5.2: d/t <= 50e2 / 70e2 / 90e2)
-  * section resistance N + M (6.2.9, CHS class 1-2 via plastic interaction)
+  * section resistance N + M (6.2.9, CHS class 1-2: exact plastic interaction M_N = M_pl·cos(πn/2))
   * flexural buckling 6.3.1 (curve a hot-finished, curve c cold-formed)
   * member N + M interaction 6.3.3, Annex B (method 2) for CHS (no LTB)
 
@@ -28,7 +28,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "tensile-structures", "scripts"))
 import factors as F  # noqa: E402  central code-factor register (V/C/U tagged)
 
-CURVES = {"a0": 0.13, "a": 0.21, "b": 0.34, "c": 0.49, "d": 0.76}
+CURVES = ("a0", "a", "b", "c", "d")   # α values come from the register (steel.imp_alpha, EN 1993-1-1 Table 6.1)
 
 
 def chs(D, t):
@@ -41,17 +41,19 @@ def chs(D, t):
     return A, I, Wel, Wpl, i
 
 
-def check(D, t, L, N, M, fy, k=1.0, curve=None, cold=False, psi=0.0, E=None, gM0=None, gM1=None):
+def check(D, t, L, N, M, fy, k=1.0, curve=None, cold=False, psi=0.0, E=None, gM0=None, gM1=None, sway=None):
+    """sway: sway buckling mode (Annex B Table B.3 note, Cm = 0.9); None = automatic (k >= 2, cantilever mast)."""
     E = F.get("steel.E") if E is None else E
     gM0 = F.get("steel.gM0") if gM0 is None else gM0
     gM1 = F.get("steel.gM1") if gM1 is None else gM1
     eps = math.sqrt(235 / fy)
     r = D / t
-    cls = 1 if r <= 50 * eps ** 2 else 2 if r <= 70 * eps ** 2 else 3 if r <= 90 * eps ** 2 else 4
+    c1, c2, c3 = (v * eps ** 2 for v in F.get("steel.class_limits")["chs"])   # Table 5.2
+    cls = 1 if r <= c1 else 2 if r <= c2 else 3 if r <= c3 else 4
     A, I, Wel, Wpl, i = chs(D, t)
     W = Wpl if cls <= 2 else Wel
     curve = curve or ("c" if cold else "a")
-    alpha = CURVES[curve]
+    alpha = F.get("steel.imp_alpha")[curve]
     Lcr = k * L * 1000
     Ncr = math.pi ** 2 * E * I / Lcr ** 2
     NRk = A * fy
@@ -61,19 +63,20 @@ def check(D, t, L, N, M, fy, k=1.0, curve=None, cold=False, psi=0.0, E=None, gM0
     NbRd = chi * NRk / gM1
     MRk = W * fy
     NEd, MEd = N * 1e3, M * 1e6
-    # section (CHS plastic interaction, 6.2.9.1(6) M_N = M_pl (1 - n^1.7))
+    # section: exact plastic N-M interaction of a thin tube M_N = M_pl·cos(πn/2) (class 1-2), linear for class 3
     n = NEd / (NRk / gM0)
-    MNRd = MRk / gM0 * (1 - n ** 1.7) if cls <= 2 else MRk / gM0 * (1 - n)
+    MNRd = MRk / gM0 * math.cos(math.pi * min(n, 1.0) / 2) if cls <= 2 else MRk / gM0 * (1 - n)
     sec = MEd / MNRd if MNRd > 0 else math.inf
     # member, Annex B, Cm for linear moment ratio psi
-    Cm = max(0.4, 0.6 + 0.4 * psi)
+    sway = (k >= 2.0) if sway is None else sway
+    Cm = F.get("steel.Cm_sway") if sway else max(F.get("steel.Cm_min"), 0.6 + 0.4 * psi)
     nb = NEd / (chi * NRk / gM1)
     kyy = Cm * (1 + min(lam - 0.2, 0.8) * nb) if cls <= 2 else Cm * (1 + min(0.6 * lam, 0.6) * nb)
     memb = nb + kyy * MEd / (MRk / gM1)
     return {"class": cls, "D/t": r, "A_mm2": A, "I_mm4": I, "i_mm": i, "slenderness_L/i": Lcr / i,
             "Ncr_kN": Ncr / 1e3, "lambda_bar": lam, "curve": curve, "chi": chi, "NbRd_kN": NbRd / 1e3,
             "MRd_kNm": MRk / 1e6, "u_section": max(n, sec) if MEd else n, "u_buckling": nb,
-            "kyy": kyy, "u_member_NM": memb, "mass_kg_m": A * 7.85e-3}
+            "Cm": Cm, "sway": sway, "kyy": kyy, "u_member_NM": memb, "mass_kg_m": A * 7.85e-3}
 
 
 def main(argv=None):
@@ -88,12 +91,18 @@ def main(argv=None):
     ap.add_argument("--fy", type=float, default=355.0)
     ap.add_argument("--cold", action="store_true", help="cold-formed CHS (curve c)")
     ap.add_argument("--curve", choices=list(CURVES), default=None)
+    ap.add_argument("--sway", action="store_true", default=None, help="sway buckling mode (Cm = 0.9); auto if k >= 2")
     ap.add_argument("--factors", default=None, help="project code-factor file")
     a = ap.parse_args(argv)
     if a.factors:
         os.environ["TENSILE_FACTORS"] = a.factors
-    print(f"Partial factors: {F.tag('steel.gM0')}, {F.tag('steel.gM1')}")
-    r = check(a.D, a.t, a.L, a.N, a.M, a.fy, a.k, a.curve, a.cold, a.psi)
+    print(f"Factors: {F.tag('steel.gM0')}, {F.tag('steel.gM1')}, {F.tag('steel.E')}, "
+          f"imperfection α [{F.status('steel.imp_alpha')}], Cm [{F.status('steel.Cm_min')}]")
+    print("Assumptions: prismatic CHS, uniform N; effective length k·L given by you (k = 1 pinned-pinned, 2 flagpole;\n"
+          "  guyed/tapered/flying masts: take L_cr from frame2d/frame3d α_cr); curve a hot-finished (a0 S460), c cold-formed;\n"
+          "  section N+M with M_N = M_pl·cos(πn/2) (class 1–2); member check Annex B eq. 6.61 with Cm from ψ (Table B.3),\n"
+          "  0.9 for a sway mode (auto when k ≥ 2). No local shell buckling (class 4 → EN 1993-1-6), no torsion, no fatigue.")
+    r = check(a.D, a.t, a.L, a.N, a.M, a.fy, a.k, a.curve, a.cold, a.psi, sway=a.sway)
     print(f"CHS {a.D}x{a.t}  S{int(a.fy)}  L={a.L} m  k={a.k}  N_Ed={a.N} kN  M_Ed={a.M} kNm")
     for key, v in r.items():
         print(f"  {key:<16} {v:.4g}" if isinstance(v, float) else f"  {key:<16} {v}")

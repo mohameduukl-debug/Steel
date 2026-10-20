@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -45,15 +46,30 @@ def fire_rank(cls: str) -> int:
     return FIRE_ORDER.index(head)
 
 
-def utilisation(m, fam, n, case, method, seam_eff):
-    """design utilisation of one material (fabric seams in the weaker direction, or ETFE foil)."""
+def product_fire(m, d):
+    """(class, source): EN 13501-1 class from the product entry when it states one, else the family default."""
+    hit = re.search(r"\b(A1|A2|B|C|D|E|F)-(s[123])(?:[,\s-]*(d[012]))?", m.get("fire", ""))
+    if hit:
+        return f"{hit.group(1)}-{hit.group(2)}" + (f",{hit.group(3)}" if hit.group(3) else ""), "product"
+    return d.get("fire_EN13501"), "family"
+
+
+def utilisation(m, fam, n, case, method, seam_eff, opts=None):
+    """design utilisation of one material (seams in the weaker direction, or ETFE foil).
+
+    partial / ts19102 use the 5 % fractile (fk_w/fk_f) when the entry has one; the seam row uses the joint
+    partial factor (γM 1.5 / γM2). Raises ValueError when the method has no factors for the family."""
     if n is None:
         return None
     if fam == "ETFE":
-        cap = m["fy1_MPa"] * m["t_mm"] / F.get("membrane.etfe_gamma")   # kN/m
-        return n / cap
-    fmin = min(m["fw"], m["ff"])
-    al, _ = MC.allowable(fmin * seam_eff, method, case, fam)
+        fd, _ = MC.etfe_design_strength(case, fy=m.get("fy10_MPa"))
+        return n / (fd * m["t_mm"])                      # MPa × mm = kN/m
+    if method in ("partial", "ts19102") and "fk_w" in m:
+        fmin = min(m["fk_w"], m["fk_f"])
+    else:
+        fmin = min(m["fw"], m["ff"])
+    se = 1.0 if method == "japan" else seam_eff
+    al, _ = MC.allowable(fmin * se, method, case, fam, opts=dict(opts or {}, joint=True))
     return n / al
 
 
@@ -68,14 +84,20 @@ def select(req, lib=None):
         why = []
         if req.get("family") and fam != req["family"]:
             why.append(f"family {fam}")
-        u = utilisation(m, fam, req.get("n_design"), req.get("case", "wind"), req.get("method", "factor"), seam_eff)
+        try:
+            u = utilisation(m, fam, req.get("n_design"), req.get("case", "wind"), req.get("method", "factor"),
+                            seam_eff, req.get("opts"))
+        except ValueError:
+            u = None
+            why.append(f"no {req.get('method')} factors for {fam}")
         if u is not None and u > 1.0:
             why.append(f"strength (util {u:.2f})")
+        fire, fsrc = product_fire(m, d)
         if req.get("fire"):
-            if "fire_EN13501" not in d:
+            if not fire:
                 why.append("fire class unknown")
-            elif fire_rank(d["fire_EN13501"]) > fire_rank(req["fire"]):
-                why.append(f"fire {d['fire_EN13501']} worse than {req['fire']}")
+            elif fire_rank(fire) > fire_rank(req["fire"]):
+                why.append(f"fire {fire} ({fsrc}) worse than {req['fire']}")
         if req.get("translucency") is not None:
             t = d.get("translucency_pct")
             if not t or t[1] < req["translucency"]:
@@ -89,7 +111,7 @@ def select(req, lib=None):
         if req.get("max_cost") is not None and d.get("cost_index", 99) > req["max_cost"]:
             why.append(f"cost index {d.get('cost_index')}")
         info = {"family": fam, "fw": m["fw"], "ff": m["ff"], "util": u, "status": m["status"],
-                "fire": d.get("fire_EN13501", "?"), "transl": d.get("translucency_pct"),
+                "fire": fire or "?", "transl": d.get("translucency_pct"),
                 "life": d.get("life_years"), "foldable": d.get("foldable"), "cost": d.get("cost_index", 99)}
         (out.append((key, why)) if why else ok.append((key, info)))
     target = req.get("u_target", 0.8)
@@ -101,7 +123,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--n-design", type=float, default=None, help="design membrane stress [kN/m]")
     ap.add_argument("--case", choices=list(MC.CASES), default="wind")
-    ap.add_argument("--method", choices=["factor", "fm", "japan", "partial"], default="factor")
+    ap.add_argument("--method", choices=MC.METHODS, default="factor")
+    ap.add_argument("--area", type=float, default=None, help="french: membrane element area [m²]")
     ap.add_argument("--seam-eff", type=float, default=None)
     ap.add_argument("--fire", default=None, help="required EN 13501-1 class or better, e.g. A2, B")
     ap.add_argument("--translucency", type=float, default=None, help="minimum light transmission [%%]")
@@ -116,9 +139,10 @@ def main(argv=None):
         os.environ["TENSILE_FACTORS"] = a.factors
     req = {"n_design": a.n_design, "case": a.case, "method": a.method, "seam_eff": a.seam_eff, "fire": a.fire,
            "translucency": a.translucency, "life": a.life, "foldable": a.foldable, "family": a.family,
-           "max_cost": a.max_cost, "u_target": a.u_target}
+           "max_cost": a.max_cost, "u_target": a.u_target, "opts": {"area": a.area}}
     ok, out = select(req)
-    print("Requirements: " + ", ".join(f"{k}={v}" for k, v in req.items() if v not in (None, False)))
+    print("Requirements: " + ", ".join(f"{k}={v}" for k, v in req.items()
+                                       if v not in (None, False) and k != "opts"))
     print(f"\n{'rank':<5}{'material':<28}{'family':<15}{'fw/ff':>9}{'util':>6}  {'fire':<9}{'transl %':>9}"
           f"{'life y':>8}{'fold':>6}{'cost':>6}  data")
     for i, (k, v) in enumerate(ok, 1):
@@ -132,9 +156,13 @@ def main(argv=None):
     print("\nExcluded:")
     for k, why in out:
         print(f"  {k:<28} {'; '.join(why)}")
-    print("\nFire/translucency/life/fold/cost are typical family figures for screening; confirm with the product's "
-          "EN 13501-1 report, datasheet and warranty. Strength basis as membrane_check.py "
-          f"(method '{a.method}', seams in the weaker direction).")
+    print("\nAssumptions:")
+    print("  - fire/translucency/life/fold/cost are TYPICAL family figures (screening only): confirm with the product's "
+          "EN 13501-1 report, datasheet and warranty")
+    print(f"  - strength as membrane_check.py (method '{a.method}'): weaker direction across a seam (seam efficiency "
+          f"{a.seam_eff or F.get('membrane.seam_efficiency')}, joint partial factor for partial/ts19102); library strengths "
+          "are published class/datasheet values, not certified batch data")
+    print("  - ETFE: σ = n/t against f_y10,23/(γM·k) of the design situation (JRC Eurocode Outlook 44)")
     return ok, out
 
 

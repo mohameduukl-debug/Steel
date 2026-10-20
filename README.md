@@ -8,18 +8,22 @@ the fabric, the cables and the structural steel, and how the three connect.
 .claude/skills/
 ├── tensile-structures/     HUB: load path, interactions, workflow, standards map, JSON schema, code-factor register
 │   └── scripts/factors.py, report.py
-├── membrane-fabric/        materials (PVC, PTFE, silicone, ETFE, ePTFE), prestress, stress checks, seams
+├── membrane-fabric/        materials (PVC, PTFE, silicone, ETFE, ePTFE; JRC class tables + datasheets), prestress,
+│                           stress checks (factor, FM, MLIT 666, A-factors, CEN/TS 19102, French), corners, tear, panel modes
 │   └── scripts/membrane_check.py, material_select.py, biaxial_fit.py
 ├── cable-tension-members/  spiral strand / FLC / stainless / bars; EN 1993-1-11, ASCE 19; lengths; schedules
 │   └── scripts/cable_calc.py, cable_schedule.py
 ├── steel-supports/         masts, struts, arches, rings, bases, foundations/anchors
-│   └── scripts/member_check.py, frame2d.py, foundation_check.py, mast_check.py
-├── tensile-connections/    fabric↔cable, fabric↔steel, cable↔steel; pins/lugs; corner plates; mast heads
+│   └── scripts/member_check.py, frame2d.py, frame3d.py, foundation_check.py, mast_check.py
+├── connection-precedents/  FIRST step for any connection: Pinterest precedent search, image review, board, gate
+│   └── scripts/precedent_search.py, pinterest_fetch.py
+├── tensile-connections/    fabric↔cable, fabric↔steel, cable↔steel; pins/lugs; corner plates; mast heads;
+│                           gussets (block tearing, Whitmore), EN 1992-4 anchors (tension, shear, interaction), fatigue
 │   └── scripts/pin_connection.py, corner_plate.py, steel_joint_checks.py, fatigue_check.py
 ├── tensile-analysis/       form finding (FDM, DR, URS), non-linear load analysis, software guide
-│   └── scripts/form_find_fdm.py, membrane_dr.py, dynamic_relaxation.py, run_cases.py
+│   └── scripts/form_find_fdm.py, membrane_dr.py, dynamic_relaxation.py, run_cases.py, mesh_convergence.py, benchmarks.py
 └── fabrication-drawings/   patterning, cutting DXF, GA DXF, steel part drawings, drawing-set contents
-    └── scripts/cutting_pattern.py, nest_panels.py, export_dxf.py, steel_part_dxf.py, dxf_writer.py
+    └── scripts/cutting_pattern.py, nest_panels.py, export_dxf.py, steel_part_dxf.py, dxf_writer.py, dxf_reader.py
 ```
 
 Each skill has a `SKILL.md` (loaded by Claude Code when relevant) and a `reference/` folder with the
@@ -52,6 +56,16 @@ python3 $S/tensile-connections/scripts/pin_connection.py --F 250 --Fser 170 --d 
 python3 $S/fabrication-drawings/scripts/cutting_pattern.py cone.json --strip 2 --comp-warp 0.5 --comp-weft 2 --out cone_patterns
 ```
 
+## Precedents before connection design
+No connection is sized before similar built details have been looked at. The `connection-precedents` skill searches
+Pinterest (WebSearch filtered to pinterest.com, English, Arabic and variant queries), downloads the pins and images
+(`pinterest_fetch.py`), records a weighted review of each image (concurrency, plate in cable plane, membrane-safe
+edges, rotation, adjustment, drainage, isolation, replaceability; image type; scale) and builds a precedent board.
+`precedent_search.py check` is the gate. Project hooks in `.claude/settings.json` remind Claude of the rule on
+connection prompts and block `pin_connection.py`, `corner_plate.py`, `steel_joint_checks.py`, `fatigue_check.py` and
+`steel_part_dxf.py` until a gate has passed in the last 24 h (`PRECEDENTS_SKIP=1` for re-checking an existing design).
+Worked example: `examples/precedents_corner_example.json` and
+`.claude/skills/connection-precedents/reference/worked-example-corner.md`.
 ## Code systems: EU, US, Saudi
 Every tool that applies a code takes `--code EU|US|SA` (or `TENSILE_CODE`):
 - **EU:** Eurocodes and CEN/TS 19102.
@@ -96,9 +110,14 @@ Claude loads `tensile-structures` first and then the specialist skills and tools
 * The panel frequency reduces to the classical rectangular-membrane result when the added mass is zero.
 
 ## Important limitations
-* The research behind the reference files used web-search excerpts (primary standards were not accessible).
-  Every value is tagged **[V] verified-search**, **[C] code knowledge** or **[U] unverified**. Check code factors against the
-  edition and National Annex in force (e.g. EN 1993-1-11:2026, CEN/TS 19102:2023) and use supplier datasheets or ETAs.
+* Every value is tagged **[V]** (checked against the standard clause, a published worked example or an official
+  document; see each skill's `reference/validation.md` / verification log), **[C]** (code recommended value, National
+  Annex may differ) or **[U]** (practice value or unverified, always with a range). Check code factors against the
+  edition and National Annex in force (second-generation Eurocodes, CEN/TS 19102:2023) and use supplier datasheets or ETAs.
+* Each tool is validated against independent references (closed forms, published worked examples, the standards' own
+  numbers): `python3 .claude/skills/tensile-structures/scripts/validate_all.py --run-tests` prints the matrix; the
+  analysis benchmarks (Hencky/Fichter membrane, Navier square, catenoid, Irvine cables, tension field) rerun with
+  `tensile-analysis/scripts/benchmarks.py`.
 * `dynamic_relaxation.py` uses a cable-net analogy (no fabric shear or Poisson coupling). Use it for concept and checking.
   Final design needs orthotropic membrane FE with wrinkling (SOFiSTiK, Easy, ixForten, RFEM, GSA …).
 * These tools support, and do not replace, a qualified engineer's design and checking.

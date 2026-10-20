@@ -45,14 +45,18 @@ def dot(a, b):
     return sum(x * y for x, y in zip(a, b))
 
 
-def solve2d(members):
+def resolve2d(members):
+    """Pure statics, no printing. members: (name, angle_deg, F[, x, y]). Returns a dict:
+    Rx, Ry, R (resultant of the member pulls), anchor_angle (direction the anchor must pull), M (kN·mm about
+    the anchor pin, from the hole positions; None without positions), e = M/R (mm), bisector and opening of
+    the first two members (edge cables), deviation of the anchor line from the bisector."""
     Rx = sum(F * math.cos(math.radians(t)) for _, t, F, *_ in members)
     Ry = sum(F * math.sin(math.radians(t)) for _, t, F, *_ in members)
     R = math.hypot(Rx, Ry)
     ang = math.degrees(math.atan2(-Ry, -Rx))  # anchor must pull opposite to resultant
-    M = 0.0
-    have_pos = all(len(m) >= 5 for m in members)
-    if have_pos:
+    M = None
+    if all(len(m) >= 5 for m in members):
+        M = 0.0
         for _, t, F, x, y in members:
             fx, fy = F * math.cos(math.radians(t)), F * math.sin(math.radians(t))
             M += x * fy - y * fx  # kN·mm about the anchor pin
@@ -60,44 +64,66 @@ def solve2d(members):
     bis = math.degrees(math.atan2(math.sin(math.radians(t1)) + math.sin(math.radians(t2)),
                                   math.cos(math.radians(t1)) + math.cos(math.radians(t2))))
     opening = abs((t2 - t1 + 180) % 360 - 180)
+    dev = abs(((ang + 180) - bis + 180) % 360 - 180)
+    return {"Rx": Rx, "Ry": Ry, "R": R, "anchor_angle": ang, "M": M, "e": (M / R if (M is not None and R) else None),
+            "bisector": bis, "opening": opening, "deviation": dev}
+
+
+def solve2d(members):
+    r = resolve2d(members)
+    R, ang = r["R"], r["anchor_angle"]
     print("Corner plate — 2D resolution")
+    print("Assumptions: rigid plate, pin-ended members, forces of ONE load combination concurrent at the node; "
+          "angles CCW from the plate x-axis toward the member; hole positions relative to the anchor pin.")
     print(f"{'member':<10}{'angle[deg]':>11}{'F[kN]':>9}")
     for m in members:
         print(f"{m[0]:<10}{m[1]:11.1f}{m[2]:9.2f}")
-    print(f"\nResultant of members : {R:.2f} kN toward {math.degrees(math.atan2(Ry, Rx)):.1f} deg")
+    print(f"\nResultant of members : {R:.2f} kN toward {math.degrees(math.atan2(r['Ry'], r['Rx'])):.1f} deg")
     print(f"Required anchor force: {R:.2f} kN acting at {ang:.1f} deg (tie-back / mast direction)")
-    print(f"Edge-cable opening angle {opening:.1f} deg, bisector at {bis:.1f} deg "
+    print(f"Edge-cable opening angle {r['opening']:.1f} deg, bisector at {r['bisector']:.1f} deg "
           f"(membrane corner strap should align with it)")
-    dev = abs(((ang + 180) - bis + 180) % 360 - 180)
-    print(f"Anchor line deviates {dev:.1f} deg from the bisector"
-          + ("  (unequal edge-cable forces — expected)" if dev > 2 else ""))
-    if have_pos:
-        e = M / R if R else 0.0
-        print(f"\nMoment about anchor pin from hole layout: {M / 1000:.3f} kNm  -> eccentricity {e:.1f} mm")
+    print(f"Anchor line deviates {r['deviation']:.1f} deg from the bisector"
+          + ("  (unequal edge-cable forces — expected)" if r["deviation"] > 2 else ""))
+    if r["M"] is not None:
+        e = r["e"] or 0.0
+        print(f"\nMoment about anchor pin from hole layout: {r['M'] / 1000:.3f} kNm  -> eccentricity {e:.1f} mm")
         print("  OK: lines of action concurrent" if abs(e) < 5 else
               "  Re-shape plate: move holes so each member's line of action passes through the anchor pin")
     return R, ang
 
 
-def solve3d(members):
+def resolve3d(members):
+    """members: (name, [dx, dy, dz], F). Plate plane from the first two members (edge cables).
+    Returns n (unit normal), Rv, R, anchor (unit), out-of-plane components F_i·(d_i·n), anchor tilt (deg),
+    bisector and opening."""
     d = [unit(m[1]) for m in members]
     F = [m[2] for m in members]
     n = unit(cross(d[0], d[1]))
     Rv = [sum(F[i] * d[i][c] for i in range(len(d))) for c in range(3)]
     R = math.sqrt(dot(Rv, Rv))
+    anchor = [-c / R for c in Rv]
+    oop = dot(anchor, n)
+    b = unit([d[0][c] + d[1][c] for c in range(3)])
+    return {"n": n, "Rv": Rv, "R": R, "anchor": anchor, "oop": [F[i] * dot(d[i], n) for i in range(len(d))],
+            "tilt_deg": math.degrees(math.asin(max(-1, min(1, oop)))), "bisector": b,
+            "opening": math.degrees(math.acos(max(-1, min(1, dot(d[0], d[1])))))}
+
+
+def solve3d(members):
+    r = resolve3d(members)
+    n, R, anchor = r["n"], r["R"], r["anchor"]
     print("Corner plate — 3D resolution (plate plane from the two edge cables)")
+    print("Assumptions: member directions from the corner to the far end; plate plane = plane of the first "
+          "two members; one load combination.")
     print(f"Plate normal n = ({n[0]:.3f}, {n[1]:.3f}, {n[2]:.3f})")
     print(f"{'member':<10}{'F[kN]':>9}{'out-of-plane[kN]':>18}")
     for i, m in enumerate(members):
-        print(f"{m[0]:<10}{F[i]:9.2f}{F[i] * dot(d[i], n):18.3f}")
-    anchor = [-c / R for c in Rv]
+        print(f"{m[0]:<10}{m[2]:9.2f}{r['oop'][i]:18.3f}")
     print(f"\nRequired anchor force {R:.2f} kN along ({anchor[0]:.3f}, {anchor[1]:.3f}, {anchor[2]:.3f})")
-    oop = dot(anchor, n)
-    print(f"Anchor direction out of plate plane: {math.degrees(math.asin(max(-1, min(1, oop)))):.2f} deg"
-          + ("  -> plate would twist; rotate plate or re-align tie-back" if abs(oop) > 0.035 else "  OK"))
-    b = unit([d[0][c] + d[1][c] for c in range(3)])
-    print(f"Edge-cable bisector ({b[0]:.3f}, {b[1]:.3f}, {b[2]:.3f}); opening "
-          f"{math.degrees(math.acos(max(-1, min(1, dot(d[0], d[1]))))):.1f} deg")
+    print(f"Anchor direction out of plate plane: {r['tilt_deg']:.2f} deg"
+          + ("  -> plate would twist; rotate plate or re-align tie-back" if abs(r['tilt_deg']) > 2.0 else "  OK"))
+    b = r["bisector"]
+    print(f"Edge-cable bisector ({b[0]:.3f}, {b[1]:.3f}, {b[2]:.3f}); opening {r['opening']:.1f} deg")
     return R, anchor
 
 

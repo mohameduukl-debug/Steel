@@ -38,6 +38,11 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "tensile-structures", "scripts
 import factors as CF  # noqa: E402
 import member_check as MC  # noqa: E402
 
+
+
+def e0_elastic(curve):
+    """EN 1993-1-1 Table 5.1 bow imperfection e0/L for elastic analysis (register steel.e0_elastic)."""
+    return CF.get("steel.e0_elastic")[curve]
 # Classical in-plane buckling of uniform parabolic arches under uniform load per horizontal metre:
 # q_cr = γ·EI/L³ (Timoshenko & Gere, Theory of Elastic Stability, after Dinnik). Used only as a cross-check:
 # frame2d itself reproduces exact ring and circular-arch solutions; against this table it differs by −0.5 … +8 %,
@@ -570,7 +575,7 @@ def run(fr, check=False, imp_curve=None, Lz=None, quiet=False, code="EU", method
     Lref = sum(m["L"] for n, m in comp) if len(comp) > 1 and all(n.startswith("M") for n, _ in comp) else \
         (max(m["L"] for _, m in comp) if comp else 1.0)
     if code == "EU":
-        amp = E0_ELASTIC.get(curve or "c", 1 / 200) * Lref
+        amp = e0_elastic(curve or "c") * Lref
     else:   # AISC C2.2a system imperfection 1/500, shaped as the buckling mode
         amp = CF.get("aisc.imperfection_ratio") * Lref
         curve = "AISC C2.2a 1/500"
@@ -602,14 +607,27 @@ def run(fr, check=False, imp_curve=None, Lz=None, quiet=False, code="EU", method
     return res
 
 
+ASSUMPTIONS = """Assumptions / model limits (frame2d):
+  - Planar Euler–Bernoulli beam-columns (no shear deformation), consistent geometric stiffness, small rotations
+    (P-Δ/P-δ by iterating K + K_G(N)); truss elements for guys carry compression too (no slackening — use frame3d
+    for tension-only cables with prestress). Loads are dead (no follower pressure).
+  - α_cr = smallest positive eigenvalue of K + α K_G (inverse iteration); 5.2.1(3): first order OK if α_cr ≥ 10.
+  - Imperfection: buckling-mode shape scaled to e0·L (Table 5.1, elastic, curve of the most compressed member).
+  - Member checks via member_check.py: (a) equivalent column with L_cr from α_cr and first-order M,
+    (b) second-order M + cross-section check. Out-of-plane buckling only via --Lz.
+  - Input loads must be ULS design values of one combination (non-linear: no superposition)."""
+
+
 def report(fr, res):
     a = res["alpha_cr"]
+    lim = CF.get("steel.alpha_cr_min_elastic")
+    print(ASSUMPTIONS)
     if res.get("alpha_cr_classical"):
         print(f"α_cr: FE {res['alpha_cr_fe']:.2f}, classical parabolic-arch table {res['alpha_cr_classical']:.2f} "
               f"(Timoshenko & Gere) -> design uses the lower value")
     print(f"Elastic critical load factor α_cr = {a:.2f}  "
-          + ("(≥ 10: first-order analysis adequate, EN 1993-1-1 5.2.1)" if a >= 10 else
-             "(< 10: second-order effects must be included)"))
+          + (f"(≥ {lim:g}: first-order analysis adequate, EN 1993-1-1 5.2.1)" if a >= lim else
+             f"(< {lim:g}: second-order effects must be included)"))
     imp = res["imperfection"]
     print(f"Imperfection for 2nd order: buckling-mode shape, amplitude {imp['amplitude_m'] * 1000:.1f} mm ("
           + (f"e0 curve {imp['curve']}, EN 1993-1-1 Table 5.1 elastic)" if res.get("code", "EU") == "EU"

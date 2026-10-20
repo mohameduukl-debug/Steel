@@ -53,6 +53,19 @@ msel = load("membrane-fabric", "material_select")
 loads = load("tensile-structures", "loads")
 aisc = load("steel-supports", "aisc_member")
 CF = load("tensile-structures", "factors")
+prec = load("connection-precedents", "precedent_search")
+pfetch = load("connection-precedents", "pinterest_fetch")
+
+
+def load_hook(name):
+    spec = importlib.util.spec_from_file_location(name, os.path.join(ROOT, ".claude", "hooks", name + ".py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+hookg = load_hook("precedent_gate")
+hookr = load_hook("precedent_reminder")
 
 
 class TestFormFinding(unittest.TestCase):
@@ -315,7 +328,7 @@ class TestMemberCheck(unittest.TestCase):
     def test_ltb_mcr_ipe300(self):
         rows, _ = memb.check(memb.Section("IPE300"), 355, 6.0, 0.0, 80, psi_LT=0.0)
         ltb = [r for r in rows if r[0].startswith("LTB")][0]
-        self.assertIn("Mcr=169", ltb[0])
+        self.assertIn("Mcr=160", ltb[0])   # C1 = 1.77 (SN003b Table 3.1, psi = 0)
 
 
 class TestFrame2D(unittest.TestCase):
@@ -531,16 +544,20 @@ class TestSensitivity(unittest.TestCase):
         self.assertAlmostEqual(res[0]["u_lo"], fat.check(spec, lo, 1.35, 1.0, 4.0)[0])
 
     def test_helical_and_aluminium_sensitivity(self):
-        out, uw = quiet(found.helical_sensitivity, 12.0, 120.0)
-        Kt_lo, FS_hi = CF.frange("geotech.helical_Kt_per_m")[0], CF.frange("geotech.helical_FS")[1]
-        self.assertAlmostEqual(uw, 120.0 / (Kt_lo * 12.0 / FS_hi))
-        self.assertTrue(out[0]["robust"] and out[1]["robust"])
-        self.assertGreater(uw, 1.0)                                    # combined worst case fails: shown to the user
+        # K_t and FS are verified (ICC-ES ESR-2794) without an uncertainty range: no sensitivity run, a clear message
+        self.assertIsNone(CF.frange("geotech.helical_Kt_per_m"))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            out, uw = found.helical_sensitivity(12.0, 120.0)
+        self.assertEqual(out, [])
+        self.assertIn("verified register values", buf.getvalue())
+        # aluminium bearing (EN 1999-1-1 Table 8.5) is verified too: the clamp-bar run says so instead of a range
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             joint.main(["clampbar", "--n", "12", "--spacing", "150", "--d", "12", "--t", "10", "--plate", "alu6082",
                         "--sensitivity"])
-        self.assertIn("aluminium bearing", buf.getvalue())
+        self.assertIn("aluminium", buf.getvalue())
+        self.assertIn("verified", buf.getvalue())
 
     def test_report_sensitivity_section(self):
         rep = load("tensile-structures", "report")
@@ -1053,6 +1070,192 @@ class TestSkillConsistency(unittest.TestCase):
                 if f.endswith(".py") and f != "factors.py":
                     src = open(os.path.join(sdir, f)).read()
                     self.assertIsNone(re.search(r"def \w+\([^)]*gM[0-9]\w*=\s*1\.", src), f"{d}/{f}")
+
+
+class TestPrecedents(unittest.TestCase):
+    EX = os.path.join(ROOT, "examples", "precedents_corner_example.json")
+
+    def setUp(self):
+        with open(self.EX) as fh:
+            self.ex = json.load(fh)
+
+    def test_every_node_has_queries_and_valid_checks(self):
+        lib = prec.load_library()
+        for node in lib["nodes"]:
+            plan = prec.build_queries(node, lib=lib)
+            groups = {w["group"] for w in plan["websearch"]}
+            self.assertEqual(groups, {"primary", "variant", "arabic"}, node)
+            self.assertTrue(all(w["allowed_domains"] == ["pinterest.com"] for w in plan["websearch"]))
+            self.assertTrue(all(prec.ARABIC.search(w["query"]) for w in plan["websearch"] if w["group"] == "arabic"))
+            self.assertTrue(set(plan["na"]) <= set(prec.FEATURES), node)
+            for c in plan["checks"]:  # every referenced tool must exist
+                skill, script = c.split()[0].split("/")
+                self.assertTrue(os.path.exists(os.path.join(SK, skill, "scripts", script)), c)
+        self.assertTrue(plan["fallback_websearch"][0]["allowed_domains"])
+
+    def test_material_prefix_and_url_encoding(self):
+        plan = prec.build_queries("corner-plate", material="PTFE")
+        self.assertTrue(plan["websearch"][0]["query"].startswith("PTFE "))
+        self.assertIn("PTFE%20tensile%20membrane%20corner%20plate", plan["pinterest_urls"][0])
+        with self.assertRaises(KeyError):
+            prec.build_queries("no-such-node")
+
+    def test_weighted_assessment(self):
+        good = {k: "yes" for k in prec.FEATURES}
+        a = prec.assess({"features": dict(good, drainage="no"), "kind": "photo"})
+        self.assertAlmostEqual(a["quality"], 10 * 15 / 16, places=1)        # weights 3,3,3,2,2,1,1,1 = 16
+        self.assertFalse(a["form_only"])
+        self.assertTrue(prec.assess({"features": dict(good, concurrent="no"), "kind": "photo"})["form_only"])
+        self.assertTrue(prec.assess({"features": good, "kind": "ai_generated"})["form_only"])
+        far = prec.assess({"features": good, "kind": "photo", "scale": "sail"}, project_scale="roof")
+        self.assertEqual(far["scale_gap"], 2)
+        self.assertTrue(far["form_only"])
+        # n/a features leave the score: keder track has no concurrency
+        k = prec.assess({"features": dict(good, concurrent="no")}, na=["concurrent", "rotation"])
+        self.assertEqual(k["quality"], 10.0)
+
+    def test_board_on_worked_example(self):
+        md, summ = prec.make_board(self.ex)
+        self.assertEqual(summ["ranking"][:2], [6, 18])                    # the two built, fully good corners
+        self.assertIn(7, [i for i, k in summ["red_flags"] if k == "concurrent"])
+        self.assertIn(1, summ["unreviewed"])
+        self.assertIn("form only", md)
+        self.assertIn("tensile-connections/corner_plate.py", md)
+        with self.assertRaises(ValueError):
+            prec.make_board(prec.template("mast-head"))
+
+    def test_gate_passes_on_worked_example_and_fails_when_degraded(self):
+        ok, res = prec.gate(self.ex)
+        self.assertTrue(ok, [r for r in res if not r[1]])
+        import copy
+
+        def fails(mut, item):
+            d = copy.deepcopy(self.ex)
+            mut(d)
+            ok, res = prec.gate(d)
+            self.assertFalse(ok)
+            self.assertIn(item, [r[0] for r in res if not r[1]])
+
+        fails(lambda d: d.update(searched=[q for q in d["searched"] if not prec.ARABIC.search(q)]), "an Arabic search")
+        fails(lambda d: [p.update(viewed=False) for p in d["precedents"][5:]],
+              ">= 5 relevant precedents viewed, with a link (no infographics/products)")
+        fails(lambda d: d["concept"]["features"].update(concurrent="?"), "concept satisfies all critical features")
+        fails(lambda d: d["concept"]["ideas"].append({"idea": "x", "from": [99]}),
+              "concept with ideas traced to relevant precedents")
+        fails(lambda d: d["concept"]["ideas"].append({"idea": "ring", "from": [13], "detail": True}),
+              "no detail copied from a 'form only' precedent")
+        fails(lambda d: d["precedents"][5]["features"].update(in_plane="?"),
+              "critical features judged on every counted precedent")
+
+    def test_gate_state_file(self):
+        f = os.path.join(tempfile.mkdtemp(), "state", "g.json")
+        prec.write_gate(self.ex, self.EX, True, gate_file=f)
+        self.assertIsNotNone(hookg.gate_ok(f))
+        import datetime as dt
+        later = dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=hookg.MAX_AGE_H + 1)
+        self.assertIsNone(hookg.gate_ok(f, now=later))
+
+    def test_pinterest_parsing_offline(self):
+        pin_html = ('<meta content="https://i.pinimg.com/736x/bc/bb/c7/bcbbc7878f99ca1e291354ce043073e8.jpg" '
+                    'name="og:image" property="og:image"/><meta content="Corner plate &amp; fork" property="og:title"/>'
+                    '<meta content="stainless corner" name="description"/>')
+        m = pfetch.parse_pin_page(pin_html)
+        self.assertEqual(m["image_sig"], "bcbbc7878f99ca1e291354ce043073e8")
+        self.assertEqual(m["title"], "Corner plate & fork")
+        board = ('x{"node_id":"UGluOjE=","image_signature":"' + "a" * 32 + '","id":"111","type":"pin",'
+                 '"images":{"736x":{"url":"u"}},"grid_title":"T1"}y{"node_id":"UGluOjI=","id":"222","type":"pin",'
+                 '"images":{"736x":{"url":"https://i.pinimg.com/736x/b/b/b/' + "b" * 32 + '.jpg"}}}')
+        pins, _ = pfetch.parse_collection_page(board)
+        self.assertEqual([(p["id"], p["sig"]) for p in pins], [("111", "a" * 32), ("222", "b" * 32)])
+        self.assertEqual(pfetch.classify("https://www.pinterest.com/pin/tensile-membrane--101260691616924639/"), "pin")
+        self.assertEqual(pfetch.pin_id_from_url("https://www.pinterest.com/pin/tensile-membrane--101260691616924639/"),
+                         "101260691616924639")
+        self.assertEqual(pfetch.classify("https://www.pinterest.com/ideas/tensile-structure-detail/913003401530/"), "ideas")
+        self.assertEqual(pfetch.classify("https://www.pinterest.com/sefararch/tensile-fabric-connection-details/"), "board")
+        self.assertEqual(pfetch.classify("https://www.pinterest.com/search/pins/?q=x"), "search")
+        self.assertEqual(pfetch.img_url("c719c54f827a44fd72e341e250c71318"),
+                         "https://i.pinimg.com/736x/c7/19/c5/c719c54f827a44fd72e341e250c71318.jpg")
+        self.assertTrue(pfetch.is_consumer("COLOURTREE 12 ft. Stainless Steel Pole - The Home Depot"))
+        self.assertFalse(pfetch.is_consumer("Membrane Plate and Anchor Point on Tensile Fabric"))
+
+    def test_masthead_example_and_verification_section(self):
+        with open(os.path.join(ROOT, "examples", "precedents_masthead_example.json")) as fh:
+            mh = json.load(fh)
+        ok, res = prec.gate(mh)
+        self.assertTrue(ok, [r for r in res if not r[1]])
+        md, summ = prec.make_board(mh)
+        self.assertIn("## Verification of the concept", md)
+        self.assertIn(7, [i for i, k in summ["red_flags"] if k == "concurrent"])   # eccentric tie-back drawing
+        # the verification claim in the example is reproduced by corner_plate (3D): resultant along the mast axis
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            corner.main(["--v", "corner:-0.6767:-0.6767:-0.2900:123.4", "--v", "tieback:0.4545:0.4545:-0.7660:183.9"])
+        self.assertIn("176.6", out.getvalue())
+        self.assertIn("(-0.000, -0.000, 1.000)", out.getvalue())
+
+    def test_ingest_mode_b(self):
+        d = tempfile.mkdtemp()
+        for fn in ("b.png", "a.jpg", "notes.txt"):
+            open(os.path.join(d, fn), "wb").close()
+        data = pfetch.ingest(d, "corner-plate", links={"a.jpg": "https://www.pinterest.com/pin/1/"})
+        self.assertEqual([p["title"] for p in data["precedents"]], ["a", "b"])
+        self.assertEqual(data["precedents"][0]["url"], "https://www.pinterest.com/pin/1/")
+        self.assertTrue(data["precedents"][1]["url"].startswith("user-supplied:"))
+        self.assertFalse(any(p["viewed"] for p in data["precedents"]))   # must still be viewed and judged
+
+    def test_fetch_retry_backoff(self):
+        import urllib.error
+        import urllib.request
+        calls, sleeps = [], []
+
+        class Resp:
+            status = 200
+
+            def read(self):
+                return b"ok"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def fake(req, context=None, timeout=None):
+            calls.append(1)
+            if len(calls) < 3:
+                raise urllib.error.URLError("reset")
+            return Resp()
+
+        orig = urllib.request.urlopen
+        urllib.request.urlopen = fake
+        try:
+            self.assertEqual(pfetch.get("https://x", _sleep=sleeps.append), (200, b"ok"))
+            self.assertEqual(sleeps, [2.0, 4.0])
+            calls.clear()
+
+            def forbidden(req, context=None, timeout=None):
+                calls.append(1)
+                raise urllib.error.HTTPError("https://x", 403, "no", {}, None)
+            urllib.request.urlopen = forbidden
+            with self.assertRaises(urllib.error.HTTPError):
+                pfetch.get("https://x", _sleep=sleeps.append)
+            self.assertEqual(len(calls), 1)                                # 403 is not retried
+        finally:
+            urllib.request.urlopen = orig
+
+    def test_hooks(self):
+        f = os.path.join(tempfile.mkdtemp(), "none.json")
+        cmd = "python3 .claude/skills/tensile-connections/scripts/corner_plate.py --m a:0:1:1:0"
+        self.assertIn("connection-precedents", hookg.decide(cmd, f))
+        self.assertIsNone(hookg.decide("PRECEDENTS_SKIP=1 " + cmd, f))
+        self.assertIsNone(hookg.decide("python3 x/corner_plate.py --help", f))
+        self.assertIsNone(hookg.decide("bash examples/run_demo.sh", f))
+        self.assertIsNone(hookg.decide("grep corner_plate.py README.md", f))
+        prec.write_gate(self.ex, self.EX, True, gate_file=f)
+        self.assertIsNone(hookg.decide(cmd, f))
+        for prompt, hit in (("صمم وصلة ركن لمظلة شد", True), ("design the mast head connection", True),
+                            ("ما هو الطقس اليوم", False), ("run the tests", False)):
+            self.assertEqual(bool(hookr.PAT.search(prompt) and hookr.DESIGN.search(prompt)), hit, prompt)
 
 
 class TestReport(unittest.TestCase):

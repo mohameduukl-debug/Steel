@@ -46,7 +46,7 @@ import math
 import sys
 from collections import defaultdict
 
-GAMMA_W = 10.0  # kN/m3
+GAMMA_W = 10.0  # kN/m3: water 9.81 kN/m3 rounded up (physical constant, not a code factor)
 
 
 def sub(a, b):
@@ -154,62 +154,110 @@ def water_depths(model, X, outs):
     return {i: level.get(i, X[i][2]) - X[i][2] for i in range(len(X))}
 
 
+def _tri_list(model):
+    return [t for t in triangles(model)]
+
+
+def add_face_loads(tris, x, y, z, pressure, snow, pfun, Rx, Ry, Rz):
+    """Add face loads to the nodal force arrays (same rules as external_loads, flat arrays).
+    pressure: follower load along the upward-oriented face normal; snow: vertical, per plan area."""
+    for a, b, c in tris:
+        ux, uy, uz = x[b] - x[a], y[b] - y[a], z[b] - z[a]
+        wx, wy, wz = x[c] - x[a], y[c] - y[a], z[c] - z[a]
+        nx, ny, nz = uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx   # 2*area*normal
+        if nz < 0:
+            nx, ny, nz = -nx, -ny, -nz   # orient the normal upward
+        p = pressure if pfun is None else pfun((x[a] + x[b] + x[c]) / 3, (y[a] + y[b] + y[c]) / 3)
+        fx, fy, fz = p * nx / 6.0, p * ny / 6.0, (p - snow) * nz / 6.0
+        Rx[a] += fx; Ry[a] += fy; Rz[a] += fz
+        Rx[b] += fx; Ry[b] += fy; Rz[b] += fz
+        Rx[c] += fx; Ry[c] += fy; Rz[c] += fz
+
+
 def relax(model, pressure=0.0, snow=0.0, tol=1e-4, maxit=200000, verbose=False, pfun=None, extra=None):
+    """Kinetic-damping DR of the tension-only link net.
+
+    Flat-array implementation: O(edges + faces) work per iteration, linear in the mesh size.
+    Fictitious mass M_i = S_i = sum(EA/L0 + T/L) with dt = 1 (lambda = 2 in Barnes' notation, a
+    sqrt(2) margin on the stability limit). Face pressure is recomputed every iteration (follower load).
+    """
     nodes, edges = model["nodes"], model["edges"]
-    X = [list(nd["xyz"]) for nd in nodes]
-    fixed = [bool(nd.get("fixed")) for nd in nodes]
     n = len(nodes)
-    V = [[0.0, 0.0, 0.0] for _ in range(n)]
+    x = [float(nd["xyz"][0]) for nd in nodes]
+    y = [float(nd["xyz"][1]) for nd in nodes]
+    z = [float(nd["xyz"][2]) for nd in nodes]
+    free = [i for i, nd in enumerate(nodes) if not nd.get("fixed")]
+    edata = [(e["n"][0], e["n"][1], float(e["EA"]), float(e["L0"]), float(e["EA"]) / float(e["L0"]))
+             for e in edges]
+    tris = _tri_list(model)
+    varying = bool(pressure or snow or pfun)
+    # constant nodal loads (ponding water, user loads)
+    P0x, P0y, P0z = [0.0] * n, [0.0] * n, [0.0] * n
+    if extra:
+        for i, f in extra.items():
+            P0x[i] += f[0]
+            P0y[i] += f[1]
+            P0z[i] += f[2]
+    vx, vy, vz = [0.0] * n, [0.0] * n, [0.0] * n
+    sqrt = math.sqrt
     KE_prev = 0.0
     it = 0
     Rmax = math.inf
-    varying = bool(pressure or snow or pfun)
+    T_out = [0.0] * len(edges)
+    L_out = [0.0] * len(edges)
+    tol2 = tol * tol
     for it in range(maxit):
-        P = external_loads(model, X, pressure, snow, pfun) if varying else {}
-        R = [list(P.get(i, [0.0, 0.0, 0.0])) for i in range(n)]
-        if extra:
-            for i, f in extra.items():
-                for c in range(3):
-                    R[i][c] += f[c]
-        S = [0.0] * n  # nodal stiffness for fictitious mass
-        for e in edges:
-            a, b = e["n"]
-            d = sub(X[b], X[a])
-            L = norm(d)
-            T = e["EA"] * (L - e["L0"]) / e["L0"]
-            if T < 0:
-                T = 0.0  # tension-only (slack cable / wrinkled membrane)
-            e["_T"], e["_L"] = T, L
-            k = e["EA"] / e["L0"] + T / L
-            S[a] += k
-            S[b] += k
-            for c in range(3):
-                f = T * d[c] / L
-                R[a][c] += f
-                R[b][c] -= f
-        Rmax = max((norm(R[i]) for i in range(n) if not fixed[i]), default=0.0)
-        if Rmax < tol:
+        Rx, Ry, Rz = P0x[:], P0y[:], P0z[:]
+        if varying:
+            add_face_loads(tris, x, y, z, pressure, snow, pfun, Rx, Ry, Rz)
+        S = [0.0] * n
+        k = 0
+        for a, b, ea, l0, k0 in edata:
+            dx, dy, dz = x[b] - x[a], y[b] - y[a], z[b] - z[a]
+            L = sqrt(dx * dx + dy * dy + dz * dz)
+            T = ea * (L - l0) / l0
+            if T < 0.0:
+                T = 0.0   # tension-only (slack cable / wrinkled membrane link)
+            T_out[k] = T
+            L_out[k] = L
+            k += 1
+            t = T / L
+            s = k0 + t
+            S[a] += s
+            S[b] += s
+            fx, fy, fz = t * dx, t * dy, t * dz
+            Rx[a] += fx; Ry[a] += fy; Rz[a] += fz
+            Rx[b] -= fx; Ry[b] -= fy; Rz[b] -= fz
+        r2 = 0.0
+        for i in free:
+            q = Rx[i] * Rx[i] + Ry[i] * Ry[i] + Rz[i] * Rz[i]
+            if q > r2:
+                r2 = q
+        Rmax = sqrt(r2)
+        if r2 < tol2:
             break
         KE = 0.0
-        for i in range(n):
-            if fixed[i]:
-                continue
-            m = max(S[i], 1e-9)  # dt = 1, m = S*dt^2/2 * 2 (safety factor 2)
-            for c in range(3):
-                V[i][c] += R[i][c] / m
-            KE += m * (V[i][0] ** 2 + V[i][1] ** 2 + V[i][2] ** 2)
-        if KE < KE_prev:  # kinetic energy peak passed -> kinetic damping reset
-            for i in range(n):
-                V[i] = [0.0, 0.0, 0.0]
+        for i in free:
+            m = S[i]
+            if m < 1e-9:
+                m = 1e-9
+            a_, b_, c_ = vx[i] + Rx[i] / m, vy[i] + Ry[i] / m, vz[i] + Rz[i] / m
+            vx[i], vy[i], vz[i] = a_, b_, c_
+            KE += m * (a_ * a_ + b_ * b_ + c_ * c_)
+        if KE < KE_prev:   # kinetic energy peak passed -> kinetic damping reset
+            for i in free:
+                vx[i] = vy[i] = vz[i] = 0.0
             KE = 0.0
         KE_prev = KE
-        for i in range(n):
-            if not fixed[i]:
-                for c in range(3):
-                    X[i][c] += V[i][c]
+        for i in free:
+            x[i] += vx[i]
+            y[i] += vy[i]
+            z[i] += vz[i]
         if verbose and it % 2000 == 0:
             print(f"  it {it:6d}  max residual {Rmax:.3e} kN", file=sys.stderr)
-    return X, it, Rmax
+    for k, e in enumerate(edges):
+        e["_T"], e["_L"] = T_out[k], L_out[k]
+    return [[x[i], y[i], z[i]] for i in range(n)], it, Rmax
 
 
 def ponding(model, X, pressure, snow, pfun, tol, maxit, max_outer=40, depth_limit=1.0, verbose=False):
@@ -292,8 +340,20 @@ def analyse(base, Et_u=800.0, Et_v=600.0, EA_cable=14000.0, pressure=0.0, snow=0
                          "pressure_kN_m2": pressure, "snow_kN_m2": snow, "pressure_field": pfun is not None,
                          "iterations": it, "max_residual_kN": Rmax, "converged": Rmax < tol,
                          "max_displacement_m": disp[imax], "max_disp_node": imax,
-                         "slack_links": len(slack), "ponding": pond}
+                         "slack_links": len(slack), "ponding": pond, "tol": tol}
     return model
+
+
+def print_assumptions(an, Et_u, Et_v, EA_cable):
+    print("Assumptions: CABLE-NET ANALOGY of the membrane — tension-only axial links, no fabric shear stiffness, no "
+          "Poisson coupling (screening tool; use membrane_dr.py for orthotropic CST);")
+    print(f"  membrane link EA = E·t x tributary width (u/warp E·t {Et_u}, v/weft E·t {Et_v} kN/m), cable EA "
+          f"{EA_cable} kN unless per-edge 'EA'; unstressed length from the form-finding force; linear elastic;")
+    print("  pressure = follower load normal to the deformed surface (+ = uplift), snow = vertical per plan area; "
+          f"kinetic-damping DR, converged when max nodal residual < {an.get('tol', 1e-4):.0e} kN;")
+    print("  slack membrane links indicate wrinkling (stress transfer then only along the other direction);"
+          + (" ponding: fill-to-spill water (γ_w = 10 kN/m3), blocked drains." if an.get("ponding") else ""))
+    print()
 
 
 def summary(model):
@@ -350,6 +410,7 @@ def main(argv=None):
         base = json.load(fh)
     model = analyse(base, a.Et_u, a.Et_v, a.EA_cable, a.pressure, a.snow, None, a.ponding, a.tol, a.maxit,
                     a.verbose, a.depth_limit)
+    print_assumptions(model["analysis"], a.Et_u, a.Et_v, a.EA_cable)
     summary(model)
     if a.out:
         with open(a.out + ".json", "w") as fh:

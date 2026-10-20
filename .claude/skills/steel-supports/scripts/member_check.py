@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Steel member check to EN 1993-1-1 (--code EU, default), AISC 360-22 (--code US, LRFD or ASD) or
+"""Steel member check to EN 1993-1-1 (--code EU, default), ANSI/AISC 360-16/360-22 (--code US, LRFD or ASD) or
 SBC 306 (--code SA: AISC based, LRFD only, φc = 0.85 / φv = 0.90 per the 2018 AR text [U])
-for CHS, RHS/SHS and I/H sections (AISC/SBC checks in aisc_member.py).
+for CHS, RHS/SHS and I/H sections. --code US runs check_aisc() in this file (validated against the AISC Design
+Examples); --code SA runs aisc_member.py with the SBC 306 factors. Legacy aliases: --code en = EU, aisc = US.
 
 For masts, struts, booms, arch segments (as straight members), edge beams and
 frames of tensile structures.
@@ -10,28 +11,34 @@ Sections (--section):
   IPE200 | HEA240 | HEB300 ...        built-in EN 10365 nominal dimensions (see --list)
   CHS:219.1x8[:cold]                  circular hollow (hot-finished default)
   RHS:200x100x8[:cold]  SHS:150x8     rectangular / square hollow (EN 10210 hot / EN 10219 cold radii)
-  I:h:b:tw:tf:r[:welded]              any doubly-symmetric I (r = root radius or weld size)
+  RHS:304.8x254x8.86:aisc             AISC HSS: t = design wall thickness t_des, outside corner radius 2t_des
+  I:h:b:tw:tf:r[:welded]              any doubly-symmetric I (r = root radius or weld size; AISC: r = k_des - tf)
 
 Section properties are computed from the true outline (root radii, corner radii)
 by polygon integration; plastic moduli by half-section clipping.
 
 Checks
   * cross-section class (Table 5.2) under the actual N (+ bending)
-  * section: N, V (y/z), N + My + Mz (conservative linear 6.2.1(7) for class 1–3)
+  * section: N, V (y/z), N + My + Mz (6.2.9.1 plastic interaction for class 1–2, linear 6.2.1(7) for class 3–4)
   * flexural buckling y and z (6.3.1, curves per Table 6.2)
-  * lateral-torsional buckling for I sections (6.3.2.2 general case, M_cr with C1)
+  * lateral-torsional buckling for I sections (6.3.2.2 general case, M_cr with C1 from NCCI SN003b Table 3.1 or --C1)
   * member interaction N + My + Mz (6.3.3, Annex B method 2)
   * tension members (N < 0): N_t,Rd = A·fy/γM0 (net section: check separately)
 
-Units: kN, kNm, m for loads/lengths; mm for section input.
+AISC 360-16/360-22 route (--code aisc; LRFD φ by default, --asd for Ω), see check_aisc():
+  * D2 tension yielding / rupture (Ae = U·An from --An/--U), E3/E4 flexural (torsional) buckling, E7 slender
+    elements (Table B4.1a, effective width; round HSS E7-7), F2 (LTB with Cb), F3/F6 flange local buckling, F7
+    rectangular HSS (FLB, WLB, LTB), F8 round HSS, G2/G4/G5/G6 shear, H1-1a/b interaction, optional App. 8 B1.
+
+Units: kN, kNm, m for loads/lengths; mm for section input; MPa for fy/fu (also in --code aisc).
 
 Examples
   python3 member_check.py --section CHS:219.1x8 --L 7.5 --N 420 --My 12
   python3 member_check.py --section SHS:150x8 --L 6 --N 300 --My 25 --Mz 10 --cold
   python3 member_check.py --section IPE300 --L 6 --N 50 --My 80 --Vz 60 --kLT 1.0 --psi-LT 0
   python3 member_check.py --section HEB200 --L 5 --N 600 --My 30 --ky 1 --kz 1
-  python3 member_check.py --section CHS:219.1x8 --L 7.5 --N 420 --My 12 --code US            # AISC 360 LRFD
-  python3 member_check.py --section I:356:368:11.2:18:15 --L 4.572 --N 3000 --code US --method ASD
+  python3 member_check.py --code US --section I:359.7:369.9:12.3:19.8:15.2 --fy 345 --L 4.27 --N 1780 --My 339 --Mz 108
+  python3 member_check.py --code US --method ASD --section RHS:304.8x203.2x4.42:aisc --fy 345 --L 7.32 --ky 1 --kz 1 --N 300
   python3 member_check.py --section CHS:219.1x8 --L 7.5 --N 420 --My 12 --code SA --sensitivity   # SBC 306
   python3 member_check.py --list
 """
@@ -53,7 +60,24 @@ PROFILES = {
     "HEA300": (290, 300, 8.5, 14.0, 27), "HEB160": (160, 160, 8.0, 13.0, 15), "HEB200": (200, 200, 9.0, 15.0, 18),
     "HEB240": (240, 240, 10.0, 17.0, 21), "HEB300": (300, 300, 11.0, 19.0, 27),
 }
-ALPHA = {"a0": 0.13, "a": 0.21, "b": 0.34, "c": 0.49, "d": 0.76}
+CURVE_NAMES = ("a0", "a", "b", "c", "d")
+
+
+def alpha_of(curve):
+    """imperfection factor α of a buckling curve, from the register (EN 1993-1-1 Table 6.1 / 6.3)."""
+    return CF.get("steel.imp_alpha")[curve]
+
+
+def C1_end_moments(psi):
+    """C1 for a segment with linear moment (end-moment ratio ψ), k = kw = 1: linear interpolation in
+    NCCI SN003b Table 3.1 (register steel.C1_end_moments, computed with κ_wt = 0 → conservative)."""
+    t = CF.get("steel.C1_end_moments")
+    ps, cs = t["psi"], t["C1"]
+    psi = max(-1.0, min(1.0, psi))
+    for (p0, c0), (p1, c1) in zip(zip(ps, cs), zip(ps[1:], cs[1:])):
+        if p1 <= psi <= p0:
+            return c0 + (c1 - c0) * (p0 - psi) / (p0 - p1)
+    return cs[-1]
 
 
 # ------------------------------------------------------------ polygon tools
@@ -125,6 +149,7 @@ class Section:
         s = spec.upper()
         self.cold = cold or s.endswith(":COLD")
         self.welded = s.endswith(":WELDED")
+        self.aisc_hss = s.endswith(":AISC")      # AISC Manual Part 1: t = t_des, outside corner radius 2 t_des
         if s in PROFILES:
             self._i(*PROFILES[s])
         elif s.startswith("I:"):
@@ -164,7 +189,9 @@ class Section:
     def _rhs(self, H, B, t):
         self.kind = "RHS"
         self.h, self.b, self.t = H, B, t
-        if self.cold:  # EN 10219-2
+        if self.aisc_hss:  # AISC Manual Part 1 HSS tables: design wall thickness, outside corner radius 2 t_des
+            ro, ri = 2.0 * t, 1.0 * t
+        elif self.cold:  # EN 10219-2
             ro, ri = ((2.0 * t, 1.0 * t) if t <= 6 else (2.5 * t, 1.5 * t) if t <= 10 else (3.0 * t, 2.0 * t))
         else:          # EN 10210-2
             ro, ri = 1.5 * t, 1.0 * t
@@ -304,16 +331,18 @@ def effective_section(sec: Section, fy):
 
 def section_class(sec: Section, fy, NEd):
     eps = math.sqrt(235 / fy)
+    lims = CF.get("steel.class_limits")      # EN 1993-1-1 Table 5.2 (register)
     if sec.kind == "CHS":
         r = sec.D / sec.t
-        return (1 if r <= 50 * eps ** 2 else 2 if r <= 70 * eps ** 2 else 3 if r <= 90 * eps ** 2 else 4), f"d/t={r:.1f}"
+        c1, c2, c3 = (v * eps ** 2 for v in lims["chs"])
+        return (1 if r <= c1 else 2 if r <= c2 else 3 if r <= c3 else 4), f"d/t={r:.1f}"
     if sec.kind == "RHS":
         cls = 1
         info = []
         for c in (sec.h - 3 * sec.t, sec.b - 3 * sec.t):
             ct = c / sec.t
             # conservative: wall in compression unless N ≈ 0
-            lim = (33, 38, 42) if NEd > 0 else (72, 83, 124)
+            lim = lims["internal_compression"] if NEd > 0 else lims["internal_bending"]
             k = 1 if ct <= lim[0] * eps else 2 if ct <= lim[1] * eps else 3 if ct <= lim[2] * eps else 4
             cls = max(cls, k)
             info.append(f"c/t={ct:.1f}")
@@ -321,7 +350,8 @@ def section_class(sec: Section, fy, NEd):
     # I section: flange outstand + web with alpha from N
     cf = (sec.b - sec.tw - 2 * sec.r) / 2
     ctf = cf / sec.tf
-    kf = 1 if ctf <= 9 * eps else 2 if ctf <= 10 * eps else 3 if ctf <= 14 * eps else 4
+    o1, o2, o3 = (v * eps for v in lims["outstand_compression"])
+    kf = 1 if ctf <= o1 else 2 if ctf <= o2 else 3 if ctf <= o3 else 4
     cw = sec.h - 2 * sec.tf - 2 * sec.r
     ctw = cw / sec.tw
     alpha = min(1.0, max(0.0, 0.5 + max(NEd, 0) * 1e3 / (2 * cw * sec.tw * fy)))
@@ -336,16 +366,55 @@ def section_class(sec: Section, fy, NEd):
 
 
 def chi(lam, alpha):
+    """EN 1993-1-1 eq. (6.49): Φ = 0.5[1 + α(λ̄ − 0.2) + λ̄²], χ = 1/(Φ + √(Φ² − λ̄²)) ≤ 1."""
     if lam <= 0.2:
         return 1.0
     ph = 0.5 * (1 + alpha * (lam - 0.2) + lam ** 2)
     return min(1.0, 1 / (ph + math.sqrt(ph ** 2 - lam ** 2)))
 
 
+def plastic_NM(sec: Section, fy, NEd, MyRk, MzRk, gM0):
+    """EN 1993-1-1 6.2.9.1 reduced plastic moments for class 1–2 sections and the biaxial exponents.
+
+    NEd [N] (sign ignored), MyRk/MzRk [Nmm] (already reduced for shear 6.2.8). Returns MNy, MNz [Nmm], α, β.
+    I/H: (6.33)–(6.38); RHS: (6.39); CHS: M_N = M_pl·cos(πn/2), the exact plastic interaction of a thin tube
+    (within 0.3 % of strip integration of real CHS, see validation.md; the often quoted M_pl(1 − n^1.7) is up to
+    5 % unconservative for n > 0.7)."""
+    NplRd = sec.A * fy / gM0
+    n = abs(NEd) / NplRd
+    Mply, Mplz = MyRk / gM0, MzRk / gM0
+    if n >= 1.0:
+        return 0.0, 0.0, 2.0, 2.0
+    if sec.kind == "CHS":
+        f = math.cos(math.pi * n / 2)
+        return Mply * f, Mplz * f, 2.0, 2.0
+    if sec.kind == "RHS":
+        aw = min((sec.A - 2 * sec.b * sec.t) / sec.A, 0.5)
+        af = min((sec.A - 2 * sec.h * sec.t) / sec.A, 0.5)
+        ab = min(1.66 / (1 - 1.13 * n ** 2), 6.0)
+        return (min(Mply * (1 - n) / (1 - 0.5 * aw), Mply), min(Mplz * (1 - n) / (1 - 0.5 * af), Mplz), ab, ab)
+    hw = sec.h - 2 * sec.tf
+    a = min((sec.A - 2 * sec.b * sec.tf) / sec.A, 0.5)
+    if abs(NEd) <= min(0.25 * NplRd, 0.5 * hw * sec.tw * fy / gM0):          # (6.33), (6.34)
+        MNy = Mply
+    else:
+        MNy = min(Mply * (1 - n) / (1 - 0.5 * a), Mply)                       # (6.36)
+    if abs(NEd) <= hw * sec.tw * fy / gM0 or n <= a:                          # (6.35), (6.37)
+        MNz = Mplz
+    else:
+        MNz = Mplz * (1 - ((n - a) / (1 - a)) ** 2)                            # (6.38)
+    return MNy, MNz, 2.0, max(5 * n, 1.0)
+
+
 def check(sec: Section, fy, L, N, My=0.0, Mz=0.0, Vy=0.0, Vz=0.0, ky=1.0, kz=1.0, kLT=None,
-          psi_y=0.0, psi_z=0.0, psi_LT=0.0):
+          psi_y=0.0, psi_z=0.0, psi_LT=0.0, C1=None, sway_y=None, sway_z=None, Cmy=None, Cmz=None, CmLT=None):
+    """EN 1993-1-1 member check. Units: fy MPa, L m, N kN (+ compression), M kNm, V kN.
+
+    C1: LTB moment factor (default from ψ_LT via SN003b Table 3.1). sway_y/z: sway buckling mode about y/z
+    (Annex B Table B.3 note: Cm = 0.9); None = automatic (k ≥ 2). Cmy/Cmz/CmLT override the Table B.3 value
+    (e.g. members with transverse load). Returns (rows, info)."""
     E = CF.get("steel.E")
-    G = E / 2.6
+    G = CF.get("steel.G")
     gM0, gM1 = CF.get("steel.gM0"), CF.get("steel.gM1")
     cls, cinfo = section_class(sec, fy, N)
     Wy = sec.Wpl_y if cls <= 2 else sec.Wel_y
@@ -376,41 +445,65 @@ def check(sec: Section, fy, L, N, My=0.0, Mz=0.0, Vy=0.0, Vz=0.0, ky=1.0, kz=1.0
                     red = rho * shear_area_modulus(sec, "y")
                     MzRk = max(MzRk - red * fy, 0.0)
                 res["shear_note"] = f"V > 0.5 Vpl on {name}: bending resistance reduced (6.2.8, ρ={rho:.2f})"
+
+    def section_row(label_extra=""):
+        if cls <= 2:
+            MNy, MNz, a_, b_ = plastic_NM(sec, fy, NEd, MyRk, MzRk, gM0)
+            res.update({"MN_y_Rd": MNy / 1e6, "MN_z_Rd": MNz / 1e6, "biax_alpha": a_, "biax_beta": b_})
+            if MNy <= 0 or MNz <= 0:
+                u = math.inf
+            elif MzEd == 0:
+                u = max(MyEd / MNy, abs(NEd) / (NRk / gM0))
+            elif MyEd == 0:
+                u = max(MzEd / MNz, abs(NEd) / (NRk / gM0))
+            else:
+                u = (MyEd / MNy) ** a_ + (MzEd / MNz) ** b_      # (6.41), the value published in worked examples
+                res["biax_LHS"] = u
+                u = max(u, abs(NEd) / (NRk / gM0))
+            return (f"section N + My + Mz (6.2.9.1 plastic, M_N,y={MNy / 1e6:.1f} M_N,z={MNz / 1e6:.1f}){label_extra}",
+                    u, 1.0, "6.2.9.1")
+        u = abs(NEd) / (NRk / gM0) + MyEd / (MyRk / gM0) + MzEd / (MzRk / gM0)
+        return (f"section N + My + Mz (linear 6.2.1(7), class {cls}){label_extra}", u, 1.0, "6.2.1(7) / 6.2.9.2")
+
     if NEd < 0:  # tension
         rows.append(("tension N_t (gross)", -N, NRk / gM0 / 1e3, "6.2.3"))
-        u = -NEd / (NRk / gM0) + MyEd / (MyRk / gM0) + MzEd / (MzRk / gM0)
-        rows.append(("section N + My + Mz (linear)", u, 1.0, "6.2.1(7)"))
+        rows.append(section_row())
         return rows, res
-    u_sec = NEd / (NRk / gM0) + MyEd / (MyRk / gM0) + MzEd / (MzRk / gM0)
-    rows.append(("section N + My + Mz (linear, conservative)", u_sec, 1.0, "6.2.1(7)"))
+    rows.append(section_row())
     cy, cz, clt = sec.curves(fy)
     out = {}
     for ax, k, I, c in (("y", ky, sec.Iy, cy), ("z", kz, sec.Iz, cz)):
         Lcr = k * L * 1000
         Ncr = math.pi ** 2 * E * I / Lcr ** 2
         lam = math.sqrt(NRk / Ncr)
-        x = chi(lam, ALPHA[c])
-        out[ax] = (lam, x, c, Lcr / math.sqrt(I / sec.A))
+        x = chi(lam, alpha_of(c))
+        out[ax] = (lam, x, c, Lcr / math.sqrt(I / sec.A), Ncr)
         rows.append((f"flexural buckling {ax} (curve {c}, λ̄={lam:.2f}, χ={x:.3f})", N, x * NRk / gM1 / 1e3, "6.3.1"))
+    res.update({"chi_y": out["y"][1], "chi_z": out["z"][1], "lambda_y": out["y"][0], "lambda_z": out["z"][0]})
     # LTB
     chiLT = 1.0
     if sec.kind == "I" and MyEd > 0:
         Lb = (kLT if kLT is not None else kz) * L * 1000
-        C1 = min(1.88 - 1.40 * psi_LT + 0.52 * psi_LT ** 2, 2.7)
-        Mcr = C1 * math.pi ** 2 * E * sec.Iz / Lb ** 2 * math.sqrt(sec.Iw / sec.Iz + Lb ** 2 * G * sec.It /
-                                                                   (math.pi ** 2 * E * sec.Iz))
+        C1v = C1 if C1 is not None else C1_end_moments(psi_LT)
+        Mcr = C1v * math.pi ** 2 * E * sec.Iz / Lb ** 2 * math.sqrt(sec.Iw / sec.Iz + Lb ** 2 * G * sec.It /
+                                                                    (math.pi ** 2 * E * sec.Iz))
         lamLT = math.sqrt(Wy * fy / Mcr)
-        chiLT = chi(lamLT, ALPHA[clt])
-        rows.append((f"LTB (curve {clt}, C1={C1:.2f}, Mcr={Mcr / 1e6:.0f} kNm, λ̄LT={lamLT:.2f})",
+        chiLT = chi(lamLT, alpha_of(clt))
+        res.update({"Mcr_kNm": Mcr / 1e6, "C1": C1v, "lambda_LT": lamLT, "chi_LT": chiLT})
+        rows.append((f"LTB (curve {clt}, C1={C1v:.2f}, Mcr={Mcr / 1e6:.0f} kNm, λ̄LT={lamLT:.2f})",
                      abs(My), chiLT * MyRk / gM1 / 1e6, "6.3.2.2"))
-    # Annex B interaction
+    # Annex B interaction (method 2)
     lam_y, chi_y = out["y"][0], out["y"][1]
     lam_z, chi_z = out["z"][0], out["z"][1]
     ny = NEd / (chi_y * NRk / gM1)
     nz = NEd / (chi_z * NRk / gM1)
-    Cmy = max(0.4, 0.6 + 0.4 * psi_y)
-    Cmz = max(0.4, 0.6 + 0.4 * psi_z)
-    CmLT = max(0.4, 0.6 + 0.4 * psi_LT)
+    cmin, csw = CF.get("steel.Cm_min"), CF.get("steel.Cm_sway")
+    sway_y = (ky >= 2.0) if sway_y is None else sway_y
+    sway_z = (kz >= 2.0) if sway_z is None else sway_z
+    Cmy = Cmy if Cmy is not None else (csw if sway_y else max(cmin, 0.6 + 0.4 * psi_y))
+    Cmz = Cmz if Cmz is not None else (csw if sway_z else max(cmin, 0.6 + 0.4 * psi_z))
+    CmLT = CmLT if CmLT is not None else max(cmin, 0.6 + 0.4 * psi_LT)
+    res.update({"Cmy": Cmy, "Cmz": Cmz, "CmLT": CmLT, "sway_y": sway_y, "sway_z": sway_z})
     if cls <= 2:
         kyy = min(Cmy * (1 + (lam_y - 0.2) * ny), Cmy * (1 + 0.8 * ny))
         if sec.kind == "I":
@@ -422,17 +515,420 @@ def check(sec: Section, fy, L, N, My=0.0, Mz=0.0, Vy=0.0, Vz=0.0, ky=1.0, kz=1.0
         kyy = min(Cmy * (1 + 0.6 * lam_y * ny), Cmy * (1 + 0.6 * ny))
         kzz = min(Cmz * (1 + 0.6 * lam_z * nz), Cmz * (1 + 0.6 * nz))
         kyz = kzz
-    if sec.kind == "I" and MyEd > 0 and lam_z >= 0.4:  # torsionally flexible member
-        kzy = max(1 - 0.1 * lam_z * nz / (CmLT - 0.25), 1 - 0.1 * nz / (CmLT - 0.25)) if cls <= 2 else \
-            max(1 - 0.05 * lam_z * nz / (CmLT - 0.25), 1 - 0.05 * nz / (CmLT - 0.25))
-    else:
+    if sec.kind == "I" and MyEd > 0:   # Table B.2: member susceptible to torsional deformations
+        if cls <= 2:
+            kzy = max(1 - 0.1 * lam_z * nz / (CmLT - 0.25), 1 - 0.1 * nz / (CmLT - 0.25))
+            if lam_z < 0.4:
+                kzy = min(0.6 + lam_z, 1 - 0.1 * lam_z * nz / (CmLT - 0.25))
+        else:
+            kzy = max(1 - 0.05 * lam_z * nz / (CmLT - 0.25), 1 - 0.05 * nz / (CmLT - 0.25))
+    else:                              # Table B.1
         kzy = 0.6 * kyy if cls <= 2 else 0.8 * kyy
     e61 = ny + kyy * MyEd / (chiLT * MyRk / gM1) + kyz * MzEd / (MzRk / gM1)
     e62 = nz + kzy * MyEd / (chiLT * MyRk / gM1) + kzz * MzEd / (MzRk / gM1)
+    res.update({"kyy": kyy, "kyz": kyz, "kzy": kzy, "kzz": kzz, "eq661": e61, "eq662": e62})
     rows.append((f"interaction (6.61) kyy={kyy:.2f} kyz={kyz:.2f}", e61, 1.0, "6.3.3 / Annex B"))
     rows.append((f"interaction (6.62) kzy={kzy:.2f} kzz={kzz:.2f}", e62, 1.0, "6.3.3 / Annex B"))
     res.update({"slenderness_y": out["y"][3], "slenderness_z": out["z"][3]})
     return rows, res
+
+
+ASSUMPTIONS = """Assumptions / model limits:
+  - Section properties from the true outline (root/corner radii EN 10210 hot, EN 10219 cold); Iw = Iz(h−tf)²/4.
+  - Class from EN 1993-1-1 Table 5.2 under the given N (web α from N for I sections; RHS walls conservative).
+  - Section check: 6.2.9.1 plastic N+M interaction for class 1–2 (CHS M_N = M_pl·cos(πn/2)), linear 6.2.1(7)
+    for class 3, effective section (EN 1993-1-5 4.4, neutral-axis shift ignored) for class 4 I/RHS; class 4 CHS
+    is not designed (EN 1993-1-6).
+  - Flexural buckling 6.3.1 (curves Table 6.2), LTB general case 6.3.2.2 with M_cr for a doubly-symmetric
+    section, load at the shear centre, k = kw = 1 (fork supports); C1 from SN003b Table 3.1 (end moments).
+  - Interaction 6.3.3 Annex B (method 2); Cm from Table B.3 for a linear moment (ψ), 0.9 for sway modes
+    (auto when k ≥ 2). Use --Cmy/--Cmz/--CmLT for transverse loads. Torsion and warping stresses not checked.
+  - Loads must be ULS design values; second-order sway effects belong in the global analysis (frame2d/frame3d)."""
+
+
+# ============================================================ ANSI/AISC 360-16 / 360-22
+# Every coefficient comes from the register section `aisc` (code_factors.json). Internal units N, mm, MPa.
+def _A(key):
+    return CF.get("aisc." + key)
+
+
+def aisc_factor(limit_state, asd):
+    """multiplier on the nominal strength: φ (LRFD) or 1/Ω (ASD), register aisc.resistance [φ, Ω]."""
+    phi, om = _A("resistance")[limit_state]
+    return 1.0 / om if asd else phi
+
+
+def Cb_F1_1(Mmax, MA, MB, MC):
+    """AISC 360 eq. (F1-1): Cb = 12.5 Mmax/(2.5 Mmax + 3 MA + 4 MB + 3 MC) (absolute values)."""
+    c = _A("Cb")["coef"]
+    Mmax, MA, MB, MC = (abs(x) for x in (Mmax, MA, MB, MC))
+    return c[0] * Mmax / (c[1] * Mmax + c[2] * MA + c[3] * MB + c[4] * MC)
+
+
+def Cb_linear(psi):
+    """Cb (F1-1) for a linear moment diagram between end moments M and ψM (ψ = +1 single curvature, uniform)."""
+    m = [abs(1 + (psi - 1) * x) for x in (0.25, 0.5, 0.75)]
+    return Cb_F1_1(max(1.0, abs(psi)), *m)
+
+
+def aisc_E3(Fy, Fe):
+    """AISC 360 E3: Fcr = 0.658^(Fy/Fe)·Fy for Fy/Fe <= 2.25 (E3-2), else 0.877 Fe (E3-3)."""
+    e3 = _A("E3")
+    if Fe <= 0:
+        return 0.0
+    return e3["base"] ** (Fy / Fe) * Fy if Fy / Fe <= e3["inelastic_limit"] else e3["elastic_factor"] * Fe
+
+
+def _aisc_I_geom(sec):
+    """b = bf/2 (flange outstand), h = clear web depth less fillets (rolled) or between flanges (welded)."""
+    h = sec.h - 2 * sec.tf - (0.0 if sec.welded else 2 * sec.r)
+    kc = min(max(4 / math.sqrt(h / sec.tw), _A("B4_1a")["kc_limits"][0]), _A("B4_1a")["kc_limits"][1])
+    return sec.b / 2, h, kc
+
+
+def _eff_width(b, lam, lam_r, Fy, Fcr, c):
+    """AISC 360 E7-2/E7-3 effective width of one element (c = [c1, c2] of Table E7.1)."""
+    if Fcr <= 0 or lam <= lam_r * math.sqrt(Fy / Fcr):
+        return b
+    Fel = (c[1] * lam_r / lam) ** 2 * Fy                       # (E7-5)
+    r = math.sqrt(Fel / Fcr)
+    return min(b, b * (1 - c[0] * r) * r)                      # (E7-3)
+
+
+def aisc_compression(sec, Fy, Lcy, Lcz, Lct=None):
+    """AISC 360 Chapter E: E3 flexural buckling about both axes, E4 torsional buckling (doubly symmetric I),
+    E7 slender elements (effective area). Lc in mm. Returns dict with Pn [N]."""
+    E, G = _A("E"), _A("G")
+    out = {"warning": None}
+    Fe_y = math.pi ** 2 * E / (Lcy / sec.iy) ** 2
+    Fe_z = math.pi ** 2 * E / (Lcz / sec.iz) ** 2
+    Fe = min(Fe_y, Fe_z)
+    mode = "flexural y" if Fe_y <= Fe_z else "flexural z"
+    if sec.kind == "I":
+        Lct = Lcz if Lct is None else Lct
+        Fe_t = (math.pi ** 2 * E * sec.Iw / Lct ** 2 + G * sec.It) / (sec.Iy + sec.Iz)     # (E4-2)
+        out["Fe_t"] = Fe_t
+        if Fe_t < Fe:
+            Fe, mode = Fe_t, "torsional (E4)"
+    Fcr = aisc_E3(Fy, Fe)
+    lim = _A("B4_1a")
+    e7 = _A("E7")
+    sE = math.sqrt(E / Fy)
+    Ae = sec.A
+    slender = []
+    if sec.kind == "I":
+        b, h, kc = _aisc_I_geom(sec)
+        lam_f, lam_w = b / sec.tf, h / sec.tw
+        lr_f = (lim["flange_builtup"] * math.sqrt(kc * E / Fy)) if sec.welded else lim["flange_rolled"] * sE
+        lr_w = lim["web_doubly_symmetric"] * sE
+        be = _eff_width(b, lam_f, lr_f, Fy, Fcr, e7["unstiffened"])
+        he = _eff_width(h, lam_w, lr_w, Fy, Fcr, e7["stiffened"])
+        Ae -= 4 * (b - be) * sec.tf + (h - he) * sec.tw
+        out.update({"lambda_f": lam_f, "lambda_r_f": lr_f, "lambda_w": lam_w, "lambda_r_w": lr_w})
+        if lam_f > lr_f:
+            slender.append(f"flange b/t={lam_f:.1f} > λr={lr_f:.1f}")
+        if lam_w > lr_w:
+            slender.append(f"web h/tw={lam_w:.1f} > λr={lr_w:.1f}")
+    elif sec.kind == "RHS":
+        lr = lim["hss_rect_wall"] * sE
+        for w in (sec.b - 3 * sec.t, sec.h - 3 * sec.t):      # B4.1b(d): outside dimension − 3t
+            lam = w / sec.t
+            we = _eff_width(w, lam, lr, Fy, Fcr, e7["hss_wall"])
+            Ae -= 2 * (w - we) * sec.t
+            if lam > lr:
+                slender.append(f"wall b/t={lam:.1f} > λr={lr:.1f}")
+        out["lambda_r"] = lr
+    else:
+        Dt = sec.D / sec.t
+        if Dt > e7["round_limit"] * E / Fy:
+            out["warning"] = f"round HSS D/t={Dt:.1f} > 0.45E/Fy: outside AISC 360 E7 (shell buckling) — not covered"
+        elif Dt > lim["hss_round"] * E / Fy:
+            Ae = (e7["round_coef"] * E / (Fy * Dt) + e7["round_add"]) * sec.A          # (E7-7)
+            slender.append(f"D/t={Dt:.1f} > 0.11E/Fy={lim['hss_round'] * E / Fy:.1f}")
+    out.update({"Fe_y": Fe_y, "Fe_z": Fe_z, "Fe": Fe, "mode": mode, "Fcr": Fcr, "Ae": Ae, "Pn": Fcr * Ae,
+                "slender": slender, "KL_r": max(Lcy / sec.iy, Lcz / sec.iz)})
+    return out
+
+
+def _flb_linear(Mp, Mr, lam, lp, lr):
+    return Mp - (Mp - Mr) * (lam - lp) / (lr - lp)
+
+
+def aisc_flexure(sec, Fy, axis="y", Lb=0.0, Cb=1.0):
+    """AISC 360 Chapter F nominal flexural strength Mn [Nmm] about the strong (y, AISC x) or weak (z, AISC y) axis.
+    I: F2 (yielding + LTB with Cb), F3 (FLB, noncompact/slender flange), F6 (minor axis);
+    rectangular HSS: F7 (yielding, FLB, WLB, LTB F7.4 for the major axis of rectangular sections); round HSS: F8."""
+    E, G = _A("E"), _A("G")
+    sE = math.sqrt(E / Fy)
+    lb = _A("B4_1b")
+    r = {"warning": None, "limits": {}}
+    if sec.kind == "I":
+        b, h, kc = _aisc_I_geom(sec)
+        lam_f = b / sec.tf
+        lp_f = lb["flange_rolled"][0] * sE
+        if axis == "z":                                   # F6, Table B4.1b case 13
+            f6 = _A("F3_F6")
+            Mp = min(Fy * sec.Wpl_z, f6["F6_Mp_cap"] * Fy * sec.Wel_z)
+            lr_f = lb["flange_rolled"][1] * sE
+            if lam_f <= lp_f:
+                Mn = Mp
+            elif lam_f <= lr_f:
+                Mn = _flb_linear(Mp, _A("F2")["FL_ratio"] * Fy * sec.Wel_z, lam_f, lp_f, lr_f)
+            else:
+                Mn = f6["F6_slender"] * E / lam_f ** 2 * sec.Wel_z
+            r["limits"] = {"yield (F6-1)": Mp, "FLB (F6)": Mn}
+            r.update({"Mn": min(Mp, Mn), "Mp": Mp, "lambda_f": lam_f, "clause": "F6"})
+            return r
+        f2 = _A("F2")
+        FL = f2["FL_ratio"] * Fy
+        Sx, Zx, J = sec.Wel_y, sec.Wpl_y, sec.It
+        Mp = Fy * Zx
+        ho = sec.h - sec.tf
+        rts = math.sqrt(math.sqrt(sec.Iz * sec.Iw) / Sx)
+        Lp = f2["Lp"] * sec.iz * sE                                                          # (F2-5)
+        jt = J / (Sx * ho)
+        Lr = f2["Lr"] * rts * E / FL * math.sqrt(jt + math.sqrt(jt ** 2 + f2["Lr_term"] * (FL / E) ** 2))  # (F2-6)
+        if Lb <= Lp:
+            M_ltb = Mp
+        elif Lb <= Lr:
+            M_ltb = min(Cb * _flb_linear(Mp, FL * Sx, Lb, Lp, Lr), Mp)                       # (F2-2)
+        else:
+            Fcr = Cb * math.pi ** 2 * E / (Lb / rts) ** 2 * math.sqrt(1 + f2["Fcr_term"] * jt * (Lb / rts) ** 2)
+            M_ltb = min(Fcr * Sx, Mp)                                                        # (F2-3, F2-4)
+        lr_f = (lb["flange_builtup"][1] * math.sqrt(kc * E / FL)) if sec.welded else lb["flange_rolled"][1] * sE
+        if lam_f <= lp_f:
+            M_flb, clause = Mp, "F2"
+        elif lam_f <= lr_f:
+            M_flb, clause = _flb_linear(Mp, FL * Sx, lam_f, lp_f, lr_f), "F3"                  # (F3-1)
+        else:
+            M_flb, clause = _A("F3_F6")["F3_slender"] * E * kc * Sx / lam_f ** 2, "F3"         # (F3-2)
+        lam_w = h / sec.tw
+        lp_w = lb["web_doubly_symmetric"][0] * sE
+        if lam_w > lp_w:
+            r["warning"] = (f"web h/tw={lam_w:.1f} > λp={lp_w:.1f}: noncompact/slender web needs AISC 360 F4/F5 "
+                            f"(not implemented) — result not valid")
+        r["limits"] = {"yield (F2-1)": Mp, "LTB (F2)": M_ltb, "FLB (F3)": M_flb}
+        r.update({"Mn": min(Mp, M_ltb, M_flb), "Mp": Mp, "Lp": Lp, "Lr": Lr, "rts": rts, "ho": ho,
+                  "lambda_f": lam_f, "lambda_w": lam_w, "clause": clause})
+        return r
+    if sec.kind == "RHS":
+        f7 = _A("F7")
+        if axis == "y":
+            Z, S, I, H = sec.Wpl_y, sec.Wel_y, sec.Iy, sec.h
+            bf, hw = sec.b - 3 * sec.t, sec.h - 3 * sec.t          # compression flange = side of width B
+        else:
+            Z, S, I, H = sec.Wpl_z, sec.Wel_z, sec.Iz, sec.b
+            bf, hw = sec.h - 3 * sec.t, sec.b - 3 * sec.t
+        t = sec.t
+        Mp = Fy * Z
+        lam, lam_w = bf / t, hw / t
+        lp, lr = (c * sE for c in lb["hss_rect_flange"])
+        if lam <= lp:
+            M_flb = Mp
+        elif lam <= lr:
+            M_flb = min(Mp, Mp - (Mp - Fy * S) * (f7["flb"][0] * lam / sE - f7["flb"][1]))     # (F7-2)
+        else:                                                                                   # (F7-3, F7-4)
+            be = min(bf, f7["be"][0] * t * sE * (1 - f7["be"][1] / lam * sE))
+            dA, zf = (bf - be) * t, (H - t) / 2
+            A = sec.A
+            zb = -dA * zf / (A - dA)                       # centroid shift of the effective section
+            Ie = I - dA * zf ** 2 - (A - dA) * zb ** 2
+            Se = Ie / (H / 2 - zb)                         # to the compression flange (governing fibre)
+            M_flb = Fy * Se
+            r.update({"be": be, "Se": Se})
+        lpw, lrw = (c * sE for c in lb["hss_rect_web"])
+        if lam_w <= lpw:
+            M_wlb = Mp
+        elif lam_w <= lrw:
+            M_wlb = min(Mp, Mp - (Mp - Fy * S) * (f7["wlb"][0] * lam_w / sE - f7["wlb"][1]))   # (F7-5)
+        else:
+            M_wlb = Mp
+            r["warning"] = f"HSS web h/t={lam_w:.1f} > λr={lrw:.1f}: slender web (F7.3(c)) not implemented"
+        M_ltb = Mp
+        ry = sec.iz if axis == "y" else sec.iy
+        if axis == "y" and sec.h > sec.b and Lb > 0:      # F7.4: rectangular HSS about the major axis only
+            JA = math.sqrt(sec.It * sec.A)
+            Lp = f7["ltb"][0] * E * ry * JA / Mp                                               # (F7-12)
+            Lr = f7["ltb"][1] * E * ry * JA / (_A("F2")["FL_ratio"] * Fy * S)                  # (F7-13)
+            if Lb > Lr:
+                M_ltb = min(Mp, f7["ltb"][1] * E * Cb * JA / (Lb / ry))                        # (F7-11)
+            elif Lb > Lp:
+                M_ltb = min(Mp, Cb * _flb_linear(Mp, _A("F2")["FL_ratio"] * Fy * S, Lb, Lp, Lr))   # (F7-10)
+            r.update({"Lp": Lp, "Lr": Lr})
+        r["limits"] = {"yield (F7-1)": Mp, "FLB (F7.2)": M_flb, "WLB (F7.3)": M_wlb, "LTB (F7.4)": M_ltb}
+        r.update({"Mn": min(Mp, M_flb, M_wlb, M_ltb), "Mp": Mp, "lambda_f": lam, "lambda_w": lam_w,
+                  "clause": "F7"})
+        return r
+    f8 = _A("F8")
+    Dt = sec.D / sec.t
+    Z, S = sec.Wpl_y, sec.Wel_y
+    Mp = Fy * Z
+    lp, lr = (c * E / Fy for c in lb["hss_round"])
+    if Dt >= f8["limit"] * E / Fy:
+        r["warning"] = f"round HSS D/t={Dt:.1f} >= 0.45E/Fy: outside AISC 360 F8 — not covered"
+    if Dt <= lp:
+        M_lb = Mp
+    elif Dt <= lr:
+        M_lb = (f8["noncompact"] * E / Dt + Fy) * S                                           # (F8-2)
+    else:
+        M_lb = f8["slender"] * E / Dt * S                                                     # (F8-3, F8-4)
+    r["limits"] = {"yield (F8-1)": Mp, "local buckling (F8.2)": M_lb}
+    r.update({"Mn": min(Mp, M_lb), "Mp": Mp, "D_t": Dt, "clause": "F8"})
+    return r
+
+
+def _Cv2(h_t, kv, E, Fy):
+    """AISC 360 G2.2 web shear buckling coefficient Cv2 (G2-9..G2-11)."""
+    c = _A("G_shear")["cv"]
+    x = math.sqrt(kv * E / Fy)
+    if h_t <= c[0] * x:
+        return 1.0
+    if h_t <= c[1] * x:
+        return c[0] * x / h_t
+    return c[2] * kv * E / (h_t ** 2 * Fy)
+
+
+def aisc_shear(sec, Fy, direction="z", Lv=None):
+    """AISC 360 Chapter G nominal shear strength Vn [N] and the resistance key.
+    direction 'z' = shear parallel to the web (strong-axis bending), 'y' = weak-axis shear."""
+    E = _A("E")
+    g = _A("G_shear")
+    if sec.kind == "I":
+        if direction == "z":                              # G2.1
+            b, h, _ = _aisc_I_geom(sec)
+            Aw = sec.h * sec.tw
+            h_t = h / sec.tw
+            if not sec.welded and h_t <= g["rolled_I_limit"] * math.sqrt(E / Fy):
+                return g["shear_yield"] * Fy * Aw, "shear_rolled_I", "G2.1(a)", 1.0
+            x = math.sqrt(g["kv_web"] * E / Fy)
+            Cv1 = 1.0 if h_t <= g["cv"][0] * x else g["cv"][0] * x / h_t                      # (G2-3, G2-4)
+            return g["shear_yield"] * Fy * Aw * Cv1, "shear", "G2.1(b)", Cv1
+        Cv2 = _Cv2(sec.b / (2 * sec.tf), g["kv_flange"], E, Fy)                              # G6
+        return g["shear_yield"] * Fy * 2 * sec.b * sec.tf * Cv2, "shear", "G6", Cv2
+    if sec.kind == "RHS":                                 # G4
+        h = (sec.h if direction == "z" else sec.b) - 3 * sec.t
+        Cv2 = _Cv2(h / sec.t, g["kv_hss"], E, Fy)
+        return g["shear_yield"] * Fy * 2 * h * sec.t * Cv2, "shear", "G4", Cv2
+    Dt = sec.D / sec.t                                    # G5
+    Lv = Lv if Lv else 1e12
+    Fcr = min(max(g["round"][0] * E / (math.sqrt(Lv / sec.D) * Dt ** 1.25), g["round"][1] * E / Dt ** 1.5),
+              g["shear_yield"] * Fy)
+    return Fcr * sec.A / 2, "shear", "G5", Fcr
+
+
+def check_aisc(sec: Section, Fy, L, N, My=0.0, Mz=0.0, Vy=0.0, Vz=0.0, ky=1.0, kz=1.0, kLT=None, Cb=1.0,
+               asd=False, Fu=None, An=None, U=1.0, Lv=None, B1=False, Cmy=None, Cmz=None):
+    """ANSI/AISC 360-16/360-22 member check. Units: Fy/Fu MPa, L m, N kN (+ compression, − tension), M kNm, V kN,
+    An mm². LRFD (φ) by default; asd=True uses Ω. Forces must be the required strengths of the method chosen
+    (LRFD factored or ASD combination) and include second-order effects unless B1=True (App. 8 P-δ amplifier
+    B1 = Cm/(1 − αPr/Pe1), K1 = 1, braced member; Cm = 1.0 unless Cmy/Cmz given). Returns (rows, info)."""
+    E = _A("E")
+    rows = []
+    res = {"code": "AISC 360", "method": "ASD" if asd else "LRFD", "warnings": []}
+    NEd = N * 1e3
+    Lmm = L * 1000
+    Lcy, Lcz = ky * Lmm, kz * Lmm
+    Lb = (kLT if kLT is not None else kz) * Lmm
+    lab = "Ω" if asd else "φ"
+    # ---- axial
+    if NEd < 0:
+        f_y = aisc_factor("tension_yield", asd)
+        Pc = Fy * sec.A * f_y
+        rows.append((f"tension yielding D2(a) Fy·Ag ({lab})", -N, Pc / 1e3, "D2-1"))
+        if Fu:
+            Ae = U * (An if An else sec.A)
+            Pr_ = Fu * Ae * aisc_factor("tension_rupture", asd)
+            rows.append((f"tension rupture D2(b) Fu·Ae, Ae={Ae / 100:.2f} cm² (U={U:g})", -N, Pr_ / 1e3, "D2-2"))
+            Pc = min(Pc, Pr_)
+            res["Ae"] = Ae
+        else:
+            res["warnings"].append("no --fu: tension rupture D2(b) not checked (give --fu, --An, --U)")
+        res["Pc"] = Pc
+        r_min = min(sec.iy, sec.iz)
+        res["L_r"] = Lmm / r_min
+    elif NEd > 0:
+        c = aisc_compression(sec, Fy, Lcy, Lcz, Lb)
+        Pc = c["Pn"] * aisc_factor("compression", asd)
+        res.update({"Fe": c["Fe"], "Fcr": c["Fcr"], "Ae": c["Ae"], "Pn": c["Pn"], "Pc": Pc, "KL_r": c["KL_r"],
+                    "buckling_mode": c["mode"], "slender": c["slender"]})
+        if c["warning"]:
+            res["warnings"].append(c["warning"])
+        sl = f", slender: E7 Ae={c['Ae'] / 100:.2f} cm²" if c["slender"] else ""
+        rows.append((f"compression E3/E4 ({c['mode']}, Fe={c['Fe']:.0f}, Fcr={c['Fcr']:.0f} MPa{sl})", N, Pc / 1e3,
+                     "E3/E4/E7"))
+        if c["KL_r"] > _A("E3")["slenderness_note"]:
+            res["warnings"].append(f"Lc/r = {c['KL_r']:.0f} > 200 (E2 user note: preferably not exceeded)")
+    else:
+        Pc = None
+    # ---- moments (optionally amplified by B1)
+    Mrx, Mry = abs(My) * 1e6, abs(Mz) * 1e6
+    if B1 and NEd > 0:
+        alpha = _A("B1")["alpha"][1 if asd else 0]
+        for ax, I, Cm in (("y", sec.Iy, Cmy), ("z", sec.Iz, Cmz)):
+            Pe1 = math.pi ** 2 * E * I / Lmm ** 2                                               # (A-8-5), K1 = 1
+            Cm = 1.0 if Cm is None else Cm
+            b1 = math.inf if alpha * NEd >= Pe1 else max(1.0, Cm / (1 - alpha * NEd / Pe1))   # (A-8-3)
+            res[f"B1_{ax}"], res[f"Pe1_{ax}"] = b1, Pe1
+            if ax == "y":
+                Mrx *= b1
+            else:
+                Mry *= b1
+    res.update({"Mrx": Mrx / 1e6, "Mry": Mry / 1e6})
+    fb = aisc_factor("flexure", asd)
+    Mcx = Mcy = None
+    if Mrx > 0:
+        fx = aisc_flexure(sec, Fy, "y", Lb, Cb)
+        Mcx = fx["Mn"] * fb
+        res["flex_y"] = fx
+        if fx["warning"]:
+            res["warnings"].append(fx["warning"])
+        gov = min(fx["limits"], key=fx["limits"].get)
+        extra = f", Cb={Cb:.2f}, Lp={fx['Lp'] / 1e3:.2f} Lr={fx['Lr'] / 1e3:.2f} m" if "Lp" in fx else ""
+        rows.append((f"flexure strong axis {fx['clause']} (governs: {gov}{extra})", Mrx / 1e6, Mcx / 1e6, "Ch. F"))
+    if Mry > 0:
+        fz = aisc_flexure(sec, Fy, "z")
+        Mcy = fz["Mn"] * fb
+        res["flex_z"] = fz
+        if fz["warning"] and fz["warning"] not in res["warnings"]:
+            res["warnings"].append(fz["warning"])
+        gov = min(fz["limits"], key=fz["limits"].get)
+        rows.append((f"flexure weak axis {fz['clause']} (governs: {gov})", Mry / 1e6, Mcy / 1e6, "Ch. F"))
+    res.update({"Mcx": Mcx / 1e6 if Mcx else None, "Mcy": Mcy / 1e6 if Mcy else None})
+    # ---- shear
+    for name, V, d in (("Vz", Vz, "z"), ("Vy", Vy, "y")):
+        if V:
+            Vn, key, clause, cv = aisc_shear(sec, Fy, d, Lv * 1000 if Lv else None)
+            Vc = Vn * aisc_factor(key, asd)
+            res[f"Vc_{d}"] = Vc / 1e3
+            rows.append((f"shear {name} {clause}", abs(V), Vc / 1e3, clause))
+    # ---- H1 interaction
+    if Pc and (Mrx > 0 or Mry > 0):
+        h1 = _A("H1")
+        pr = abs(NEd) / Pc
+        mm = (Mrx / Mcx if Mrx else 0.0) + (Mry / Mcy if Mry else 0.0)
+        if pr >= h1["threshold"]:
+            u, eq = pr + h1["factor"] * mm, "H1-1a"
+        else:
+            u, eq = pr / 2 + mm, "H1-1b"
+        res.update({"H1": u, "H1_eq": eq, "Pr_Pc": pr})
+        rows.append((f"interaction {eq} (Pr/Pc={pr:.3f}{', tension H1.2' if NEd < 0 else ''})", u, 1.0, "H1"))
+    return rows, res
+
+
+ASSUMPTIONS_AISC = """Assumptions / model limits (ANSI/AISC 360-16 / 360-22, --code aisc):
+  - Section properties from the true outline (as the EN route); AISC HSS: give the design wall thickness t_des
+    (0.93 t_nom for ERW A500) with ':aisc' (outside corner radius 2 t_des); W shapes: r = k_des − t_f.
+    Width-to-thickness: b = bf/2, h = d − 2k (rolled I); b = B − 3t (HSS, B4.1b(d)).
+  - Compression: E3 about both axes with Lc = k·L, E4 torsional buckling of doubly symmetric I (Lcz = LTB length),
+    E7 effective width (Table E7.1) for slender elements, E7-7 for round HSS; HSS torsional buckling ignored.
+  - Flexure: F2 (LTB, Cb from --Cb, --Cb-moments, or F1-1 on a linear diagram from --psi-LT; default 1.0),
+    F3/F6 flange local buckling, F7 (HSS; LTB F7.4 only for the major axis of rectangular sections), F8 (round
+    HSS). F4/F5 (noncompact or slender webs), singly symmetric sections, tees, angles and channels: not covered.
+  - Shear: G2.1 (rolled I φv = 1.00 / Ωv = 1.50 when h/tw <= 2.24√(E/Fy)), G2.2 Cv2, G4, G5 (Lv = --Lv or ∞),
+    G6; no tension-field action. Interaction H1-1a/b (H1.2 for tension, without the optional Cb increase).
+  - Required strengths are the LRFD or ASD combination values (choose with --asd) and must include second-order
+    effects (direct analysis, frame2d/frame3d) unless --B1 is given (App. 8 B1 with K1 = 1, EI* = EI, Cm = 1.0
+    unless --Cmy/--Cmz). Tension rupture needs --fu and the net/effective area (--An, --U)."""
 
 
 def main(argv=None):
@@ -450,16 +946,34 @@ def main(argv=None):
     ap.add_argument("--ky", type=float, default=1.0, help="effective length factor, y buckling")
     ap.add_argument("--kz", type=float, default=1.0, help="effective length factor, z buckling")
     ap.add_argument("--kLT", type=float, default=None, help="LTB length factor (default = kz)")
-    ap.add_argument("--psi-y", type=float, default=0.0, help="end-moment ratio for Cmy")
-    ap.add_argument("--psi-z", type=float, default=0.0)
-    ap.add_argument("--psi-LT", type=float, default=0.0, help="end-moment ratio for C1 / CmLT")
+    ap.add_argument("--psi-y", type=float, default=None, help="end-moment ratio for Cmy (default 0; AISC: Cm for --B1)")
+    ap.add_argument("--psi-z", type=float, default=None)
+    ap.add_argument("--psi-LT", type=float, default=None,
+                    help="end-moment ratio for C1 / CmLT (default 0); AISC: Cb from F1-1 on the linear diagram")
+    ap.add_argument("--C1", type=float, default=None, help="override C1 (e.g. from LTBeam / SN003 Table 3.2)")
+    ap.add_argument("--Cmy", type=float, default=None, help="override Cmy (Annex B Table B.3)")
+    ap.add_argument("--Cmz", type=float, default=None)
+    ap.add_argument("--CmLT", type=float, default=None)
+    ap.add_argument("--sway-y", dest="sway_y", action="store_true", default=None,
+                    help="sway buckling mode about y (Cmy = 0.9); default auto if ky >= 2")
+    ap.add_argument("--sway-z", dest="sway_z", action="store_true", default=None)
     ap.add_argument("--factors", default=None)
-    ap.add_argument("--code", choices=CF.CODES, default=None, help="EU (EN 1993-1-1) | US (AISC 360-22) | SA (SBC 306)")
-    ap.add_argument("--method", choices=["LRFD", "ASD"], default="LRFD", help="US: LRFD or ASD (SA: LRFD only)")
-    ap.add_argument("--Lb", type=float, default=None, help="US/SA: unbraced length for LTB [m] (default kz·L)")
-    ap.add_argument("--Cb", type=float, default=None, help="US/SA: C_b (default from --psi-LT, F1-1)")
-    ap.add_argument("--second-order", action="store_true", help="US/SA: moments are already second-order (B1 = 1)")
-    ap.add_argument("--sensitivity", action="store_true", help="SA: re-check over the φc / φv ranges [U]")
+    g = ap.add_argument_group("code system: EU (EN 1993-1-1, default) | US (AISC 360-16/22) | SA (SBC 306)")
+    g.add_argument("--code", choices=list(CF.CODES) + ["en", "aisc"], default=None,
+                   help="EU | US | SA (default: TENSILE_CODE or EU); legacy: en = EU, aisc = US")
+    g.add_argument("--method", choices=["LRFD", "ASD"], default="LRFD", help="US: LRFD or ASD (SA: LRFD only)")
+    g.add_argument("--asd", action="store_true", help="same as --method ASD")
+    g.add_argument("--fu", type=float, default=None, help="tensile strength Fu [MPa] for D2(b) rupture")
+    g.add_argument("--An", type=float, default=None, help="net area An [mm²] for D2(b) (default Ag)")
+    g.add_argument("--U", type=float, default=1.0, help="shear lag factor U (Table D3.1), Ae = U·An")
+    g.add_argument("--Lb", type=float, default=None, help="US/SA: unbraced length for LTB [m] (default kLT·L)")
+    g.add_argument("--Cb", type=float, default=None, help="US/SA: Cb (default 1.0, from --Cb-moments or --psi-LT)")
+    g.add_argument("--Cb-moments", dest="Cb_moments", default=None,
+                   help="Mmax,MA,MB,MC of the unbraced segment -> Cb from eq. (F1-1)")
+    g.add_argument("--Lv", type=float, default=None, help="round HSS shear: distance max to zero shear [m] (G5)")
+    g.add_argument("--B1", action="store_true", help="US: amplify moments by App. 8 B1 (braced member, K1 = 1)")
+    g.add_argument("--second-order", action="store_true", help="SA: moments are already second-order (B1 = 1)")
+    g.add_argument("--sensitivity", action="store_true", help="SA: re-check over the φc / φv ranges [U]")
     a = ap.parse_args(argv)
     if a.factors:
         os.environ["TENSILE_FACTORS"] = a.factors
@@ -467,7 +981,8 @@ def main(argv=None):
         print("Built-in (EN 10365 nominal h b tw tf r):")
         for k, v in PROFILES.items():
             print(f"  {k:<8} {v}")
-        print("Parametric: CHS:DxT  RHS:HxBxT  SHS:BxT  (add :cold)   I:h:b:tw:tf:r[:welded]")
+        print("Parametric: CHS:DxT  RHS:HxBxT  SHS:BxT  (add :cold, or :aisc = AISC HSS with t_des)   "
+              "I:h:b:tw:tf:r[:welded]")
         return
     if not a.section or a.L is None:
         ap.error("--section and --L required")
@@ -476,18 +991,24 @@ def main(argv=None):
           f"Iy={sec.Iy / 1e4:.1f} Iz={sec.Iz / 1e4:.1f} cm⁴  Wpl,y={sec.Wpl_y / 1e3:.1f} Wpl,z={sec.Wpl_z / 1e3:.1f} cm³  "
           f"It={sec.It / 1e4:.2f} cm⁴" + (f"  Iw={sec.Iw / 1e6:.2f}e3 cm⁶" if sec.Iw else "") +
           f"  mass={sec.mass:.1f} kg/m")
-    code = CF.code(a.code)
-    if code in ("US", "SA"):
+    code = {"en": "EU", "aisc": "US"}.get(a.code, a.code)
+    code = CF.code(code)
+    if code == "US":
+        return _main_aisc(a, sec)
+    if code == "SA":
         return main_aisc(a, sec, code)
-    print(f"Partial factors: {CF.tag('steel.gM0')}, {CF.tag('steel.gM1')};  fy={a.fy:g} MPa, L={a.L} m")
-    rows, res = check(sec, a.fy, a.L, a.N, a.My, a.Mz, a.Vy, a.Vz, a.ky, a.kz, a.kLT, a.psi_y, a.psi_z, a.psi_LT)
+    print(f"Factors: {CF.tag('steel.gM0')}, {CF.tag('steel.gM1')}, {CF.tag('steel.E')}, {CF.tag('steel.G')};  "
+          f"imperfection α [{CF.status('steel.imp_alpha')}], C1 table [{CF.status('steel.C1_end_moments')}];  "
+          f"fy={a.fy:g} MPa, L={a.L} m")
+    print(ASSUMPTIONS)
+    psi_y, psi_z, psi_LT = (0.0 if v is None else v for v in (a.psi_y, a.psi_z, a.psi_LT))
+    rows, res = check(sec, a.fy, a.L, a.N, a.My, a.Mz, a.Vy, a.Vz, a.ky, a.kz, a.kLT, psi_y, psi_z, psi_LT,
+                      C1=a.C1, sway_y=a.sway_y, sway_z=a.sway_z, Cmy=a.Cmy, Cmz=a.Cmz, CmLT=a.CmLT)
     print(f"Class {res['class']}  ({res['class_info']})")
-    print(f"{'check':<62}{'demand':>9}{'capacity':>10}{'util':>7}  ref")
-    worst = 0.0
-    for name, d, c, ref in rows:
-        u = d / c if c else math.inf
-        worst = max(worst, u)
-        print(f"{name:<62}{d:9.2f}{c:10.2f}{u:7.2f}  {ref}" + ("  <-- FAIL" if u > 1 else ""))
+    if "Cmy" in res:
+        print(f"Cmy={res['Cmy']:.2f}{' (sway)' if res['sway_y'] else ''}  Cmz={res['Cmz']:.2f}"
+              f"{' (sway)' if res['sway_z'] else ''}  CmLT={res['CmLT']:.2f}")
+    worst = _print_rows(rows)
     if "effective" in res:
         e = res["effective"]
         print(f"Class 4 effective section (EN 1993-1-5 4.4, simplified): A_eff={e['A_eff'] / 100:.2f} cm², "
@@ -500,10 +1021,56 @@ def main(argv=None):
     return worst, res
 
 
+def _print_rows(rows):
+    print(f"{'check':<62}{'demand':>9}{'capacity':>10}{'util':>7}  ref")
+    worst = 0.0
+    for name, d, c, ref in rows:
+        u = d / c if c else math.inf
+        worst = max(worst, u)
+        print(f"{name:<62}{d:9.2f}{c:10.2f}{u:7.2f}  {ref}" + ("  <-- FAIL" if u > 1 else ""))
+    return worst
+
+
+def _main_aisc(a, sec):
+    if a.Cb is not None:
+        Cb, cb_src = a.Cb, "--Cb"
+    elif a.Cb_moments:
+        Cb, cb_src = Cb_F1_1(*map(float, a.Cb_moments.split(","))), "F1-1 from --Cb-moments"
+    elif a.psi_LT is not None:
+        Cb, cb_src = Cb_linear(a.psi_LT), f"F1-1 on a linear diagram, ψ={a.psi_LT:g}"
+    else:
+        Cb, cb_src = 1.0, "default 1.0 (conservative)"
+    cm = [a.Cmy, a.Cmz]
+    for i, psi in enumerate((a.psi_y, a.psi_z)):
+        if cm[i] is None and psi is not None:
+            cm[i] = _A("B1")["Cm"][0] + _A("B1")["Cm"][1] * psi        # (A-8-4), ψ = −M1/M2 sign convention
+    a.asd = a.asd or a.method == "ASD"
+    if a.Lb is not None:
+        a.kLT = a.Lb / a.L
+    method = "ASD (Rn/Ω)" if a.asd else "LRFD (φRn)"
+    print(f"Code: ANSI/AISC 360-16/360-22, {method}.  Factors: {CF.tag('aisc.E')}, {CF.tag('aisc.G')}; "
+          f"φ/Ω [{CF.status('aisc.resistance')}], B4.1 limits [{CF.status('aisc.B4_1a')}/{CF.status('aisc.B4_1b')}], "
+          f"E3/E7 [{CF.status('aisc.E3')}/{CF.status('aisc.E7')}], F2 [{CF.status('aisc.F2')}], "
+          f"F7/F8 [{CF.status('aisc.F7')}/{CF.status('aisc.F8')}], H1 [{CF.status('aisc.H1')}];  "
+          f"Fy={a.fy:g} MPa{f', Fu={a.fu:g} MPa' if a.fu else ''}, L={a.L} m, Cb={Cb:.3f} ({cb_src})")
+    print(ASSUMPTIONS_AISC)
+    rows, res = check_aisc(sec, a.fy, a.L, a.N, a.My, a.Mz, a.Vy, a.Vz, a.ky, a.kz, a.kLT, Cb, a.asd, a.fu,
+                           a.An, a.U, a.Lv, a.B1, cm[0], cm[1])
+    if "B1_y" in res:
+        print(f"App. 8 B1: x-x {res['B1_y']:.3f} (Pe1={res['Pe1_y'] / 1e3:.0f} kN), y-y {res['B1_z']:.3f} "
+              f"(Pe1={res['Pe1_z'] / 1e3:.0f} kN) -> Mrx={res['Mrx']:.2f}, Mry={res['Mry']:.2f} kNm")
+    worst = _print_rows(rows)
+    for w in res["warnings"]:
+        print("NOTE:", w)
+    bad = any(("not covered" in w) or ("not valid" in w) or ("not implemented" in w) for w in res["warnings"])
+    ok = worst <= 1 and not bad
+    print(f"Governing ratio {worst:.2f} -> {'OK' if ok else 'NOT OK'}")
+    return worst, res
 def main_aisc(a, sec, code):
     import aisc_member as AM
+    z = lambda v: 0.0 if v is None else v  # noqa: E731
     kw = dict(Kx=a.ky, Ky=a.kz, Lb=a.Lb if a.Lb is not None else (a.kLT or a.kz) * a.L, Cb=a.Cb,
-              psi_x=a.psi_y, psi_y=a.psi_z, psi_LT=a.psi_LT, code=code, method=a.method, second_order=a.second_order)
+              psi_x=z(a.psi_y), psi_y=z(a.psi_z), psi_LT=z(a.psi_LT), code=code, method=a.method, second_order=a.second_order)
     # EN naming -> AISC: strong axis y -> x, weak z -> y; V_z (strong-axis shear) -> V_y
     rows, info = AM.check(sec, a.fy, a.L, a.N, a.My, a.Mz, a.Vy, a.Vz, **kw)
     f = info["factors"]

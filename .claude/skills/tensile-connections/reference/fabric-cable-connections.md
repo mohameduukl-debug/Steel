@@ -14,7 +14,7 @@
   PVC/PES tolerates sliding much better.
 * Pocket sizing [U]: inner circumference ≈ π·d + 15–30 mm, i.e. lay-flat width ≈ 1.5–2 d plus the weld. For a 12–20 mm cable
   the finished pocket is about 40–80 mm. It must pass a fitting or have open ends for swaging after pulling.
-* Edge geometry: R ≈ c²/(8s); T ≈ n·R; practical sag span/8 … span/15 (≈ 6.7–12.5 %) [V]; designers use 8–12 %.
+* Edge geometry: R ≈ c²/(8s); T ≈ n·R; practical sag span/8 … span/15 (≈ 6.7–12.5 %) [V]; designers use 8–12 % [U].
 
 ## 2. External cable with clamp plates (PTFE, large spans)
 * The keder-roped membrane edge is held between pairs of short aluminium clamp plates. The plates connect to the cable by bent

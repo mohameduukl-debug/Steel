@@ -1,6 +1,6 @@
 ---
 name: tensile-structures
-description: Hub skill for tensile fabric (membrane) structures built from membrane fabric, steel cables and structural steel, designed to Eurocodes (EU), US codes (ASCE 7, AISC 360, ASCE 55, ASCE 19, ACI 318) or the Saudi Building Code (SBC 301/306/304/201). Use it first for any question about how fabric, cables and steel work together — load path, design workflow, which specialist skill or tool to use. It covers concept, form finding, analysis, connection design, patterning and fabrication/shop drawings for canopies, sails, hypars, cones, arch-supported tunnels, multi-bay ridge/valley roofs, cable nets, masts and stadium roofs. Routes to membrane-fabric, cable-tension-members, steel-supports, tensile-connections, tensile-analysis and fabrication-drawings.
+description: Hub skill for tensile fabric (membrane) structures built from membrane fabric, steel cables and structural steel, designed to Eurocodes (EU), US codes (ASCE 7, AISC 360, ASCE 55, ASCE 19, ACI 318) or the Saudi Building Code (SBC 301/306/304/201). Use it first for any question about how fabric, cables and steel work together — load path, design workflow, which specialist skill or tool to use. It covers concept, form finding, analysis, connection design, patterning and fabrication/shop drawings for canopies, sails, hypars, cones, arch-supported tunnels, multi-bay ridge/valley roofs, cable nets, masts and stadium roofs. Routes to membrane-fabric, cable-tension-members, steel-supports, connection-precedents, tensile-connections, tensile-analysis and fabrication-drawings.
 ---
 
 # Tensile Structures — system hub
@@ -49,12 +49,13 @@ Key couplings:
 | # | Stage | Output | Skill → tool |
 |---|-------|--------|--------------|
 | 1 | Concept: shape, supports, material family, prestress level | sketch, plan, heights | this skill + `membrane-fabric` |
-| 2 | **Form finding** (sail, hypar, cone, arch tunnel, multi-bay ridge/valley, custom) | equilibrium surface, cable sags, support/arch loads | `tensile-analysis` → `form_find_fdm.py` |
+| 2 | **Form finding** (sail, hypar, cone, arch tunnel, multi-bay ridge/valley, custom) | equilibrium surface, cable sags, support/arch loads | `tensile-analysis` → `form_find_fdm.py` (incl. `rings`, `--uniform-stress`) |
 | 3 | Material data | E·t, ν, compensation from biaxial tests | `membrane-fabric` → `biaxial_fit.py` |
-| 4 | **Load analysis**: prestress, wind (directions, zones), snow, ponding | stresses (warp/weft/principal), wrinkling, deflection, envelopes | `tensile-analysis` → `membrane_dr.py` (orthotropic CST), `dynamic_relaxation.py` (net, fast), `run_cases.py` |
-| 5 | Membrane checks | material choice, fabric/seam utilisation per case, tear, corners, panel frequency, ETFE | `membrane-fabric` → `material_select.py`, `membrane_check.py --envelope --sensitivity` |
-| 6 | Cables | F_Rd, SLS, rods, clamps, saddles, fatigue, schedule with unstressed lengths, stressing turns, force from frequencies | `cable-tension-members` → `cable_calc.py`, `cable_schedule.py --envelope` |
-| 7 | Steel supports | members (CHS/RHS/I, LTB, class 4), arch/mast stability (α_cr, 2nd order), foundations | `steel-supports` → `member_check.py`, `frame2d.py`, `foundation_check.py` (`mast_check.py` quick) |
+| 4 | **Load analysis**: prestress, wind (directions, zones), snow, ponding | stresses (warp/weft/principal), wrinkling, deflection, envelopes | `tensile-analysis` → `membrane_dr.py` (orthotropic CST), `dynamic_relaxation.py` (net, fast), `run_cases.py`, `mesh_convergence.py` |
+| 5 | Membrane checks | material choice, fabric/seam utilisation per case (factor / fm / japan / partial / ts19102 / french), tear, corners (published n_eff), panel modes with computed added mass, ETFE (JRC Outlook 44) | `membrane-fabric` → `material_select.py`, `membrane_check.py --envelope --sensitivity` |
+| 6 | Cables | F_Rd, SLS, rods, clamps (EN 6.4), saddles (EN 6.3: radius 30d/400δ, slip, clamping pressure), fatigue, schedule with unstressed lengths (∫ds/(1+T/EA)), stressing turns, force from frequencies; 112-product library with sources | `cable-tension-members` → `cable_calc.py`, `cable_schedule.py --envelope` |
+| 7 | Steel supports | members (CHS/RHS/I, LTB, class 4), arch/mast stability (α_cr, 2nd order), foundations | `steel-supports` → `frame3d.py` (mast + tie-backs + cables: α_cr, 2nd order, membrane reactions), `frame2d.py` (arches/tapered), `member_check.py`, `foundation_check.py` (`mast_check.py` quick) |
+| 8a | Connection precedents (always before 8) | Pinterest search, images viewed and scored, precedent board, agreed concept, gate PASS | `connection-precedents` → `pinterest_fetch.py`, `precedent_search.py` |
 | 8 | Connections | pins/lugs, corner plates, welds, bolts, base plates, EN 1992-4 anchors, aluminium clamps, fatigue | `tensile-connections` → `pin_connection.py`, `corner_plate.py`, `steel_joint_checks.py`, `fatigue_check.py` |
 | 9 | Patterning | geodesic seams, compensation/decompensation, auto-split, notches, panel sheets, nesting | `fabrication-drawings` → `cutting_pattern.py`, `nest_panels.py` |
 | 10 | Drawings | GA/setting-out DXF, steel part drawings with weld symbols | `fabrication-drawings` → `export_dxf.py`, `steel_part_dxf.py`, `dxf_writer.py` |
@@ -64,12 +65,22 @@ Key couplings:
 Loop back as needed. Connection geometry changes the cable lengths (node-to-pin deductions); steel stiffness
 changes the stresses; patterning can move the seams (warp direction and stiffness).
 
+### Validation matrix
+```bash
+python3 .claude/skills/tensile-structures/scripts/validate_all.py --run-tests [--strict] [--out validation_matrix]
+```
+For every skill: number of cases validated against an independent reference (each skill's `reference/validation.md`),
+scripts not yet covered, [V]/[C]/[U] tags in the text and the V/C/U status of the register entries it owns. `--strict`
+fails when a script has no validation entry. Quote the matrix in a report with `report.py --validation`.
+
 ### Calculation report
 ```bash
 python3 .claude/skills/tensile-structures/scripts/report.py --title "Project X" --model sail.json \
         --cases sail_cases_envelope.json --material PVC-III --cables sail_cables.csv \
         --patterns sail_patterns.csv --extra steel_checks.txt --out project_report
 ```
+`--precedents prec_corner/precedents.json ...` adds the connection-precedents gate status, concept and verification
+(a failing gate is listed as governing); `--validation` appends the validation matrix.
 Sections: design basis (every factor with its V/C/U tag and the list of unverified ones), form finding, load cases
 and envelopes, membrane check per case, cable schedule, patterns, further checks (pasted tool output), governing
 utilisations and limitations.
@@ -99,11 +110,20 @@ python3 $S/tensile-structures/scripts/report.py --model sail.json --cases sail_c
 * Masts are normally pin-based and loaded near-axially. All cables at a head or plate should be concurrent.
 * Slope ≥ ~15° is often quoted for drainage and self-cleaning. Always check ponding on the deformed shape.
 
+## Limitations of the tool set
+* The tools are a design and checking aid. Each tool is validated against independent references (see the validation
+  matrix), but a project still needs the design and independent check of a qualified engineer and, for final design of
+  large or complex roofs, a commercial form-finding/analysis package (Easy, SOFiSTiK, ixForten …).
+* Code values come from the register. **U** values must be confirmed, or shown not to govern with `--sensitivity`.
+* Material, cable and hardware data are typical published values. Use the supplier's certified data for the project.
+* All tools are stdlib Python. Large meshes are slower than commercial solvers (see `tensile-analysis` timings).
+
 ## References in this skill
 * `reference/system-interconnections.md`: how each pair of components interacts, every interface, failure modes.
 * `reference/design-workflow-checklist.md`: stage-by-stage checklist with deliverables and hold points.
 * `reference/model-schema.md`: JSON model format shared by all tools.
 * `reference/standards-map.md`: which standard covers what (EU/US/JP), with verification status.
+* `reference/validation.md`: hub validation (chain statics, register, report, matrix).
 * `reference/codes-eu-us-saudi.md`: EU / US / Saudi code systems: combinations, wind, resistance factors, SBC caveats.
 
 ## Code systems: EU, US, Saudi
@@ -119,7 +139,7 @@ python3 .claude/skills/tensile-structures/scripts/loads.py make-cases loads.json
 |---|---|---|---|
 | `loads.py` | EN 1990, EN 1991-1-4 | ASCE 7-22 (7-16 option) | SBC 301-18 (no snow, ASCE 7-10 wind) |
 | `membrane_check.py` | stress factor / CEN/TS 19102 | `asce55` (β·L_t, biaxial 0.8 rule, seam types) | `asce55` |
-| `member_check.py` | EN 1993-1-1 | AISC 360-22 LRFD/ASD (`aisc_member.py`) | SBC 306: φc 0.85, φv 0.90, LRFD only [U] |
+| `member_check.py` | EN 1993-1-1 | AISC 360-16/22 LRFD/ASD (validated against 23 AISC Design Examples) | SBC 306 via `aisc_member.py`: φc 0.85, φv 0.90, LRFD only [U] |
 | `steel_joint_checks.py` weld / bolts / anchor | EN 1993-1-8, EN 1992-4 | AISC J2/J3, ACI 318-19 Ch. 17 | same as US (SBC 306/304) |
 | `pin_connection.py` | EN 1993-1-8 | AISC D5/J7 govern the lug | same as US, LRFD |
 | `frame2d.py --check` | EN 1993-1-1 (equivalent column + 2nd order) | AISC effective-length + direct analysis (0.8EI, 1/500) | same, φc 0.85 |
@@ -158,9 +178,9 @@ OK / NOT OK decision does not depend on the factor) or **DEPENDS** (confirm the 
 lets you issue the check while the factor is still being verified. State that in the report.
 
 ## Honesty about code values
-Research for this skill used web search excerpts (primary PDFs were not
-accessible). Values are tagged **[verified-search]**, **[code-knowledge]** or
-**[unverified]** in the references. Before issuing calculations, confirm every
-code factor against the edition and National Annex in force (e.g. EN 1993-1-11:2026
-replaced the 2006 edition; CEN/TS 19102:2023 is a Technical Specification, not yet
-a full EN). Always use the supplier's datasheet or ETA for actual products.
+Values are tagged **[V]** (checked against the clause, a published worked example or an official document; the
+verification logs and validation tables in each skill give the evidence), **[C]** (code recommended value, the National
+Annex may differ) or **[U]** (practice value or not verified, always with a range). Before issuing calculations, confirm
+every code factor against the edition and National Annex in force (second-generation Eurocodes are being published;
+CEN/TS 19102:2023 is a Technical Specification, not yet a full EN). Always use the supplier's datasheet or ETA for
+actual products.

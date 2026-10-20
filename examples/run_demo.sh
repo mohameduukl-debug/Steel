@@ -23,6 +23,7 @@ python3 "$S/tensile-analysis/scripts/membrane_dr.py" sail.json --Ew 800 --Ef 600
 
 echo; echo "== 2b. Load-case set (wind directions, zones, snow + ponding) and envelope =="
 python3 "$S/tensile-analysis/scripts/run_cases.py" sail.json "$HERE/load_cases_example.json" --out sail_cases
+python3 "$S/tensile-analysis/scripts/benchmarks.py" --quick --case square cable_point wrinkling | tail -6
 
 echo; echo "== 3. Membrane: material choice, checks, panel frequency, corner, sensitivity =="
 python3 "$S/membrane-fabric/scripts/material_select.py" --n-design 8.6 --case wind --fire B --life 15 | sed -n 1,8p
@@ -32,7 +33,9 @@ python3 "$S/membrane-fabric/scripts/membrane_check.py" --material PVC-III --nw 7
 python3 "$S/membrane-fabric/scripts/membrane_check.py" --material PVC-III --prestress 2 2 --flutter 5 5 \
         --f-target 2.0 --sensitivity | sed -n '/Panel frequency/,$p'
 python3 "$S/membrane-fabric/scripts/membrane_check.py" --material PVC-III --case wind --corner 30 90 0.35 \
-        --layers 3 | sed -n '/Corner/,$p'
+        --layers 3 --neff-basis french | sed -n '/Corner/,$p'
+python3 "$S/membrane-fabric/scripts/membrane_check.py" --material Sattler-Atlas-760-IV --nw 35.55 --nf 12.75 --case snow \
+        --method ts19102 | tail -12
 
 echo; echo "== 4. Cables: edge-cable check + schedule =="
 python3 "$S/cable-tension-members/scripts/cable_calc.py" edge --chord 10.44 --sag 1.17 --n 8.0
@@ -51,6 +54,12 @@ python3 "$S/cable-tension-members/scripts/cable_calc.py" stress-turns --L 10.44 
 python3 "$S/cable-tension-members/scripts/cable_calc.py" freq-tension --L 10.44 --m 1.3 --EA 14000 \
         --f 1:6.22 --f 2:12.4 --f 3:18.7
 
+echo; echo "== 5a. Connection precedents: Pinterest search plan before designing the corner =="
+python3 "$S/connection-precedents/scripts/precedent_search.py" queries corner-plate --material PVC | sed -n 1,12p
+python3 "$S/connection-precedents/scripts/precedent_search.py" board "$HERE/precedents_corner_example.json" \
+        --out corner_precedent_board | sed -n '/## Precedents/,/Off-topic/p'
+python3 "$S/connection-precedents/scripts/precedent_search.py" check "$HERE/precedents_corner_example.json" --no-record
+
 echo; echo "== 5. Corner plate resolution + pin/lug check (corner forces from the uplift run) =="
 python3 "$S/tensile-connections/scripts/corner_plate.py" --m EC1:15:83:180:48 --m EC2:105:83:-48:180 \
         --m strap:60:6:100:173
@@ -63,9 +72,12 @@ python3 "$S/tensile-connections/scripts/steel_joint_checks.py" weld --F 210 --an
 python3 "$S/tensile-connections/scripts/steel_joint_checks.py" baseplate --col CHS --D 168.3 --tc 8 --B 350 --H 350 \
         --tp 25 --Nc 300 --Nt 60 --V 25 --anchors 4 --anchor-d 20 --edge 55
 
+python3 "$S/steel-supports/scripts/frame3d.py" mast --H 6 --section CHS:219.1x10 --tie=-5,-5,0:60000:10 \
+        --tie=-6,1,0:60000:10 --tie=1,-6,0:60000:10 --reactions sail_snow.json --node 0 --check | tail -15
 python3 "$S/steel-supports/scripts/frame2d.py" arch --L 20 --f 4 --n 20 --section CHS:219.1x8 --q 3.5 --check --Lz 5
 python3 "$S/tensile-connections/scripts/steel_joint_checks.py" anchor --n1 2 --n2 2 --s1 200 --s2 200 --c1 400 \
-        --c2 400 --hef 250 --d 24 --N 60
+        --c2 400 --hef 250 --d 24 --N 60 --V 25 --h 600
+python3 "$S/tensile-connections/scripts/steel_joint_checks.py" gusset --help | head -3
 python3 "$S/steel-supports/scripts/foundation_check.py" block --B 2.5 --L 2.5 --D 1.5 --V 60 --H 45 --ha 0.3 --mu 0.45 --qRd 200
 python3 "$S/steel-supports/scripts/foundation_check.py" helical --T 10 --pull 90 --sensitivity
 python3 "$S/steel-supports/scripts/frame2d.py" arch --L 20 --f 4 --n 40 --shape circular --section CHS:219.1x8 \
@@ -75,7 +87,7 @@ echo; echo "== 7. Patterns, GA DXF and steel part drawings =="
 python3 "$S/fabrication-drawings/scripts/cutting_pattern.py" sail.json --panels-along v --strip 2 --seams geodesic \
         --comp-warp 0.8 --comp-weft 1.6 --decomp-ends 0 --decomp-length 500 --seam 50 --edge 80 \
         --roll-width 2500 --out sail_patterns
-python3 "$S/fabrication-drawings/scripts/export_dxf.py" sail.json --forces --out sail_GA
+python3 "$S/fabrication-drawings/scripts/export_dxf.py" sail.json --forces --csv --out sail_GA
 python3 "$S/fabrication-drawings/scripts/steel_part_dxf.py" lug --d0 37 --d 36 --t 25 --a 50 --c 35 \
         --base 150 --height 110 --mark LP-01 --qty 4 --project "Demo sail"
 python3 "$S/fabrication-drawings/scripts/steel_part_dxf.py" corner --t 25 --edge 45 --hole A:0:0:52 \
@@ -90,6 +102,8 @@ python3 "$S/tensile-analysis/scripts/dynamic_relaxation.py" multibay.json --snow
 python3 "$S/fabrication-drawings/scripts/cutting_pattern.py" multibay.json --seams geodesic --strip 1 --roll-width 2670 \
         --auto-split --notch 1000 --sheets --project "Demo market roof" --out multibay_patterns | tail -4
 python3 "$S/fabrication-drawings/scripts/nest_panels.py" multibay_patterns.json --gap 20 --out multibay_nest
+echo "-- DXF check of every file written so far (structure, layers, \$INSUNITS = mm) --"
+python3 "$S/fabrication-drawings/scripts/dxf_reader.py" --units-mm *.dxf | tail -3
 
 echo; echo "== 8b. Code systems: US (ASCE 7 / AISC 360 / ASCE 55 / ACI 318) and Saudi (SBC) =="
 python3 "$S/tensile-structures/scripts/loads.py" combos --code SA --set uls

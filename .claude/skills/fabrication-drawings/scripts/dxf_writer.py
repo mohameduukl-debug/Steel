@@ -239,6 +239,8 @@ class DXF:
 
 
 if __name__ == "__main__":  # smoke test
+    print("Assumptions: R12 (AC1009) ASCII DXF, $INSUNITS = 4 (mm; ignored by strict R12 readers), coordinates written "
+          "with 6 decimals, non-ASCII text replaced by '?', dimensions drawn as lines + text (no DIMENSION entity).")
     d = DXF()
     d.layer("CUT", "red")
     d.layer("TEXT", "green")

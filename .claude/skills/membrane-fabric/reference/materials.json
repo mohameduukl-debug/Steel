@@ -1,243 +1,743 @@
 {
-  "_readme": "Membrane material library for membrane_check.py. Strengths are strip tensile strengths warp/weft in kN/m (1 kN/m = 50 N/5cm). 'source' says where the value came from; 'status' = 'datasheet' (manufacturer figure seen via search extract), 'class-table' (generic classification table), or 'typical' (industry typical, NOT verified - replace with the project datasheet). Stiffness Et values are indicative only: always use biaxial test data (EN 17117-1) for the actual batch. family_defaults selection fields (fire_EN13501 best class commonly achieved by FR grades, translucency_pct, life_years, foldable, self_cleaning, cost_index relative to PVC) are TYPICAL industry figures for screening only (manufacturer literature / TensiNet guide via search extracts): the product's classification report, datasheet and warranty govern.",
-  "materials": {
-    "PVC-I": {
-      "family": "PES/PVC",
-      "fw": 66,
-      "ff": 60,
-      "weight_gm2": "750-900",
-      "status": "class-table",
-      "source": "teloniabiti.com PVC type table (3300/3000 N/5cm)"
-    },
-    "PVC-II": {
-      "family": "PES/PVC",
-      "fw": 84,
-      "ff": 80,
-      "weight_gm2": "900-1050",
-      "status": "class-table",
-      "source": "teloniabiti.com (4200/4000 N/5cm)"
-    },
-    "PVC-III": {
-      "family": "PES/PVC",
-      "fw": 112,
-      "ff": 108,
-      "weight_gm2": "1050-1300",
-      "status": "class-table",
-      "source": "teloniabiti.com (5600/5400 N/5cm)"
-    },
-    "PVC-IV": {
-      "family": "PES/PVC",
-      "fw": 168,
-      "ff": 146,
-      "weight_gm2": "1300-1450",
-      "status": "class-table",
-      "source": "teloniabiti.com (8400/7300 N/5cm)"
-    },
-    "PVC-V": {
-      "family": "PES/PVC",
-      "fw": 200,
-      "ff": 190,
-      "weight_gm2": "1450-1600",
-      "status": "class-table",
-      "source": "teloniabiti.com (10000/9500 N/5cm)"
-    },
-    "Ferrari-Tenseo-1002S2": {
-      "family": "PES/PVC",
-      "fw": 84,
-      "ff": 80,
-      "weight_gm2": 1050,
-      "roll_width_mm": 2670,
-      "status": "datasheet",
-      "source": "Serge Ferrari Tenseo Advanced 1002 S2 datasheet (420/400 daN/5cm)"
-    },
-    "Mehler-Valmex-FR1000-III": {
-      "family": "PES/PVC",
-      "fw": 120,
-      "ff": 110,
-      "weight_gm2": 1050,
-      "roll_width_mm": 2500,
-      "status": "datasheet",
-      "source": "Mehler Valmex FR 1000 Mehatop (6000/5500 N/5cm)"
-    },
-    "Chukoh-FGT-800": {
-      "family": "glass/PTFE",
-      "fw": 147,
-      "ff": 118,
-      "weight_gm2": 1300,
-      "roll_width_mm": 3800,
-      "status": "datasheet",
-      "source": "Chukoh Skytop FGT-800 (4410/3528 N/3cm min)"
-    },
-    "Chukoh-FGT-1000": {
-      "family": "glass/PTFE",
-      "fw": 183,
-      "ff": 167,
-      "weight_gm2": 1700,
-      "roll_width_mm": 3800,
-      "status": "datasheet",
-      "source": "Chukoh Skytop FGT-1000 (5500/5000 N/3cm min)"
-    },
-    "Verseidag-B18089": {
-      "family": "glass/PTFE",
-      "fw": 140,
-      "ff": 120,
-      "weight_gm2": 1150,
-      "roll_width_mm": 4700,
-      "status": "datasheet",
-      "source": "Tenseo Xtrem GF 7000 / Duraskin B18089 sample card (700/600 daN/5cm); weight conflicts with another source (1550) - check"
-    },
-    "PTFE-glass-generic-1000": {
-      "family": "glass/PTFE",
-      "fw": 116,
-      "ff": 110,
-      "weight_gm2": 1000,
-      "status": "typical",
-      "source": "generic example 5800/5500 N/5cm"
-    },
-    "Silicone-glass-generic": {
-      "family": "glass/silicone",
-      "fw": 100,
-      "ff": 90,
-      "status": "typical",
-      "source": "range 4000-7000 N/5cm (80-140 kN/m)"
-    },
-    "Sefar-Tenara-4T40HF": {
-      "family": "ePTFE",
-      "fw": 80,
-      "ff": 80,
-      "weight_gm2": 1080,
-      "status": "datasheet",
-      "source": "Sefar Tenara 4T40HF (4000/4000 N/5cm), light transmission 38%"
-    },
-    "SaintGobain-Sheerfill-II": {
-      "family": "glass/PTFE",
-      "fw": 144,
-      "ff": 105,
-      "weight_gm2": 1305,
-      "status": "datasheet",
-      "source": "Birdair Sheerfill II ASTM spec 825/600 lb/in (x0.1751 kN/m per lb/in)"
-    },
-    "ETFE-200um": {
-      "family": "ETFE",
-      "fw": 4.0,
-      "ff": 4.0,
-      "t_mm": 0.2,
-      "fy1_MPa": 20.0,
-      "E_MPa": 660,
-      "status": "typical",
-      "source": "ETFE yield 20-30 MPa, E≈660 MPa, ν≈0.42 (IASS 2024 P237 / tensiletechnic); fw = f_y × t (yield-based, NOT UTS)"
-    },
-    "ETFE-250um": {
-      "family": "ETFE",
-      "fw": 5.0,
-      "ff": 5.0,
-      "t_mm": 0.25,
-      "fy1_MPa": 20.0,
-      "E_MPa": 660,
-      "status": "typical",
-      "source": "as ETFE-200um"
-    }
+ "_readme": "Membrane material library for membrane_check.py / material_select.py. fw/ff = strip tensile strength warp/weft in kN/m (1 kN/m = 1 N/mm; conversions: N/5cm ÷ 50, daN/5cm ÷ 5, N/3cm ÷ 30, lb/in × 0.17513). 'raw' = value and unit as published; 'strength_basis' says whether it is a mean, minimum, nominal or 5 % fractile; fk_w/fk_f = characteristic 5 % values where published (used by --method partial / ts19102). 'status': datasheet = manufacturer sheet read at source_url; excerpt = manufacturer value seen only as a search excerpt (URL not retrievable); class-table = published classification table (JRC132615 Eurocode Outlooks); published-example = value used in a published worked example; typical = industry typical, NOT verified. All values are for screening and benchmarking: design with the supplier's certified strength (5 % fractile) and biaxial data for the delivered batch. ETFE: fw = f_y10 × t (10 % strain stress), not UTS. family_defaults selection fields are TYPICAL family figures (status typical).",
+ "materials": {
+  "PVC-I": {
+   "family": "PES/PVC",
+   "fw": 55.0,
+   "ff": 55.0,
+   "fk_w": 50.0,
+   "fk_f": 50.0,
+   "raw": "2750/2750 N/5cm",
+   "raw_fk": "2500/2500 N/5cm",
+   "strength_basis": "mean (EN ISO 1421); fk = 5 % fractile",
+   "tear_N": [
+    170,
+    170
+   ],
+   "tear_method": "EN 1875-3 method B (mean)",
+   "seam_eff_23C": 0.9,
+   "seam_eff_70C": 0.7,
+   "weight_gm2": "750-900",
+   "weight_source": "French recommendations type table (JRC132615 Code Review No. 3), order of magnitude",
+   "status": "class-table",
+   "source": "JRC132615 (2023) Eurocode Outlook No. 5/6, PES/PVC Type I (proposed harmonised classification)",
+   "source_url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
   },
-  "family_defaults": {
-    "PES/PVC": {
-      "Et_w": 800,
-      "Et_f": 600,
-      "nu": 0.4,
-      "comp_warp_pct": "0.5-1.5",
-      "comp_weft_pct": "1.0-3.5",
-      "prestress_kN_m": "1.0-4.0",
-      "seam_eff": "0.80-0.90",
-      "status": "typical",
-      "fire_EN13501": "B-s2,d0",
-      "translucency_pct": [
-        0,
-        20
-      ],
-      "life_years": [
-        15,
-        25
-      ],
-      "foldable": true,
-      "self_cleaning": "with PVDF/fluoro top-coat",
-      "cost_index": 1.0
-    },
-    "glass/PTFE": {
-      "Et_w": 1400,
-      "Et_f": 1000,
-      "nu": 0.5,
-      "comp_warp_pct": "0-0.5",
-      "comp_weft_pct": "1.0-4.0",
-      "prestress_kN_m": "2.0-8.0 (heavy grades 6-8)",
-      "seam_eff": "0.70-0.80",
-      "status": "typical",
-      "fire_EN13501": "A2-s1,d0",
-      "translucency_pct": [
-        12,
-        25
-      ],
-      "life_years": [
-        25,
-        35
-      ],
-      "foldable": false,
-      "self_cleaning": "yes",
-      "cost_index": 3.0
-    },
-    "glass/silicone": {
-      "Et_w": 1000,
-      "Et_f": 800,
-      "nu": 0.5,
-      "status": "typical",
-      "fire_EN13501": "B-s1,d0",
-      "translucency_pct": [
-        20,
-        40
-      ],
-      "life_years": [
-        20,
-        30
-      ],
-      "foldable": false,
-      "self_cleaning": "dirt pick-up without top-coat",
-      "cost_index": 2.0,
-      "fire_note": "some products A2 (check the classification report)"
-    },
-    "ePTFE": {
-      "Et_w": 300,
-      "Et_f": 300,
-      "nu": 0.4,
-      "status": "typical (low stiffness, foldable)",
-      "fire_EN13501": "B-s1,d0",
-      "translucency_pct": [
-        15,
-        40
-      ],
-      "life_years": [
-        20,
-        30
-      ],
-      "foldable": true,
-      "self_cleaning": "yes",
-      "cost_index": 4.0
-    },
-    "ETFE": {
-      "Et_w": 132,
-      "Et_f": 132,
-      "nu": 0.42,
-      "prestress_kN_m": "cushions: pressure-governed",
-      "status": "typical (E·t at 200 µm)",
-      "fire_EN13501": "B-s1,d0",
-      "translucency_pct": [
-        88,
-        95
-      ],
-      "life_years": [
-        30,
-        40
-      ],
-      "foldable": false,
-      "self_cleaning": "yes",
-      "cost_index": 3.0
-    }
+  "PVC-II": {
+   "family": "PES/PVC",
+   "fw": 80.0,
+   "ff": 80.0,
+   "fk_w": 70.0,
+   "fk_f": 70.0,
+   "raw": "4000/4000 N/5cm",
+   "raw_fk": "3500/3500 N/5cm",
+   "strength_basis": "mean (EN ISO 1421); fk = 5 % fractile",
+   "tear_N": [
+    280,
+    280
+   ],
+   "tear_method": "EN 1875-3 method B (mean)",
+   "seam_eff_23C": 0.9,
+   "seam_eff_70C": 0.7,
+   "weight_gm2": 1050,
+   "weight_source": "French recommendations type table (JRC132615 Code Review No. 3), order of magnitude",
+   "status": "class-table",
+   "source": "JRC132615 (2023) Eurocode Outlook No. 5/6, PES/PVC Type II (proposed harmonised classification)",
+   "source_url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
+  },
+  "PVC-III": {
+   "family": "PES/PVC",
+   "fw": 110.0,
+   "ff": 100.0,
+   "fk_w": 100.0,
+   "fk_f": 90.0,
+   "raw": "5500/5000 N/5cm",
+   "raw_fk": "5000/4500 N/5cm",
+   "strength_basis": "mean (EN ISO 1421); fk = 5 % fractile",
+   "tear_N": [
+    450,
+    450
+   ],
+   "tear_method": "EN 1875-3 method B (mean)",
+   "seam_eff_23C": 0.9,
+   "seam_eff_70C": 0.7,
+   "weight_gm2": "1050-1250",
+   "weight_source": "French recommendations type table (JRC132615 Code Review No. 3), order of magnitude",
+   "status": "class-table",
+   "source": "JRC132615 (2023) Eurocode Outlook No. 5/6, PES/PVC Type III (proposed harmonised classification)",
+   "source_url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
+  },
+  "PVC-IV": {
+   "family": "PES/PVC",
+   "fw": 150.0,
+   "ff": 130.0,
+   "fk_w": 135.0,
+   "fk_f": 120.0,
+   "raw": "7500/6500 N/5cm",
+   "raw_fk": "6750/6000 N/5cm",
+   "strength_basis": "mean (EN ISO 1421); fk = 5 % fractile",
+   "tear_N": [
+    750,
+    750
+   ],
+   "tear_method": "EN 1875-3 method B (mean)",
+   "seam_eff_23C": 0.9,
+   "seam_eff_70C": 0.6,
+   "weight_gm2": "1350-1850",
+   "weight_source": "French recommendations type table (JRC132615 Code Review No. 3), order of magnitude",
+   "status": "class-table",
+   "source": "JRC132615 (2023) Eurocode Outlook No. 5/6, PES/PVC Type IV (proposed harmonised classification)",
+   "source_url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
+  },
+  "PVC-V": {
+   "family": "PES/PVC",
+   "fw": 185.0,
+   "ff": 160.0,
+   "fk_w": 170.0,
+   "fk_f": 145.0,
+   "raw": "9250/8000 N/5cm",
+   "raw_fk": "8500/7250 N/5cm",
+   "strength_basis": "mean (EN ISO 1421); fk = 5 % fractile",
+   "tear_N": [
+    1100,
+    1100
+   ],
+   "tear_method": "EN 1875-3 method B (mean)",
+   "seam_eff_23C": 0.8,
+   "seam_eff_70C": 0.55,
+   "weight_gm2": "1450-1600",
+   "weight_source": "typical [U] (no class weight published for Type V)",
+   "status": "class-table",
+   "source": "JRC132615 (2023) Eurocode Outlook No. 5/6, PES/PVC Type V (proposed harmonised classification)",
+   "source_url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
+  },
+  "Ferrari-Tenseo-1002S2": {
+   "family": "PES/PVC",
+   "fw": 84.0,
+   "ff": 80.0,
+   "raw": "420/400 daN/5cm",
+   "strength_basis": "mean ±5 % (EN ISO 1421)",
+   "tear_N": [
+    550,
+    500
+   ],
+   "tear_method": "DIN 53363",
+   "weight_gm2": 1050,
+   "t_mm": 0.78,
+   "roll_width_mm": 2670,
+   "fire": "B-s2,d0 (EN 13501-1 certificate available); NFPA 701",
+   "light_transmission_pct": 8,
+   "coating": "PVC + Précontraint, fluorinated top-coat",
+   "status": "datasheet",
+   "source": "Serge Ferrari Tenseo Advanced 1002 S2 (formerly Flexlight Advanced 1002 S2) datasheet; Tv 8 % NFP 38511 (4 % EN 410)",
+   "source_url": "https://makmax.com.au/wp-content/uploads/2025/02/Serge-Ferrari-Tenseo-Advanced-1002S2-EN.pdf"
+  },
+  "Ferrari-Flexlight-1302S2": {
+   "family": "PES/PVC",
+   "fw": 160.0,
+   "ff": 140.0,
+   "raw": "800/700 daN/5cm",
+   "strength_basis": "mean ±5 % (EN ISO 1421)",
+   "tear_N": [
+    1200,
+    1100
+   ],
+   "tear_method": "DIN 53363",
+   "weight_gm2": 1350,
+   "t_mm": 1.02,
+   "roll_width_mm": 2670,
+   "fire": "C-s2,d0 (EN 13501-1, as printed; other certificates on demand)",
+   "status": "datasheet",
+   "source": "Serge Ferrari Flexlight Advanced 1302 S2 datasheet",
+   "source_url": "https://buitink-technology.com/pdf/Flexlight-Advanced-1302-S2.pdf"
+  },
+  "Ferrari-Flexlight-1502S2": {
+   "family": "PES/PVC",
+   "fw": 200.0,
+   "ff": 160.0,
+   "raw": "1000/800 daN/5cm",
+   "strength_basis": "mean ±5 %",
+   "tear_N": [
+    1600,
+    1400
+   ],
+   "tear_method": "DIN 53363",
+   "weight_gm2": 1500,
+   "t_mm": 1.14,
+   "roll_width_mm": 1800,
+   "fire": "C-s2,d0 (EN 13501-1, as printed)",
+   "status": "datasheet",
+   "source": "Serge Ferrari Flexlight Advanced 1502 S2 datasheet",
+   "source_url": "https://www.buitink-technology.com/pdf/Flexlight-Advanced-1502-S2.pdf"
+  },
+  "Mehler-Valmex-FR1000-III": {
+   "family": "PES/PVC",
+   "fw": 120.0,
+   "ff": 110.0,
+   "raw": "6000/5500 N/5cm",
+   "strength_basis": "nominal (EN ISO 1421/V1)",
+   "tear_N": [
+    900,
+    800
+   ],
+   "tear_method": "DIN 53363",
+   "weight_gm2": 1050,
+   "roll_width_mm": 2500,
+   "fire": "B-s2,d0 (EN 13501-1), DIN 4102 B1",
+   "coating": "PVC, multi-composed PVDF lacquer both sides; base PES low-wick 1670 dtex P 2/2",
+   "status": "datasheet",
+   "source": "Mehler VALMEX FR 1000 MEHATOP F1 type III, technical datasheet No. 1012.9 (art. 7269 5246); roll width 2500 mm from earlier search excerpt, not on this sheet",
+   "source_url": "https://www.tensaform.com/Uploads/Document/b23c5048-6b4f-4501-8e14-27841a4e1ad7.pdf"
+  },
+  "Verseidag-Duraskin-B4915": {
+   "family": "PES/PVC",
+   "fw": 115.0,
+   "ff": 102.0,
+   "raw": "5750/5100 N/5cm",
+   "strength_basis": "nominal ±5 %",
+   "tear_N": [
+    950,
+    800
+   ],
+   "weight_gm2": 1100,
+   "roll_width_mm": 2500,
+   "fire": "DIN 4102 B1",
+   "coating": "PVC + 100 % PVDF lacquer (non-weldable variant)",
+   "status": "excerpt",
+   "source": "Verseidag Duraskin B 19151 / B 4915 / B 69152 catalogue sheet on ArchiExpo (seen as search excerpt only; page returns 403)",
+   "source_url": "https://pdf.archiexpo.com/pdf/verseidag-indutex/duraskin-b-19151-b-4915-b-69152/61073-129911.html"
+  },
+  "Sattler-Atlas-760-IV": {
+   "family": "PES/PVC",
+   "fw": 172.0,
+   "ff": 168.0,
+   "fk_w": 138.15,
+   "fk_f": 134.94,
+   "raw": "8600/8400 N/5cm",
+   "strength_basis": "mean n23; fk = n23·(1 − 1.64·0.12) as in the JRC example",
+   "status": "published-example",
+   "source": "Sattler 760 Atlas Type IV as used in the JRC 2025 CEN/TS 19102 worked example (Mollaert & Stimpfle, slides 109 and 112)",
+   "source_url": "https://eurocodes.jrc.ec.europa.eu/sites/default/files/2025-08/D1_Mollaert-Stimpfle_website.pdf"
+  },
+  "Chukoh-FGT-600": {
+   "family": "glass/PTFE",
+   "fw": 122.7,
+   "ff": 98.0,
+   "raw": "3680/2940 N/3cm",
+   "strength_basis": "minimum (JIS L 1096 cut strip)",
+   "tear_N": [
+    225,
+    225
+   ],
+   "tear_method": "JIS L 1096 trapezoid (minimum)",
+   "weight_gm2": 1000,
+   "t_mm": 0.6,
+   "fire": "non-combustible material, MLIT certification NM-8665",
+   "light_transmission_pct": 15,
+   "status": "datasheet",
+   "source": "Chukoh SKYTOP FGT-600 typical-properties table (Chukoh Chemical Industries); roll width 3800 mm from earlier search excerpt",
+   "source_url": "https://www.chukoh.com/products/skytop/fgt/"
+  },
+  "Chukoh-FGT-800": {
+   "family": "glass/PTFE",
+   "fw": 147.0,
+   "ff": 117.6,
+   "raw": "4410/3528 N/3cm",
+   "strength_basis": "minimum (JIS L 1096 cut strip)",
+   "tear_N": [
+    294,
+    294
+   ],
+   "tear_method": "JIS L 1096 trapezoid (minimum)",
+   "weight_gm2": 1300,
+   "t_mm": 0.8,
+   "roll_width_mm": 3800,
+   "fire": "non-combustible material, MLIT certification NM-8665",
+   "light_transmission_pct": 12,
+   "status": "datasheet",
+   "source": "Chukoh SKYTOP FGT-800 typical-properties table (Chukoh Chemical Industries); roll width 3800 mm from earlier search excerpt",
+   "source_url": "https://www.chukoh.com/products/skytop/fgt/"
+  },
+  "Chukoh-FGT-1000": {
+   "family": "glass/PTFE",
+   "fw": 183.3,
+   "ff": 166.7,
+   "raw": "5500/5000 N/3cm",
+   "strength_basis": "minimum (JIS L 1096 cut strip)",
+   "tear_N": [
+    400,
+    450
+   ],
+   "tear_method": "JIS L 1096 trapezoid (minimum)",
+   "weight_gm2": 1700,
+   "t_mm": 1.0,
+   "roll_width_mm": 3800,
+   "fire": "non-combustible material, MLIT certification NM-8665",
+   "light_transmission_pct": 10,
+   "status": "datasheet",
+   "source": "Chukoh SKYTOP FGT-1000 typical-properties table (Chukoh Chemical Industries); roll width 3800 mm from earlier search excerpt",
+   "source_url": "https://www.chukoh.com/products/skytop/fgt/"
+  },
+  "SaintGobain-Sheerfill-II": {
+   "family": "glass/PTFE",
+   "fw": 144.5,
+   "ff": 105.1,
+   "raw": "825/600 lb/in",
+   "strength_basis": "minimum average (ASTM D4851, 2 in/min)",
+   "tear_N": [
+    334,
+    311
+   ],
+   "tear_method": "ASTM D4851 trapezoidal (min. avg.)",
+   "weight_gm2": 1305,
+   "t_mm": 0.76,
+   "fire": "ASTM E84 flame spread 5, smoke 10; ASTM E136 substrate pass; ASTM E108 Class A",
+   "light_transmission_pct": 12,
+   "status": "datasheet",
+   "source": "Saint-Gobain SHEERFILL II Architectural Membrane, Birdair ASTM sheet (solar transmission 12 % ASTM E424; after crease fold 680/415 lb/in)",
+   "source_url": "https://www.birdair.com/files/specifications/Sheerfill%20II%20ASTM.PDF"
+  },
+  "SaintGobain-Sheerfill-V": {
+   "family": "glass/PTFE",
+   "fw": 96.3,
+   "ff": 109.5,
+   "raw": "550/625 lb/in",
+   "strength_basis": "minimum average (ASTM D4851)",
+   "tear_N": [
+    178,
+    289
+   ],
+   "tear_method": "ASTM D4851 trapezoidal (min. avg.)",
+   "weight_gm2": 983,
+   "t_mm": 0.56,
+   "fire": "ASTM E84 flame spread 0",
+   "light_transmission_pct": 16,
+   "status": "datasheet",
+   "source": "Saint-Gobain SHEERFILL V EverClean, Birdair ASTM sheet (after crease fold 375/400 lb/in)",
+   "source_url": "https://www.birdair.com/files/specifications/Sheerfill%20V%20EverClean%20ASTM.PDF"
+  },
+  "Verseidag-B18039": {
+   "family": "glass/PTFE",
+   "fw": 84.0,
+   "ff": 80.0,
+   "raw": "4200/4000 N/5cm",
+   "strength_basis": "nominal ±5 % (DIN 53354)",
+   "tear_N": [
+    300,
+    300
+   ],
+   "weight_gm2": 800,
+   "roll_width_mm": 3000,
+   "fire": "DIN 4102 A2",
+   "light_transmission_pct": 17,
+   "status": "excerpt",
+   "source": "Verseidag-Indutex Duraskin B 18039 catalogue sheet on ArchiExpo (search excerpt only; page returns 403)",
+   "source_url": "https://pdf.archiexpo.com/pdf/verseidag-indutex/duraskin-b-18039/61073-129885.html"
+  },
+  "Verseidag-B18089": {
+   "family": "glass/PTFE",
+   "fw": 140.0,
+   "ff": 120.0,
+   "raw": "700/600 daN/5cm",
+   "strength_basis": "nominal",
+   "weight_gm2": 1150,
+   "roll_width_mm": 4700,
+   "status": "excerpt",
+   "source": "Tenseo Xtrem GF 7000 / Duraskin B18089 sample card (search excerpt; another excerpt gives 1550 g/m2 - check); no retrievable URL"
+  },
+  "PTFE-glass-I": {
+   "family": "glass/PTFE",
+   "fw": 70.0,
+   "ff": 50.0,
+   "raw": "3500/2500 N/5cm",
+   "strength_basis": "mean (EN ISO 1421); 5 % fractile 'to be determined'",
+   "tear_N": [
+    150,
+    150
+   ],
+   "seam_eff_23C": 0.8,
+   "status": "class-table",
+   "source": "JRC132615 (2023) Eurocode Outlook No. 7/8, glass/PTFE Type I (proposal)",
+   "source_url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
+  },
+  "PTFE-glass-II": {
+   "family": "glass/PTFE",
+   "fw": 85.0,
+   "ff": 80.0,
+   "raw": "4250/4000 N/5cm",
+   "strength_basis": "mean (EN ISO 1421); 5 % fractile 'to be determined'",
+   "tear_N": [
+    200,
+    250
+   ],
+   "seam_eff_23C": 0.9,
+   "status": "class-table",
+   "source": "JRC132615 (2023) Eurocode Outlook No. 7/8, glass/PTFE Type II (proposal)",
+   "source_url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
+  },
+  "PTFE-glass-III": {
+   "family": "glass/PTFE",
+   "fw": 140.0,
+   "ff": 120.0,
+   "raw": "7000/6000 N/5cm",
+   "strength_basis": "mean (EN ISO 1421); 5 % fractile 'to be determined'",
+   "tear_N": [
+    300,
+    300
+   ],
+   "seam_eff_23C": 0.9,
+   "status": "class-table",
+   "source": "JRC132615 (2023) Eurocode Outlook No. 7/8, glass/PTFE Type III (proposal)",
+   "source_url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
+  },
+  "PTFE-glass-IV": {
+   "family": "glass/PTFE",
+   "fw": 160.0,
+   "ff": 140.0,
+   "raw": "8000/7000 N/5cm",
+   "strength_basis": "mean (EN ISO 1421); 5 % fractile 'to be determined'",
+   "tear_N": [
+    400,
+    400
+   ],
+   "seam_eff_23C": 0.9,
+   "status": "class-table",
+   "source": "JRC132615 (2023) Eurocode Outlook No. 7/8, glass/PTFE Type IV (proposal)",
+   "source_url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
+  },
+  "PTFE-glass-generic-1000": {
+   "family": "glass/PTFE",
+   "fw": 116,
+   "ff": 110,
+   "weight_gm2": 1000,
+   "raw": "5800/5500 N/5cm",
+   "strength_basis": "typical",
+   "status": "typical",
+   "source": "generic example 5800/5500 N/5cm (no product source)"
+  },
+  "Silicone-glass-I-": {
+   "family": "glass/silicone",
+   "fw": 52.0,
+   "ff": 40.0,
+   "raw": "2600/2000 N/5cm",
+   "strength_basis": "mean (EN ISO 1421)",
+   "tear_N": [
+    176,
+    133
+   ],
+   "seam_eff_23C": 0.7,
+   "seam_eff_70C": 0.7,
+   "status": "class-table",
+   "source": "JRC132615 (2023) Eurocode Outlook No. 9/10, glass/silicone Type I- (proposal; seams stitched/glued 70 %)",
+   "source_url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
+  },
+  "Silicone-glass-I+": {
+   "family": "glass/silicone",
+   "fw": 80.0,
+   "ff": 78.0,
+   "raw": "4000/3900 N/5cm",
+   "strength_basis": "mean (EN ISO 1421)",
+   "tear_N": [
+    190,
+    190
+   ],
+   "seam_eff_23C": 0.7,
+   "seam_eff_70C": 0.7,
+   "status": "class-table",
+   "source": "JRC132615 (2023) Eurocode Outlook No. 9/10, glass/silicone Type I+ (proposal; seams stitched/glued 70 %)",
+   "source_url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
+  },
+  "Silicone-glass-III": {
+   "family": "glass/silicone",
+   "fw": 120.0,
+   "ff": 112.0,
+   "raw": "6000/5600 N/5cm",
+   "strength_basis": "mean (EN ISO 1421)",
+   "tear_N": [
+    400,
+    400
+   ],
+   "seam_eff_23C": 0.7,
+   "seam_eff_70C": 0.7,
+   "status": "class-table",
+   "source": "JRC132615 (2023) Eurocode Outlook No. 9/10, glass/silicone Type III (proposal; seams stitched/glued 70 %)",
+   "source_url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
+  },
+  "Silicone-glass-III+": {
+   "family": "glass/silicone",
+   "fw": 150.0,
+   "ff": 150.0,
+   "raw": "7500/7500 N/5cm",
+   "strength_basis": "mean (EN ISO 1421)",
+   "tear_N": [
+    550,
+    550
+   ],
+   "seam_eff_23C": 0.7,
+   "seam_eff_70C": 0.7,
+   "status": "class-table",
+   "source": "JRC132615 (2023) Eurocode Outlook No. 9/10, glass/silicone Type III+ (proposal; seams stitched/glued 70 %)",
+   "source_url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
+  },
+  "Silicone-glass-V": {
+   "family": "glass/silicone",
+   "fw": 200.0,
+   "ff": 198.0,
+   "raw": "10000/9900 N/5cm",
+   "strength_basis": "mean (EN ISO 1421)",
+   "tear_N": [
+    900,
+    850
+   ],
+   "seam_eff_23C": 0.7,
+   "seam_eff_70C": 0.7,
+   "status": "class-table",
+   "source": "JRC132615 (2023) Eurocode Outlook No. 9/10, glass/silicone Type V (proposal; seams stitched/glued 70 %)",
+   "source_url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
+  },
+  "Silicone-glass-generic": {
+   "family": "glass/silicone",
+   "fw": 100,
+   "ff": 90,
+   "raw": "5000/4500 N/5cm",
+   "strength_basis": "typical",
+   "status": "typical",
+   "source": "range 4000-7000 N/5cm (80-140 kN/m), no product source"
+  },
+  "Sefar-Tenara-4T40HF": {
+   "family": "ePTFE",
+   "fw": 80.0,
+   "ff": 80.0,
+   "raw": "4000/4000 N/5cm",
+   "strength_basis": "maximum tensile strength (ASTM D4851)",
+   "tear_N": [
+    798,
+    752
+   ],
+   "tear_method": "ASTM D4851 trapezoidal",
+   "weight_gm2": 1080,
+   "t_mm": 0.55,
+   "roll_width_mm": 1575,
+   "fire": "EN 13501 B-s1,d0; ASTM E84 Class A; NFPA 701 small scale",
+   "light_transmission_pct": 38,
+   "coating": "100 % fluoropolymer",
+   "status": "datasheet",
+   "source": "SEFAR Architecture TENARA Fabric 4T40HF technical datasheet (transmission 38 % ASTM D1003)",
+   "source_url": "https://www.birdair.com/files/specifications/Sefar_TENARA_Specs_4T40HF_en.pdf"
+  },
+  "PTFE-fabric-coated-0": {
+   "family": "ePTFE",
+   "fw": 30.0,
+   "ff": 32.0,
+   "fk_w": 30.0,
+   "fk_f": 32.0,
+   "raw": "1500/1600 N/5cm",
+   "strength_basis": "5 % fractile at 23 °C (EN ISO 13934-1)",
+   "weight_gm2": 250,
+   "tear_N": [
+    390,
+    390
+   ],
+   "fire": "B-s1,d0",
+   "seam_eff_23C": 0.9,
+   "status": "class-table",
+   "source": "JRC132615 (2023) Eurocode Outlook No. 11/12, fluoropolymer-coated PTFE fabric Type 0 (also 50/70 °C values there)",
+   "source_url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
+  },
+  "PTFE-fabric-coated-I": {
+   "family": "ePTFE",
+   "fw": 48.0,
+   "ff": 52.0,
+   "fk_w": 48.0,
+   "fk_f": 52.0,
+   "raw": "2400/2600 N/5cm",
+   "strength_basis": "5 % fractile at 23 °C (EN ISO 13934-1)",
+   "weight_gm2": 340,
+   "tear_N": [
+    700,
+    700
+   ],
+   "fire": "B-s1,d0",
+   "seam_eff_23C": 0.9,
+   "status": "class-table",
+   "source": "JRC132615 (2023) Eurocode Outlook No. 11/12, fluoropolymer-coated PTFE fabric Type I (also 50/70 °C values there)",
+   "source_url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
+  },
+  "PTFE-fabric-coated-II": {
+   "family": "ePTFE",
+   "fw": 80.0,
+   "ff": 80.0,
+   "fk_w": 80.0,
+   "fk_f": 80.0,
+   "raw": "4000/4000 N/5cm",
+   "strength_basis": "5 % fractile at 23 °C (EN ISO 13934-1)",
+   "weight_gm2": 1100,
+   "tear_N": [
+    1000,
+    1000
+   ],
+   "fire": "B-s1,d0",
+   "seam_eff_23C": 0.9,
+   "status": "class-table",
+   "source": "JRC132615 (2023) Eurocode Outlook No. 11/12, fluoropolymer-coated PTFE fabric Type II (also 50/70 °C values there)",
+   "source_url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
+  },
+  "ETFE-200um": {
+   "family": "ETFE",
+   "fw": 4.2,
+   "ff": 4.2,
+   "t_mm": 0.2,
+   "fy10_MPa": 21.0,
+   "fy1_MPa": 20.0,
+   "E_MPa": 660,
+   "weight_gm2": 350,
+   "strength_basis": "fw = f_y10,23 × t (10 % strain stress, NOT UTS)",
+   "status": "typical",
+   "source": "JRC132615 Eurocode Outlook 44 recommended f_y10,23 = 21 MPa (no tests); first yield ≈ 20 MPa, E ≈ 660 MPa (IASS 2024 P237 / tensiletechnic); density 1.75 g/cm3 (Nowoflon)",
+   "source_url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
+  },
+  "ETFE-250um": {
+   "family": "ETFE",
+   "fw": 5.25,
+   "ff": 5.25,
+   "t_mm": 0.25,
+   "fy10_MPa": 21.0,
+   "fy1_MPa": 20.0,
+   "E_MPa": 660,
+   "weight_gm2": 438,
+   "strength_basis": "fw = f_y10,23 × t (10 % strain stress, NOT UTS)",
+   "status": "typical",
+   "source": "JRC132615 Eurocode Outlook 44 recommended f_y10,23 = 21 MPa (no tests); first yield ≈ 20 MPa, E ≈ 660 MPa (IASS 2024 P237 / tensiletechnic); density 1.75 g/cm3 (Nowoflon)",
+   "source_url": "https://publications.jrc.ec.europa.eu/repository/bitstream/JRC132615/JRC132615_01.pdf"
+  },
+  "Nowoflon-ET6235Z-200um": {
+   "family": "ETFE",
+   "fw": 4.6,
+   "ff": 4.6,
+   "t_mm": 0.2,
+   "fy10_MPa": 23.0,
+   "fu_MPa": 50.0,
+   "E_MPa": 1000,
+   "elongation_pct": 500,
+   "tear_N_per_mm": 500,
+   "weight_gm2": 350,
+   "density_gcm3": 1.75,
+   "light_transmission_pct": 91,
+   "fire": "DIN 4102 B1 (Nowoflon ET technical information)",
+   "strength_basis": "fw = stress at 10 % strain × t (datasheet mean, DIN EN ISO 527 MD/TD)",
+   "thickness_range_um": [
+    80,
+    400
+   ],
+   "roll_width_mm": 1550,
+   "status": "datasheet",
+   "source": "NOWOFOL NOWOFLON ET 6235 Z technical datasheet (tensile 50 MPa, strain at break 500 %, 23 MPa at 10 % strain, modulus 1000 MPa 0.05-1 %, tear 500 N/mm DIN 53363, LT > 91 % EN 410, 350 g/m2 at 200 µm); roll 1550 mm from earlier search excerpt",
+   "source_url": "https://www.buitink-technology.com/pdf/Nowoflon_ET_6235%20Z.pdf"
   }
+ },
+ "family_defaults": {
+  "PES/PVC": {
+   "Et_w": 800,
+   "Et_f": 600,
+   "nu": 0.4,
+   "comp_warp_pct": "0.5-1.5",
+   "comp_weft_pct": "1.0-3.5",
+   "prestress_kN_m": "1.0-4.0",
+   "seam_eff": "0.80-0.90",
+   "status": "typical",
+   "fire_EN13501": "B-s2,d0",
+   "translucency_pct": [
+    0,
+    20
+   ],
+   "life_years": [
+    15,
+    25
+   ],
+   "foldable": true,
+   "self_cleaning": "with PVDF/fluoro top-coat",
+   "cost_index": 1.0,
+   "fire_note": "Euroclass B-s2,d0 typical for FR grades; some datasheets print C-s2,d0 (Ferrari 1302/1502 S2) - check the product report"
+  },
+  "glass/PTFE": {
+   "Et_w": 1400,
+   "Et_f": 1000,
+   "nu": 0.5,
+   "comp_warp_pct": "0-0.5",
+   "comp_weft_pct": "1.0-4.0",
+   "prestress_kN_m": "2.0-8.0 (heavy grades 6-8)",
+   "seam_eff": "0.70-0.80",
+   "status": "typical",
+   "fire_EN13501": "A2-s1,d0",
+   "translucency_pct": [
+    12,
+    25
+   ],
+   "life_years": [
+    25,
+    35
+   ],
+   "foldable": false,
+   "self_cleaning": "yes",
+   "cost_index": 3.0,
+   "fire_note": "A2-s1,d0 / DIN 4102 A2 / ASTM E136 substrate; Japan: non-combustible certification (Chukoh NM-8665)"
+  },
+  "glass/silicone": {
+   "Et_w": 1000,
+   "Et_f": 800,
+   "nu": 0.5,
+   "status": "typical",
+   "fire_EN13501": "B-s1,d0",
+   "translucency_pct": [
+    20,
+    40
+   ],
+   "life_years": [
+    20,
+    30
+   ],
+   "foldable": false,
+   "self_cleaning": "dirt pick-up without top-coat",
+   "cost_index": 2.0,
+   "fire_note": "some products A2 (check the classification report)"
+  },
+  "ePTFE": {
+   "Et_w": 300,
+   "Et_f": 300,
+   "nu": 0.4,
+   "status": "typical (low stiffness, foldable)",
+   "fire_EN13501": "B-s1,d0",
+   "translucency_pct": [
+    15,
+    40
+   ],
+   "life_years": [
+    20,
+    30
+   ],
+   "foldable": true,
+   "self_cleaning": "yes",
+   "cost_index": 4.0,
+   "fire_note": "Tenara 4T40HF B-s1,d0 (datasheet); JRC Outlook 12 B-s1,d0"
+  },
+  "ETFE": {
+   "Et_w": 132,
+   "Et_f": 132,
+   "nu": 0.42,
+   "prestress_kN_m": "cushions: pressure-governed",
+   "status": "typical (E·t at 200 µm)",
+   "fire_EN13501": "B-s1,d0",
+   "translucency_pct": [
+    88,
+    95
+   ],
+   "life_years": [
+    30,
+    40
+   ],
+   "foldable": false,
+   "self_cleaning": "yes",
+   "cost_index": 3.0
+  }
+ }
 }
