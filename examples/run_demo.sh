@@ -79,6 +79,9 @@ python3 "$S/tensile-connections/scripts/steel_joint_checks.py" anchor --n1 2 --n
         --c2 400 --hef 250 --d 24 --N 60 --V 25 --h 600
 python3 "$S/tensile-connections/scripts/steel_joint_checks.py" gusset --help | head -3
 python3 "$S/steel-supports/scripts/foundation_check.py" block --B 2.5 --L 2.5 --D 1.5 --V 60 --H 45 --ha 0.3 --mu 0.45 --qRd 200
+python3 "$S/steel-supports/scripts/foundation_check.py" helical --T 10 --pull 90 --sensitivity
+python3 "$S/steel-supports/scripts/frame2d.py" arch --L 20 --f 4 --n 40 --shape circular --section CHS:219.1x8 \
+        --p-normal 3.5 | sed -n 1p
 
 echo; echo "== 7. Patterns, GA DXF and steel part drawings =="
 python3 "$S/fabrication-drawings/scripts/cutting_pattern.py" sail.json --panels-along v --strip 2 --seams geodesic \
@@ -102,8 +105,27 @@ python3 "$S/fabrication-drawings/scripts/nest_panels.py" multibay_patterns.json 
 echo "-- DXF check of every file written so far (structure, layers, \$INSUNITS = mm) --"
 python3 "$S/fabrication-drawings/scripts/dxf_reader.py" --units-mm *.dxf | tail -3
 
+echo; echo "== 8b. Code systems: US (ASCE 7 / AISC 360 / ASCE 55 / ACI 318) and Saudi (SBC) =="
+python3 "$S/tensile-structures/scripts/loads.py" combos --code SA --set uls
+python3 "$S/tensile-structures/scripts/loads.py" wind --code SA --V 50 --exposure C --z 4
+python3 "$S/tensile-structures/scripts/loads.py" wind --code US --V 50 --exposure C --z 4
+python3 "$S/membrane-fabric/scripts/membrane_check.py" --material PVC-III --nw 7.4 --nf 7.4 --case wind --code SA | tail -3
+python3 "$S/steel-supports/scripts/member_check.py" --section CHS:168.3x8 --L 6 --N 260 --My 6 --code SA --sensitivity \
+        | sed -n '/check/,/sensitivity/p'
+# ASD uses service-level (unfactored) forces
+python3 "$S/steel-supports/scripts/member_check.py" --section CHS:168.3x8 --L 6 --N 175 --My 4 --code US --method ASD \
+        | grep -E "interaction|Governing"
+python3 "$S/tensile-connections/scripts/steel_joint_checks.py" anchor --n1 2 --n2 2 --s1 200 --s2 200 --c1 400 \
+        --c2 400 --hef 250 --d 24 --N 60 --code US | tail -4
+
+python3 "$S/steel-supports/scripts/frame2d.py" arch --L 20 --f 4 --n 20 --section CHS:219.1x8 --q 3.5 --check \
+        --Lz 5 --code SA | sed -n '/member checks/,$p'
+python3 "$S/tensile-connections/scripts/steel_joint_checks.py" baseplate --col CHS --D 168.3 --tc 8 --B 350 --H 350 \
+        --tp 25 --Nc 300 --Nt 60 --V 25 --anchors 4 --anchor-d 20 --edge 55 --code SA | tail -7
+python3 "$S/tensile-connections/scripts/fatigue_check.py" --code US --aisc-cat E --spectrum 40:1e6 --spectrum 25:5e6
+
 echo; echo "== 9. Calculation report =="
 python3 "$S/tensile-structures/scripts/report.py" --title "Demo sail" --model sail.json --cases sail_cases_envelope.json \
-        --material PVC-III --cables sail_cables.csv --patterns sail_patterns.csv --out sail_report
+        --material PVC-III --method partial --cables sail_cables.csv --patterns sail_patterns.csv --out sail_report
 
 echo; echo "Done. Files in $OUT:"; ls -1 "$OUT"

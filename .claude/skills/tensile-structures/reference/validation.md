@@ -17,3 +17,14 @@ the whole chain: whatever solver is used, the supports must carry exactly the ap
 
 The per-skill validations (closed-form solutions, published worked examples, the standards' own numbers) are in each
 skill's `reference/validation.md`. `python3 scripts/validate_all.py --run-tests` prints the current matrix.
+
+## `loads.py` (code systems EU / US / SA; merged from the code-systems branch)
+
+| Tool | Case | Reference | Expected | Obtained | Tolerance | Test |
+|---|---|---|---|---|---|---|
+| `loads.py combos` | ASCE 7-22 LRFD | ASCE 7-22 2.3.1 | 0.9D+1.0W; 1.2D+1.0S+0.5W | exact | exact | `test_tools` (combos) |
+| `loads.py combos` | SBC 301-18 | SBC 301-18 (no snow) | no S term | exact | exact | same |
+| `loads.py combos` | EN 1990 | EN 1990 Table A1.2(B), ψ0,W = 0.6 | 1.35G+1.5S+0.9W | exact | exact | same |
+| `loads.py combos --set membrane` | ASCE 55 β | ASCE 55-10 Table 4-2 | 0.33 (P+D+W), 0.17 (P+D) | exact | exact | same |
+| `loads.py wind` | ASCE 7-22 K_z, exposure B, 100 ft; ASCE 7-16 exposure C, 20 ft | ASCE 7 Table 26.10-1 | 0.95, 0.90 | within 0.01 | 0.01 | `test_tools` (wind) |
+| `loads.py wind` | EN 1991-1-4 peak pressure | EN 1991-1-4 eq. 4.8 | q_p closed form | within 0.005 kN/m² | 0.005 | same |

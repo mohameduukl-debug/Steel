@@ -43,6 +43,14 @@ import member_check as MC  # noqa: E402
 def e0_elastic(curve):
     """EN 1993-1-1 Table 5.1 bow imperfection e0/L for elastic analysis (register steel.e0_elastic)."""
     return CF.get("steel.e0_elastic")[curve]
+# Classical in-plane buckling of uniform parabolic arches under uniform load per horizontal metre:
+# q_cr = γ·EI/L³ (Timoshenko & Gere, Theory of Elastic Stability, after Dinnik). Used only as a cross-check:
+# frame2d itself reproduces exact ring and circular-arch solutions; against this table it differs by −0.5 … +8 %,
+# so arch designs use the lower of the two α_cr values.
+CLASSICAL_PARABOLIC = {"pinned": {0.1: 28.5, 0.2: 45.4, 0.3: 46.5, 0.4: 43.9, 0.5: 38.4},
+                       "fixed": {0.1: 60.7, 0.2: 101.0, 0.3: 115.0, 0.4: 111.0, 0.5: 97.4}}
+
+E0_ELASTIC = {"a0": 1 / 350, "a": 1 / 300, "b": 1 / 250, "c": 1 / 200, "d": 1 / 150}  # EN 1993-1-1 Table 5.1
 
 
 # ------------------------------------------------------------ banded solver
@@ -143,6 +151,7 @@ class Frame:
         self.members = {}    # name -> dict(section, fy, elems=[...], sec=Section)
         self.nodal = {}      # node -> [fx, fy, m]
         self.udl = []        # (elem index, qx_global, qy_global) per unit length
+        self.pressure = []   # (elem index, pn) FOLLOWER load per unit length along the left normal of a->b
 
     def add_member(self, name, node_ids, section=None, fy=355.0, A=None, I=None, E=None, truss=False):
         E = E or CF.get("steel.E") * 1e-3  # kN/mm2 -> we use kN, m: E in kN/m2 below
@@ -176,7 +185,17 @@ class Frame:
         L = math.hypot(dx, dy)
         return L, dx / L, dy / L
 
-    def assemble(self, dmap, n, Nax=None, geo_only=False, factor_geo=1.0):
+    def follower_terms(self, ei, pn):
+        """dF_ext/dU of a follower pressure on element ei: f_a = f_b = (pn/2)·(−Δy, Δx) (lumped part)."""
+        (a, b) = self.elems[ei]["n"]
+        h = pn / 2
+        out = []
+        for row_node in (a, b):
+            out += [((row_node, 0), (a, 1), h), ((row_node, 0), (b, 1), -h),
+                    ((row_node, 1), (a, 0), -h), ((row_node, 1), (b, 0), h)]
+        return out
+
+    def assemble(self, dmap, n, Nax=None, geo_only=False, factor_geo=1.0, follower=0.0):
         bw = 0
         for e in self.elems:
             ids = [dmap.get((v, d)) for v in e["n"] for d in range(3)]
@@ -205,6 +224,12 @@ class Frame:
                 for j in range(6):
                     if dofs[j] is not None:
                         K.add(dofs[i], dofs[j], kg[i][j])
+        if follower:
+            # tangent of loads that follow the deformation: K_t = K − dF_ext/dU (non-symmetric)
+            for ei, pn in self.pressure:
+                for r, c, v in self.follower_terms(ei, pn):
+                    if r in dmap and c in dmap:
+                        K.add(dmap[r], dmap[c], -follower * v)
         return K
 
     def load_vector(self, dmap, n, extra=None):
@@ -220,6 +245,14 @@ class Frame:
             qa = qx * c + qy * s
             qt = -qx * s + qy * c
             fl = [qa * L / 2, qt * L / 2, qt * L * L / 12, qa * L / 2, qt * L / 2, -qt * L * L / 12]
+            T = rot(c, s)
+            fg = [sum(T[m][i] * fl[m] for m in range(6)) for i in range(6)]
+            for k, (v, d) in enumerate((v, d) for v in e["n"] for d in range(3)):
+                full[(v, d)] = full.get((v, d), 0.0) + fg[k]
+        for (ei, pn) in self.pressure:
+            e = self.elems[ei]
+            L, c, s = self.geom(e)
+            fl = [0.0, pn * L / 2, pn * L * L / 12, 0.0, pn * L / 2, -pn * L * L / 12]
             T = rot(c, s)
             fg = [sum(T[m][i] * fl[m] for m in range(6)) for i in range(6)]
             for k, (v, d) in enumerate((v, d) for v in e["n"] for d in range(3)):
@@ -257,6 +290,10 @@ class Frame:
                     qt = -qx * s + qy * c
                     fe = [qa * L / 2, qt * L / 2, qt * L * L / 12, qa * L / 2, qt * L / 2, -qt * L * L / 12]
                     f = [f[i] - fe[i] for i in range(6)]
+            for (eu, pn) in self.pressure:
+                if eu == ei:
+                    fe = [0.0, pn * L / 2, pn * L * L / 12, 0.0, pn * L / 2, -pn * L * L / 12]
+                    f = [f[i] - fe[i] for i in range(6)]
             N = f[3]  # tension positive (force on end 2 along local x)
             out.append({"N": N, "V1": f[1], "M1": -f[2], "M2": f[5], "L": L})
         return out
@@ -270,11 +307,13 @@ class Frame:
         return dmap, u, self.element_forces(dmap, u)
 
     def buckling(self, forces, iters=400, tol=1e-9):
-        """smallest positive λ with det(K + λ K_G(N)) = 0 via inverse (power) iteration on K^-1(-K_G)."""
+        """smallest positive λ with det(K + λ (K_G(N) − K_P)) = 0 via inverse (power) iteration on K^-1(-K_G).
+
+        K_P = dF/dU of follower pressures (self.pressure); dead loads (nodal, udl) keep their direction."""
         dmap, n = self.dof_map()
         Nax = [f["N"] for f in forces]
         K = self.assemble(dmap, n).factor()
-        KG = self.assemble(dmap, n, Nax=Nax, geo_only=True)
+        KG = self.assemble(dmap, n, Nax=Nax, geo_only=True, follower=1.0)
 
         def op(x):
             return K.solve([-v for v in KG.matvec(x)])
@@ -313,7 +352,7 @@ class Frame:
             dmap, u, forces = self.linear()
             for _ in range(iters):
                 Nax = [f["N"] for f in forces]
-                K = self.assemble(dmap, len(u), Nax=Nax).factor()
+                K = self.assemble(dmap, len(u), Nax=Nax, follower=1.0).factor()
                 F, _ = self.load_vector(dmap, len(u))
                 u2 = K.solve(F)
                 f2 = self.element_forces(dmap, u2, Nax)
@@ -352,7 +391,7 @@ class Frame:
 
 
 # ------------------------------------------------------------ generators
-def gen_arch(L, f, n, section, fy, supports, q, shape="parabolic", P=None):
+def gen_arch(L, f, n, section, fy, supports, q, shape="parabolic", P=None, p_normal=0.0):
     fr = Frame()
     if shape == "circular":
         R = (L * L / 4 + f * f) / (2 * f)
@@ -373,6 +412,11 @@ def gen_arch(L, f, n, section, fy, supports, q, shape="parabolic", P=None):
             L_e = math.hypot(fr.nodes[b][0] - fr.nodes[a][0], fr.nodes[b][1] - fr.nodes[a][1])
             proj = abs(fr.nodes[b][0] - fr.nodes[a][0]) / L_e
             fr.udl.append((ei, 0.0, -q * proj))  # q per horizontal metre, downward
+    if q and shape == "parabolic" and not P and not p_normal:
+        fr.classical = {"L": L, "f_L": f / L, "supports": supports, "q": q}
+    if p_normal:
+        # nodes run left -> right over the crown, so the left normal points outward: inward pressure = −pn
+        fr.pressure = [(ei, -p_normal) for ei in range(n)]
     if P:
         for (node, fx, fy_) in P:
             fr.nodal[node] = [fx, fy_, 0.0]
@@ -419,6 +463,9 @@ def from_json(d):
             L_e = math.hypot(fr.nodes[b][0] - fr.nodes[a][0], fr.nodes[b][1] - fr.nodes[a][1])
             proj = abs(fr.nodes[b][0] - fr.nodes[a][0]) / L_e if u.get("per_horizontal") else 1.0
             fr.udl.append((ei, u.get("qx", 0.0) * proj, u.get("qy", 0.0) * proj))
+    for pr in d.get("loads", {}).get("pressure", []):
+        sign = 1.0 if pr.get("side", "left") == "left" else -1.0
+        fr.pressure += [(ei, sign * pr["p"]) for ei in fr.members[pr["member"]]["elems"]]
     return fr
 
 
@@ -431,6 +478,36 @@ def member_summary(fr, forces):
                      "M_max": max(max(abs(f["M1"]), abs(f["M2"])) for f in fs),
                      "V_max": max(abs(f["V1"]) for f in fs), "L": sum(f["L"] for f in fs)}
     return out
+
+
+def design_aisc(fr, lin, sec_order, alpha, members=None, Lz=None, code="US", method="LRFD"):
+    """AISC 360-22 / SBC 306: (a) effective-length method (L_c from α_cr, first-order M with B1);
+    (b) direct analysis method (C2/C3: second-order M with 0.8EI and a 1/500 mode-shaped imperfection, K = 1 on
+        the physical member length). The effective-length method needs α_cr ≥ 3 (Δ2nd/Δ1st ≤ 1.5, App. 7)."""
+    import aisc_member as AM
+    E = CF.get("steel.E")
+    rows = []
+    mast = [n for n in fr.members if n.startswith("M") and n[1:].isdigit() and not fr.members[n]["truss"]]
+    Lphys = sum(lin[n]["L"] for n in mast) if len(mast) > 1 else None
+    for name, m in fr.members.items():
+        if m["truss"] or not m["section"] or (members and name not in members):
+            continue
+        s1, s2 = lin[name], sec_order[name]
+        sec = m["sec"]
+        Lm = s1["L"]
+        NEd = max(-s1["N_min"], 0.0)
+        Lcr = (math.pi * math.sqrt(E * sec.Iy / (alpha * NEd * 1e3)) / 1000) if NEd > 0 and alpha < math.inf else Lm
+        kz = Lz / Lm if Lz else 1.0
+        r1, _ = AM.check(sec, m["fy"], Lm, NEd, s1["M_max"], 0.0, s1["V_max"], 0.0, Kx=Lcr / Lm, Ky=kz,
+                         code=code, method=method)
+        # DAM (AISC C2/C3): K = 1 on the PHYSICAL member length (a mast split into M00…Mnn is one member)
+        kx_dam = (Lphys / Lm) if Lphys else 1.0
+        r2, _ = AM.check(sec, m["fy"], Lm, max(-s2["N_min"], 0.0), s2["M_max"], 0.0, s2["V_max"], 0.0, Kx=kx_dam,
+                         Ky=kz, code=code, method=method, second_order=True)
+        rows.append({"member": name, "section": m["section"], "N_Ed": NEd, "M1": s1["M_max"], "M2": s2["M_max"],
+                     "Lcr_inplane": Lcr, "util_equiv_column": max(d / c for _, d, c, _ in r1),
+                     "util_second_order_section": max(d / c for _, d, c, _ in r2), "class": None})
+    return rows
 
 
 def design(fr, lin, sec_order, alpha, members=None, Lz=None):
@@ -465,9 +542,28 @@ def design(fr, lin, sec_order, alpha, members=None, Lz=None):
     return rows
 
 
-def run(fr, check=False, imp_curve=None, Lz=None, quiet=False):
+def classical_alpha(fr):
+    """α_cr from the classical parabolic-arch table (interpolated in f/L), or None outside its scope."""
+    c = getattr(fr, "classical", None)
+    if not c:
+        return None
+    tab = CLASSICAL_PARABOLIC[c["supports"]]
+    ks = sorted(tab)
+    if not ks[0] <= c["f_L"] <= ks[-1]:
+        return None
+    for k0, k1 in zip(ks[:-1], ks[1:]):
+        if k0 <= c["f_L"] <= k1:
+            gam = tab[k0] + (tab[k1] - tab[k0]) * (c["f_L"] - k0) / (k1 - k0)
+            break
+    e = fr.elems[0]
+    return gam * e["E"] * e["I"] / c["L"] ** 3 / c["q"]
+
+
+def run(fr, check=False, imp_curve=None, Lz=None, quiet=False, code="EU", method="LRFD"):
     dmap, u, f1 = fr.linear()
-    lam, mode = fr.buckling(f1)
+    lam_fe, mode = fr.buckling(f1)
+    lam_cl = classical_alpha(fr)
+    lam = min(lam_fe, lam_cl) if lam_cl else lam_fe
     s1 = member_summary(fr, f1)
     # mode-shaped imperfection: amplitude e0·L of the longest compressed member (Table 5.1 elastic)
     comp = [(n, m) for n, m in s1.items() if m["N_min"] < 0 and not fr.members[n]["truss"]]
@@ -478,17 +574,34 @@ def run(fr, check=False, imp_curve=None, Lz=None, quiet=False):
         curve = sec.curves(fr.members[name]["fy"])[0] if sec else "c"
     Lref = sum(m["L"] for n, m in comp) if len(comp) > 1 and all(n.startswith("M") for n, _ in comp) else \
         (max(m["L"] for _, m in comp) if comp else 1.0)
-    amp = e0_elastic(curve or "c") * Lref
+    if code == "EU":
+        amp = e0_elastic(curve or "c") * Lref
+    else:   # AISC C2.2a system imperfection 1/500, shaped as the buckling mode
+        amp = CF.get("aisc.imperfection_ratio") * Lref
+        curve = "AISC C2.2a 1/500"
     mx = max((abs(v) for (node, d), v in mode.items() if d < 2), default=1.0) or 1.0
     imp = {k: v / mx * amp for k, v in mode.items() if k[1] < 2}
-    _, u2, f2 = fr.second_order(imp)
+    if code != "EU":   # AISC C2.3 reduced stiffness for the second-order (direct analysis) run
+        red = CF.get("aisc.dam_stiffness")
+        saved_E = [e["E"] for e in fr.elems]
+        for e in fr.elems:
+            e["E"] *= red
+        try:
+            _, u2, f2 = fr.second_order(imp)
+        finally:
+            for e, E_ in zip(fr.elems, saved_E):
+                e["E"] = E_
+    else:
+        _, u2, f2 = fr.second_order(imp)
     s2 = member_summary(fr, f2)
     R = fr.reactions(dmap, u)
-    res = {"alpha_cr": lam, "first_order": s1, "second_order": s2, "reactions": R,
+    res = {"alpha_cr": lam, "alpha_cr_fe": lam_fe, "alpha_cr_classical": lam_cl, "first_order": s1, "second_order": s2, "reactions": R,
            "imperfection": {"curve": curve, "amplitude_m": amp},
            "max_disp_m": max((abs(v) for v in u), default=0.0)}
+    res["code"] = code
     if check:
-        res["design"] = design(fr, s1, s2, lam, Lz=Lz)
+        res["design"] = (design(fr, s1, s2, lam, Lz=Lz) if code == "EU" else
+                         design_aisc(fr, s1, s2, lam, Lz=Lz, code=code, method=method))
     if not quiet:
         report(fr, res)
     return res
@@ -509,11 +622,16 @@ def report(fr, res):
     a = res["alpha_cr"]
     lim = CF.get("steel.alpha_cr_min_elastic")
     print(ASSUMPTIONS)
+    if res.get("alpha_cr_classical"):
+        print(f"α_cr: FE {res['alpha_cr_fe']:.2f}, classical parabolic-arch table {res['alpha_cr_classical']:.2f} "
+              f"(Timoshenko & Gere) -> design uses the lower value")
     print(f"Elastic critical load factor α_cr = {a:.2f}  "
           + (f"(≥ {lim:g}: first-order analysis adequate, EN 1993-1-1 5.2.1)" if a >= lim else
              f"(< {lim:g}: second-order effects must be included)"))
-    print(f"Imperfection for 2nd order: buckling-mode shape, amplitude {res['imperfection']['amplitude_m'] * 1000:.1f} mm "
-          f"(e0 curve {res['imperfection']['curve']}, EN 1993-1-1 Table 5.1 elastic)")
+    imp = res["imperfection"]
+    print(f"Imperfection for 2nd order: buckling-mode shape, amplitude {imp['amplitude_m'] * 1000:.1f} mm ("
+          + (f"e0 curve {imp['curve']}, EN 1993-1-1 Table 5.1 elastic)" if res.get("code", "EU") == "EU"
+             else f"{imp['curve']}; second-order run with 0.8EI)"))
     print(f"\n{'member':<10}{'N_min 1st':>11}{'N_min 2nd':>11}{'M 1st':>9}{'M 2nd':>9}{'V max':>9}  [kN, kNm]")
     for name in fr.members:
         a1, a2 = res["first_order"][name], res["second_order"][name]
@@ -524,13 +642,28 @@ def report(fr, res):
     for node, r in res["reactions"].items():
         print(f"  node {node:>3}: Rx={r[0]:9.2f} Ry={r[1]:9.2f} Mz={r[2]:9.2f}")
     if "design" in res:
-        print(f"\nEN 1993-1-1 member checks (factors {CF.tag('steel.gM0')}, {CF.tag('steel.gM1')})")
-        print(f"{'member':<10}{'section':<18}{'L_cr,y [m]':>11}{'equiv. column':>15}{'2nd-order sect.':>17}")
+        if res.get("code", "EU") == "EU":
+            print(f"\nEN 1993-1-1 member checks (factors {CF.tag('steel.gM0')}, {CF.tag('steel.gM1')})")
+            print(f"{'member':<10}{'section':<18}{'L_cr,y [m]':>11}{'equiv. column':>15}{'2nd-order sect.':>17}")
+        else:
+            std = "SBC 306 (AISC based, LRFD, φc 0.85 [U])" if res["code"] == "SA" else "AISC 360-22"
+            print(f"\n{std} member checks: effective-length method | direct analysis "
+                  f"(0.8EI [{CF.status('aisc.dam_stiffness')}], 1/500 imperfection, K = 1 on the member)")
+            print(f"{'member':<10}{'section':<18}{'L_c,x [m]':>11}{'eff. length':>15}{'direct anal.':>17}")
         worst = 0.0
+        aisc_code = res.get("code", "EU") != "EU"
         for r in res["design"]:
-            worst = max(worst, r["util_equiv_column"], r["util_second_order_section"])
+            if aisc_code:   # both are AISC methods: ELM allowed only if α_cr ≥ 3 (App. 7); DAM always
+                u = (min(r["util_equiv_column"], r["util_second_order_section"]) if res["alpha_cr"] >= 3
+                     else r["util_second_order_section"])
+                worst = max(worst, u)
+            else:
+                worst = max(worst, r["util_equiv_column"], r["util_second_order_section"])
             print(f"{r['member']:<10}{r['section']:<18}{r['Lcr_inplane']:11.2f}{r['util_equiv_column']:15.2f}"
                   f"{r['util_second_order_section']:17.2f}")
+        if aisc_code:
+            print("Governing = lower of the two AISC methods" + ("" if res["alpha_cr"] >= 3 else
+                  " — α_cr < 3: effective-length method NOT permitted, direct analysis governs"))
         print(f"Governing utilisation {worst:.2f} -> {'OK' if worst <= 1 else 'NOT OK'}")
 
 
@@ -546,6 +679,9 @@ def main(argv=None):
     ap.add_argument("--fy", type=float, default=355.0)
     ap.add_argument("--supports", choices=["pinned", "fixed"], default="pinned")
     ap.add_argument("--q", type=float, default=0.0, help="arch: load per horizontal metre, downward [kN/m]")
+    ap.add_argument("--p-normal", type=float, default=0.0,
+                    help="arch: FOLLOWER pressure normal to the arch, + toward the centre of curvature [kN/m] "
+                         "(membrane/wind pressure that turns with the arch)")
     ap.add_argument("--H", type=float, default=12.0, help="mast height [m]")
     ap.add_argument("--D-base", type=float, default=219.1)
     ap.add_argument("--D-mid", type=float, default=219.1)
@@ -557,6 +693,8 @@ def main(argv=None):
     ap.add_argument("--guy", action="append", default=[], help="guy 'dx:EA' (anchor offset m, EA kN)")
     ap.add_argument("--Lz", type=float, default=None, help="out-of-plane buckling length [m]")
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--code", choices=CF.CODES, default=None, help="member design: EU (EN 1993-1-1) | US (AISC 360) | SA (SBC 306)")
+    ap.add_argument("--method", choices=["LRFD", "ASD"], default="LRFD", help="US: LRFD or ASD (SA: LRFD only)")
     ap.add_argument("--factors", default=None)
     ap.add_argument("--out", default=None)
     a = ap.parse_args(argv)
@@ -566,13 +704,13 @@ def main(argv=None):
         with open(a.input) as fh:
             fr = from_json(json.load(fh))
     elif a.kind == "arch":
-        fr = gen_arch(a.L, a.f, a.n, a.section, a.fy, a.supports, a.q, a.shape)
+        fr = gen_arch(a.L, a.f, a.n, a.section, a.fy, a.supports, a.q, a.shape, p_normal=a.p_normal)
     elif a.kind == "mast":
         guys = [tuple(map(float, g.split(":"))) for g in a.guy]
         fr = gen_mast(a.H, a.n, a.D_base, a.D_mid, a.D_top, a.t, a.fy, a.base, a.N, a.Hlat, guys)
     else:
         ap.error("give arch | mast | --input")
-    res = run(fr, a.check, Lz=a.Lz)
+    res = run(fr, a.check, Lz=a.Lz, code=CF.code(a.code), method=a.method)
     if a.out:
         with open(a.out + ".json", "w") as fh:
             json.dump({k: v for k, v in res.items() if k != "reactions"} | {"reactions": {str(k): v for k, v in res["reactions"].items()}},

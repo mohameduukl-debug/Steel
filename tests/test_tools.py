@@ -50,6 +50,8 @@ cut = load("fabrication-drawings", "cutting_pattern")
 dxfw = load("fabrication-drawings", "dxf_writer")
 nestm = load("fabrication-drawings", "nest_panels")
 msel = load("membrane-fabric", "material_select")
+loads = load("tensile-structures", "loads")
+aisc = load("steel-supports", "aisc_member")
 CF = load("tensile-structures", "factors")
 prec = load("connection-precedents", "precedent_search")
 pfetch = load("connection-precedents", "pinterest_fetch")
@@ -361,6 +363,54 @@ class TestFrame2D(unittest.TestCase):
             lam, _ = fr.buckling(fo)
             self.assertAlmostEqual(lam * 30 ** 3 / EI / gam, 1.0, delta=0.04)
 
+    def ring_quarter(self, follower, n=48, R=20.0):
+        # quarter ring with symmetry supports (mode n = 2), inextensible (A × 1e5)
+        fr = frame.Frame()
+        for i in range(n + 1):
+            t = (math.pi / 2) * i / n
+            fr.nodes.append([R * math.sin(t), R * math.cos(t)])
+        fr.supports = {0: (1, 0, 1), n: (0, 1, 1)}
+        fr.add_member("R", list(range(n + 1)), section="CHS:323.9x10", fy=355)
+        for el in fr.elems:
+            el["A"] *= 1e5
+        if follower:
+            fr.pressure = [(ei, -1.0) for ei in range(n)]
+        else:
+            ds = (math.pi / 2) * R / n
+            for i in range(n + 1):
+                t = (math.pi / 2) * i / n
+                w = ds * (0.5 if i in (0, n) else 1.0)
+                fr.nodal[i] = [-math.sin(t) * w, -math.cos(t) * w, 0.0]
+        _, _, fo = fr.linear()
+        lam, _ = fr.buckling(fo)
+        return lam * R ** 3 / (fr.elems[0]["E"] * fr.elems[0]["I"])
+
+    def test_ring_buckling_exact(self):
+        # exact classical ring results: constant-direction pressure 4EI/R³, hydrostatic (follower) 3EI/R³
+        self.assertAlmostEqual(self.ring_quarter(False), 4.0, delta=0.002)
+        self.assertAlmostEqual(self.ring_quarter(True), 3.0, delta=0.002)
+
+    def test_circular_arch_hydrostatic_exact(self):
+        # two-hinged circular arch, uniform hydrostatic pressure: q_cr = (π²/α² − 1)·EI/R³ (Timoshenko & Gere)
+        R = 20.0
+        for deg in (30, 60, 90):
+            al = math.radians(deg)
+            fr = frame.gen_arch(2 * R * math.sin(al), R * (1 - math.cos(al)), 60, "CHS:323.9x10", 355, "pinned",
+                                0.0, shape="circular", p_normal=1.0)
+            for el in fr.elems:
+                el["A"] *= 1e5
+            _, _, fo = fr.linear()
+            lam, _ = fr.buckling(fo)
+            exact = math.pi ** 2 / al ** 2 - 1
+            self.assertAlmostEqual(lam * R ** 3 / (fr.elems[0]["E"] * fr.elems[0]["I"]) / exact, 1.0, delta=1e-3)
+
+    def test_arch_design_uses_lower_alpha(self):
+        res = frame.run(frame.gen_arch(20, 4, 20, "CHS:219.1x8", 355, "pinned", 3.5), quiet=True)
+        self.assertIsNotNone(res["alpha_cr_classical"])
+        self.assertAlmostEqual(res["alpha_cr"], min(res["alpha_cr_fe"], res["alpha_cr_classical"]))
+        EI = self.EI("CHS:219.1x8")
+        self.assertAlmostEqual(res["alpha_cr_classical"], 45.4 * EI / 20 ** 3 / 3.5, places=6)   # f/L = 0.2
+
     def test_second_order_amplification(self):
         # pinned column, midspan point load, N = 0.5 Ncr: M2/M1 = tan(u)/u, u = (π/2)√(N/Ncr)
         fr = frame.gen_mast(8, 16, 219.1, 219.1, 219.1, 8, 355, "pinned", 1.0, 0.0, [])
@@ -459,7 +509,7 @@ class TestSensitivity(unittest.TestCase):
 
     def test_every_unverified_factor_has_a_range(self):
         for path, e in CF.iter_entries():
-            if e["status"] == "U" and "value" in e and isinstance(e["value"], (int, float)):
+            if e["status"] == "U" and not e.get("info"):            # info = edition notes, not a numeric factor
                 self.assertIsNotNone(CF.frange(path), path)
                 lo, hi = CF.frange(path)
                 self.assertLessEqual(lo, hi, path)
@@ -492,6 +542,36 @@ class TestSensitivity(unittest.TestCase):
         res = quiet(fat.cable_sensitivity, spec, "dsC_spiral_socket", 1.35, 1.0, 4.0)
         lo = CF.frange("fatigue_cables.dsC_spiral_socket")[0]
         self.assertAlmostEqual(res[0]["u_lo"], fat.check(spec, lo, 1.35, 1.0, 4.0)[0])
+
+    def test_helical_and_aluminium_sensitivity(self):
+        # K_t and FS are verified (ICC-ES ESR-2794) without an uncertainty range: no sensitivity run, a clear message
+        self.assertIsNone(CF.frange("geotech.helical_Kt_per_m"))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            out, uw = found.helical_sensitivity(12.0, 120.0)
+        self.assertEqual(out, [])
+        self.assertIn("verified register values", buf.getvalue())
+        # aluminium bearing (EN 1999-1-1 Table 8.5) is verified too: the clamp-bar run says so instead of a range
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            joint.main(["clampbar", "--n", "12", "--spacing", "150", "--d", "12", "--t", "10", "--plate", "alu6082",
+                        "--sensitivity"])
+        self.assertIn("aluminium", buf.getvalue())
+        self.assertIn("verified", buf.getvalue())
+
+    def test_report_sensitivity_section(self):
+        rep = load("tensile-structures", "report")
+        tmp = tempfile.mkdtemp()
+        p = os.path.join(tmp, "s")
+        quiet(fdm.main, ["sail4", "--n", "8", "--prestress", "2", "--out", p])
+        cf = os.path.join(tmp, "c.json")
+        with open(cf, "w") as fh:
+            json.dump({"cases": [{"name": "PS"}, {"name": "S", "snow": 0.5, "duration": "long"}]}, fh)
+        quiet(cases.main, [p + ".json", cf, "--out", os.path.join(tmp, "k")])
+        md = quiet(rep.main, ["--model", p + ".json", "--cases", os.path.join(tmp, "k_envelope.json"),
+                              "--material", "PVC-II", "--method", "partial", "--out", os.path.join(tmp, "r")])
+        self.assertIn("## Sensitivity to uncertain factors", md)
+        self.assertIn("`membrane.partial`", md)
 
     def test_schedule_sls_sensitivity(self):
         s = {"cables": [{"id": "C1", "A": 100.0, "E": 160.0, "Fmin": 150.0, "L_stressed": 10.0, "F_SLS": 60.0}]}
@@ -587,6 +667,119 @@ class TestMembraneExtras2(unittest.TestCase):
         self.assertNotIn("Chukoh-FGT-800", [k for k, _ in ok])
         ok, _ = msel.select({"translucency": 80})
         self.assertEqual({v["family"] for _, v in ok}, {"ETFE"})
+
+
+class TestCodeSystems(unittest.TestCase):
+    """EU / US / Saudi code systems: combinations, wind, AISC 360 / SBC 306, ACI 318, ASCE 55."""
+
+    def test_combinations(self):
+        us = {c["name"]: c for c in loads.combos("US", "uls")}
+        self.assertEqual(us["0.9D+1.0W"]["D"], 0.9)
+        self.assertEqual(us["1.2D+1.0S+0.5W"]["S"], 1.0)             # ASCE 7-22: strength-level snow
+        sa = loads.combos("SA", "uls")
+        self.assertTrue(all("S" not in c for c in sa))                # SBC 301-18: no snow
+        eu = {c["name"]: c for c in loads.combos("EU", "uls")}
+        self.assertAlmostEqual(eu["1.35G+1.5S+0.9W"]["W"], 1.5 * 0.6)
+        mem = {c["name"]: c for c in loads.combos("US", "membrane")}
+        self.assertEqual(mem["P+D+0.6W"]["beta"], 0.33)
+        self.assertEqual(mem["P+D"]["beta"], 0.17)
+
+    def test_make_cases(self):
+        spec = {"loads": {"D": {"snow": 0.02}, "S": {"snow": 0.5}, "W_up": {"pressure": 0.6},
+                          "W_down": {"pressure": -0.3}}}
+        out = loads.make_cases(spec, "EU", "uls")
+        c = {x["name"]: x for x in out["cases"]}["1.35G+1.5S+0.9W[W_up]"]
+        self.assertAlmostEqual(c["snow"], 1.35 * 0.02 + 1.5 * 0.5)
+        self.assertAlmostEqual(c["pressure"], 0.9 * 0.6)
+        self.assertEqual(c["duration"], "short")
+
+    def test_wind_en_and_asce(self):
+        # EN 1991-1-4, terrain II, z = 10 m: c_e(z) = 2.35 (Figure 4.2)
+        r = loads.qp_en(25.0, 10.0, "II")
+        self.assertAlmostEqual(r["ce"], 2.35, delta=0.01)
+        self.assertAlmostEqual(r["qp"], 2.35 * 0.5 * 1.25 * 25 ** 2 / 1e3, delta=0.005)
+        # ASCE 7-22 Table 26.10-1: exposure B at 100 ft -> K_z = 0.95; ASCE 7-10/16 Table: C at 20 ft -> 0.90
+        self.assertAlmostEqual(loads.kz_asce(30.48, "B", "22"), 0.95, delta=0.01)
+        self.assertAlmostEqual(loads.kz_asce(6.096, "C", "16"), 0.90, delta=0.01)
+        self.assertAlmostEqual(loads.kz_asce(10.0, "C", "16"), 1.00, delta=0.01)
+        q = loads.q_asce(50.0, 10.0, "C", "16")
+        self.assertAlmostEqual(q["q"], 0.613 * q["Kz"] * 0.85 * 2500 / 1e3)
+
+    def W14x90(self):
+        return memb.Section("I:355.6:368.3:11.18:18.03:15.2")
+
+    def test_aisc_w14x90_manual_values(self):
+        # AISC Manual Table 4-1a: W14x90, Lc = 15 ft, Fy = 50 ksi -> φcPn = 1000 kips (4448 kN)
+        rows, info = aisc.check(self.W14x90(), 345, 4.572, 100.0)
+        self.assertAlmostEqual(info["Pc"] / 4448.2, 1.0, delta=0.015)
+        # W14x90 noncompact flange (F3): φbMn = 574 kip-ft (778.2 kNm) for short Lb
+        rows, info = aisc.check(self.W14x90(), 345, 1.0, 10.0, Mx=100.0)
+        self.assertAlmostEqual(info["Mcx"] / 778.2, 1.0, delta=0.015)
+
+    def test_sbc306_and_asd_factors(self):
+        sec = memb.Section("CHS:219.1x8")
+        _, us = aisc.check(sec, 355, 7.5, 420.0)
+        _, sa = aisc.check(sec, 355, 7.5, 420.0, code="SA")
+        _, asd = aisc.check(sec, 355, 7.5, 420.0, method="ASD")
+        self.assertAlmostEqual(sa["Pc"] / us["Pc"], 0.85 / 0.90)       # SBC 306-18: φc = 0.85
+        self.assertAlmostEqual(asd["Pc"] / us["Pc"], (1 / 1.67) / 0.90)
+        with self.assertRaises(SystemExit):
+            aisc.check(sec, 355, 7.5, 420.0, code="SA", method="ASD")  # SBC 306: LRFD only
+
+    def test_aisc_slender_chs_and_cb(self):
+        sec = memb.Section("CHS:600x5")
+        Ae, _ = aisc.effective_area(sec, 355, 300, 200000)
+        self.assertAlmostEqual(Ae / sec.A, 0.038 * 200000 / (355 * 120) + 2 / 3)   # E7-6
+        self.assertAlmostEqual(aisc.cb_linear(0.0), 12.5 / 7.5)                 # 1.67
+        self.assertAlmostEqual(aisc.cb_linear(-1.0), 12.5 / 5.5)                # 2.27
+
+    def test_aci_anchor_bolts_welds(self):
+        rows, info = joint.anchor_group_aci(2, 2, 200, 200, 400, 400, 250, 24, 45.6, "8.8", 30, 60)
+        self.assertAlmostEqual(info["Nb"], 10 * math.sqrt(30) * 250 ** 1.5 / 1e3)
+        self.assertAlmostEqual(info["Ncbg"], (375 + 200 + 375) ** 2 / (9 * 250 ** 2) * info["Nb"])   # c capped at 1.5h_ef
+        rows, _ = joint.bolts_aisc([(0, 0)], 0, 50, 0, 0, 20, "A325", 15, 490, 45, 0, True)
+        self.assertAlmostEqual(rows[0][2], 0.75 * 372 * math.pi * 100 / 1e3)
+        rows, _ = joint.weld_aisc(100, 90, 200, 6, 0, 0, 482, 2)
+        self.assertAlmostEqual(rows[0][2], 0.75 * 0.6 * 482 * 1.5 * 6)          # θ = 90°: 1.5 × strength
+
+    def test_asce55_membrane(self):
+        al, _ = mem.allowable(112, "asce55", "wind", "PES/PVC")
+        self.assertAlmostEqual(al, 112 * 0.33 * 0.75)
+        al, _ = mem.allowable(112, "asce55", "snow", "PES/PVC", seam="sewn")
+        self.assertAlmostEqual(al, 112 * 0.27 * 0.75 * 0.6)
+        rows = mem.point_utils(8.0, 7.0, 112, 108, "asce55", "wind", "PES/PVC", 0.8)
+        bi = [r for r in rows if r[0].startswith("biaxial")][0]
+        self.assertAlmostEqual(bi[2], 0.8 * 0.33 * 0.75 * 220)
+
+    def test_frame2d_aisc_design(self):
+        fr = frame.gen_mast(6, 24, 168.3, 168.3, 168.3, 8, 355, "pinned", 250, 0.0, [])
+        res = frame.run(fr, check=True, quiet=True, code="US")
+        mid = res["design"][12]
+        self.assertLess(res["alpha_cr"], 3.0)                         # ELM not permitted -> DAM governs
+        self.assertGreaterEqual(mid["util_second_order_section"], mid["util_equiv_column"])   # DAM ≥ column curve
+        self.assertAlmostEqual(res["imperfection"]["amplitude_m"], 6.0 / 500)
+        # ELM member check equals member_check --code US on the same column
+        rows, info = aisc.check(memb.Section("CHS:168.3x8"), 355, 6.0, 250.0)
+        self.assertAlmostEqual(mid["util_equiv_column"], max(d / c for _, d, c, _ in rows), places=6)
+
+    def test_baseplate_aisc_dg1(self):
+        a = type("A", (), dict(col="CHS", D=168.3, B=350.0, H=350.0, tp=25.0, fy=355.0, fck=30.0, A2=None, Nc=300.0,
+                               Nt=0.0, V=0.0, anchors=4, anchor_d=20.0, anchor_grade="8.8"))
+        rows, info = joint.baseplate_aisc(a)
+        self.assertAlmostEqual(info["Pp"], 0.85 * 30 * 350 * 350 / 1e3)                     # J8-1
+        m = (350 - 0.8 * 168.3) / 2
+        self.assertAlmostEqual(info["t_req_c"], m * math.sqrt(2 * 300e3 / (0.9 * 355 * 350 * 350)))   # DG1
+
+    def test_aisc_fatigue_category_c(self):
+        # AISC App. 3, category C at 2·10⁶ cycles: F_SR = (44e8/2e6)^(1/3) = 13.0 ksi = 89.7 MPa
+        u, rows, Fth, FSR, dse = fat.aisc_fatigue([(50.0, 2e6)], "C")
+        self.assertAlmostEqual(FSR, (44e8 / 2e6) ** (1 / 3) * 6.894757, places=6)
+        self.assertAlmostEqual(FSR, 89.7, delta=0.1)
+        self.assertAlmostEqual(Fth, 10 * 6.894757)
+
+    def test_foundation_us_stability(self):
+        rows, info = found.block(2.5, 2.5, 1.5, 60, 45, 0.3, 0.45, 200, code="SA")
+        self.assertAlmostEqual(rows[0][2], 0.9 * info["W_kN"])                   # 0.9D + 1.0W
 
 
 class TestJoints(unittest.TestCase):

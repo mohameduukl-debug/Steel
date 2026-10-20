@@ -149,3 +149,16 @@ built on. It is not an independent example.
   χ_LT is 0.98–0.99 either way, so the published interaction values are reproduced. The handbook does not tabulate this M_cr.
 - **CHS plastic interaction.** The often-quoted M_N = M_pl(1 − n^1.7) is up to 5 % above the exact plastic
   capacity for n > 0.7. The tools now use cos(πn/2), the thin-tube exact curve.
+
+## `aisc_member.py` (SBC 306 route and `frame2d --code US|SA`; merged from the code-systems branch)
+
+| Tool | Case | Reference | Expected | Obtained | Tolerance | Test |
+|---|---|---|---|---|---|---|
+| `aisc_member.py` | W14×90, L_c = 15 ft, Fy 50 ksi, compression | AISC Manual Table 4-1a | φcPn = 1000 kips (4448 kN) | within 1.5 % | 1.5 % | `test_tools.TestCodeSystems.test_aisc_w14x90_manual_values` |
+| `aisc_member.py` | W14×90 noncompact flange (F3), short L_b | AISC Manual Table 3-2 | φbMn = 574 kip-ft | within 0.6 % | 1 % | same |
+| `aisc_member.py` | C_b on a linear diagram ψ = 0 and −1 | AISC 360 eq. F1-1 closed form | 12.5/7.5, 12.5/5.5 | exact | exact | `test_tools` (cb_linear) |
+| `aisc_member.py` | SBC 306 vs AISC, same column | φc 0.85 / 0.90 ratio | ratio of capacities | exact | exact | `test_tools` (code SA) |
+| `frame2d.py --code US` | pinned mast, α_cr < 3 | AISC App. 7: ELM not permitted, DAM governs; C2.2a 1/500 | DAM ≥ column curve, imperfection L/500 | match | exact | `test_tools.test_frame2d_aisc_design` |
+
+The US route of `member_check.py` (`--code US`) uses `check_aisc()` (23 AISC Design Examples above);
+`aisc_member.py` keeps the SBC 306 factors and the frame2d design.

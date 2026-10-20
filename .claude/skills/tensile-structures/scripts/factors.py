@@ -107,6 +107,23 @@ def sens_line(name: str, res: dict) -> str:
     return (f"  sensitivity {name}: " + ", ".join(f"util {u:.2f} at {v:g}" for v, u in pts) + f" -> {verdict}")
 
 
+CODES = ("EU", "US", "SA")
+
+
+def code(explicit: str | None = None, project: str | None = None) -> str:
+    """active design-code system: explicit argument > env TENSILE_CODE > project file '_code' > 'EU'."""
+    c = explicit or os.environ.get("TENSILE_CODE") or load(project).get("_code") or "EU"
+    c = c.upper()
+    if c not in CODES:
+        raise SystemExit(f"unknown code system '{c}' (EU, US, SA)")
+    return c
+
+
+def code_label(c: str) -> str:
+    return {"EU": "Eurocodes (EN)", "US": "US codes (ASCE 7 / AISC 360 / ASCE 55 / ACI 318)",
+            "SA": "Saudi Building Code (SBC 301/306/304/201, 2018 values)"}[c]
+
+
 def tag(path: str, project: str | None = None) -> str:
     """short printable provenance, e.g. 'gammaR=1.0 [V]'."""
     return f"{path.split('.')[-1]}={get(path, project)} [{status(path, project)}]"

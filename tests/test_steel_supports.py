@@ -371,7 +371,8 @@ class TestFrame3D(unittest.TestCase):
             for ei, (eu, qx, qy) in enumerate(fr.udl):
                 md.udl.append((eu, [qx, 0.0, qy]))
             r3 = F3.run(md, imp="none", quiet=True)
-            self.assertAlmostEqual(r3["alpha_cr"] / r2["alpha_cr"], 1.0, delta=1e-4)
+            # frame2d arch designs with min(FE, classical table); compare the FE eigenvalues of the two solvers
+            self.assertAlmostEqual(r3["alpha_cr"] / r2.get("alpha_cr_fe", r2["alpha_cr"]), 1.0, delta=1e-4)
             self.assertAlmostEqual(r3["first_order"]["ARCH"]["My"] / r2["first_order"]["ARCH"]["M_max"], 1.0, delta=1e-4)
             self.assertAlmostEqual(r3["first_order"]["ARCH"]["N_min"] / r2["first_order"]["ARCH"]["N_min"], 1.0, delta=1e-5)
             self.assertAlmostEqual(r3["reactions_first"][0][0] / r2["reactions"][0][0], 1.0, delta=1e-5)

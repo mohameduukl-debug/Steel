@@ -52,6 +52,7 @@ BOLT = {  # fyb, fub [MPa] (EN 1993-1-8 Table 3.1, EN ISO 3506); alpha_v for the
     "4.6": (240, 400, 0.6), "5.6": (300, 500, 0.6), "8.8": (640, 800, 0.6), "10.9": (900, 1000, 0.5),
     "A2-50": (210, 500, None), "A4-50": (210, 500, None), "A2-70": (450, 700, None), "A4-70": (450, 700, None),
     "A4-80": (600, 800, None),          # None -> aluminium.alpha_v_stainless_bolt from the register
+    "A325": (634, 827, 0.6), "A490": (896, 1034, 0.5),     # ASTM F3125 Gr. A325 / A490 (US, SA)
 }
 AS = {10: 58, 12: 84.3, 16: 157, 20: 245, 22: 303, 24: 353, 27: 459, 30: 561, 36: 817, 42: 1120, 48: 1470}
 # hexagon nut / head: width across flats s and across corners e_min (ISO 4032 / ISO 4014 product grade A) [mm]
@@ -114,6 +115,85 @@ def weld(F, angle, L, a, e, x, grade, sides=2, fu=None):
         row("simplified: F_w,Ed per length [N/mm]", fw, a * fvw, "4.5.3.3"),
     ], {"N_kN": N / 1e3, "V_kN": V / 1e3, "M_kNm": M / 1e6, "beta_w": bw, "fu": fu,
         "sig_perp": sig, "tau_perp": tau_p, "tau_par": tau_l, "Fw_Rd": a * fvw}
+
+
+def weld_aisc(F, angle, L, a, e, x, FEXX, sides=2, method="LRFD"):
+    """AISC 360-22 J2.4 fillet weld (linear weld group, in-plane): R_n per length = 0.6·F_EXX·(1 + 0.5·sin^1.5 θ)·a,
+    θ = angle of the resultant to the weld axis; φ = 0.75 / Ω = 2.00."""
+    k = g("aisc.phi_weld") if method == "LRFD" else 1 / g("aisc.Omega_weld")
+    N = F * 1e3 * math.sin(math.radians(angle))
+    V = F * 1e3 * math.cos(math.radians(angle))
+    M = V * e + N * x
+    n_max = N / (sides * L) + M / (sides * L ** 2 / 6)
+    v = V / (sides * L)
+    r = math.hypot(n_max, v)
+    th = math.atan2(abs(n_max), abs(v)) if r else 0.0
+    cap = k * 0.6 * FEXX * (1 + 0.5 * math.sin(th) ** 1.5) * a
+    return [row(f"fillet weld per length (θ = {math.degrees(th):.0f}°) [N/mm]", r, cap,
+                f"AISC 360-22 J2.4, F_EXX = {FEXX:g} MPa")], {"N_kN": N / 1e3, "V_kN": V / 1e3, "M_kNm": M / 1e6}
+
+
+def bolt_stresses(grade):
+    """AISC Table J3.2 nominal F_nt, F_nv (threads in N / excluded X) [MPa]."""
+    tab = g("aisc.bolt_F")
+    if grade in tab:
+        return tab[grade]["Fnt"], tab[grade]["Fnv_N"], tab[grade]["Fnv_X"]
+    fub = BOLT[grade][1]
+    return 0.75 * fub, 0.450 * fub, 0.563 * fub      # J3.2 threaded-part rule (F_nt = 0.75F_u, F_nv = 0.45/0.563F_u)
+
+
+def bolts_aisc(coords, Vx, Vy, M, N, d, grade, t, fu_p, e1, p1, threads, method="LRFD"):
+    """AISC 360-22 J3: bolt shear, tension, combined (J3-3a), bearing 2.4dtF_u and tearout 1.2l_c·t·F_u (J3.11)."""
+    k = g("aisc.phi_bolt") if method == "LRFD" else 1 / g("aisc.Omega_bolt")
+    n = len(coords)
+    cx = sum(c[0] for c in coords) / n
+    cy = sum(c[1] for c in coords) / n
+    Ip = sum((c[0] - cx) ** 2 + (c[1] - cy) ** 2 for c in coords)
+    Fv = max(math.hypot(Vx / n - (M * 1e3 * (y - cy) / Ip if Ip else 0.0),
+                        Vy / n + (M * 1e3 * (xx - cx) / Ip if Ip else 0.0)) for xx, y in coords)
+    Fnt, FnvN, FnvX = bolt_stresses(grade)
+    Fnv = FnvN if threads else FnvX
+    Ab = math.pi * d * d / 4
+    d0 = d + (2 if d < 24 else 3)                       # standard hole (J3.3, approx.)
+    lc = min(e1 - d0 / 2 if e1 else 9e9, p1 - d0 if p1 else 9e9)
+    Rb = min(2.4 * d * t * fu_p, 1.2 * lc * t * fu_p)
+    rows = [row(f"bolt shear ({grade}, F_nv = {Fnv:g} MPa) [kN]", Fv, k * Fnv * Ab / 1e3, "AISC J3.7"),
+            row(f"bearing / tearout t = {t:g} (l_c = {min(lc, 9e3):.0f} mm) [kN]", Fv, k * Rb / 1e3, "AISC J3.11")]
+    if N:
+        Ft = N / n
+        frv = Fv * 1e3 / Ab
+        Fnt_p = min(1.3 * Fnt - Fnt / (k * Fnv) * frv, Fnt)
+        rows += [row(f"bolt tension (F_nt = {Fnt:g} MPa) [kN]", Ft, k * Fnt * Ab / 1e3, "AISC J3.6"),
+                 row("tension with shear F'_nt (J3-3a) [kN]", Ft, k * max(Fnt_p, 0.0) * Ab / 1e3, "AISC J3.7")]
+    return rows, {"Fnt": Fnt, "Fnv": Fnv}
+
+
+def anchor_group_aci(n1, n2, s1, s2, c1, c2, hef, d, dh, grade, fc, Nu, cracked=True):
+    """ACI 318-19 Ch.17 (US) / SBC 304 Ch.17 (SA, ACI 318-14 base): cast-in headed anchors in tension.
+    Steel N_sa = A_se·f_uta, concrete breakout N_cbg (1.5h_ef projected areas), pullout N_pn = ψc,P·8·A_brg·f'c."""
+    fyb, fub, _ = BOLT[grade]
+    Ase = AS.get(int(d), 0.78 * math.pi * d * d / 4)
+    futa = min(fub, 1.9 * fyb, 860.0)                   # ACI 17.6.1.2
+    n = n1 * n2
+    Nsa = Ase * futa / 1e3
+    Nb = g("aci318.kc_cast") * math.sqrt(fc) * hef ** 1.5 / 1e3
+    c15 = 1.5 * hef
+    wx = min(c1, c15) + s1 * (n1 - 1) + min(c1, c15)
+    wy = min(c2, c15) + s2 * (n2 - 1) + min(c2, c15)
+    ANco = 9 * hef ** 2
+    ANc = min(wx * wy, n * ANco)
+    cmin = min(c1, c2)
+    psi_ed = 1.0 if cmin >= c15 else 0.7 + 0.3 * cmin / c15
+    psi_c = 1.0 if cracked else g("aci318.psi_cN_uncracked_cast")
+    Ncbg = ANc / ANco * psi_ed * psi_c * Nb
+    Abrg = math.pi / 4 * (dh ** 2 - d ** 2)
+    Npn = (1.0 if cracked else g("aci318.psi_cP_uncracked")) * g("aci318.pullout_coef") * Abrg * fc / 1e3
+    ps, pc, pp = g("aci318.phi_steel_tension"), g("aci318.phi_breakout_cast"), g("aci318.phi_pullout_cast")
+    rows = [row(f"steel per anchor (f_uta = {futa:.0f}, φ = {ps}) [kN]", Nu / n, ps * Nsa, "ACI 17.6.1"),
+            row(f"pullout per anchor (A_brg = {Abrg:.0f} mm², φ = {pp}) [kN]", Nu / n, pp * Npn, "ACI 17.6.3"),
+            row(f"concrete breakout, group (N_b = {Nb:.1f} kN, A_Nc/A_Nco = {ANc / ANco:.2f}, ψ_ed = {psi_ed:.2f}) [kN]",
+                Nu, pc * Ncbg, "ACI 17.6.2")]
+    return rows, {"Nb": Nb, "Ncbg": Ncbg, "Nsa": Nsa, "Npn": Npn}
 
 
 # ------------------------------------------------------------------ bolts
@@ -455,6 +535,62 @@ def baseplate(a):
     return rows, info
 
 
+def baseplate_aisc(a, method="LRFD"):
+    """AISC 360-22 J8 + Design Guide 1 (3rd ed.) base plate: concentric compression (bearing and plate thickness
+    from the cantilever ℓ = max(m, n, λn')), uplift (plate bending with b_eff = 2x, anchor steel per ACI 318
+    Ch. 17) and shear (friction μ = 0.55 under compression, else anchor steel in shear)."""
+    lrfd = method == "LRFD"
+    pc = g("aisc.phi_bearing") if lrfd else 1 / g("aisc.Omega_bearing")
+    pb = g("aisc.phi_b") if lrfd else 1 / g("aisc.Omega_b")
+    fc = a.fck
+    B, N = a.B, a.H                                     # plate width / length (N along the column depth)
+    A1 = B * N
+    A2 = a.A2 or A1
+    Pp = min(0.85 * fc * A1 * math.sqrt(min(A2 / A1, 4.0)), 1.7 * fc * A1) / 1e3
+    rows = []
+    info = {"Pp": Pp}
+    if a.Nc:
+        if a.col.upper() == "CHS":
+            m = n = (N - 0.8 * a.D) / 2
+            lam_n = 0.0
+            note = "round HSS: m = n = (N − 0.8D)/2"
+        else:
+            d, bf = a.hc, a.bf
+            m, n = (N - 0.95 * d) / 2, (B - 0.8 * bf) / 2
+            X = min(4 * d * bf / (d + bf) ** 2 * a.Nc / (pc * Pp), 1.0)
+            lam = min(2 * math.sqrt(X) / (1 + math.sqrt(1 - X)), 1.0)
+            lam_n = lam * math.sqrt(d * bf) / 4
+            note = f"I: m = (N − 0.95d)/2, n = (B − 0.8b_f)/2, λn' = {lam_n:.0f} mm"
+        ell = max(m, n, lam_n)
+        treq = ell * math.sqrt(2 * a.Nc * 1e3 / (pb * a.fy * B * N))
+        rows.append(row(f"concrete bearing (A2/A1 = {A2 / A1:.2f}) [kN]", a.Nc, pc * Pp, "AISC J8"))
+        rows.append(row(f"plate thickness for bearing (ℓ = {ell:.0f} mm) [mm]", treq, a.tp, "DG1 " + note))
+        info["t_req_c"] = treq
+    if a.Nt:
+        T = a.Nt / a.anchors
+        fyb, fub, _ = BOLT[a.anchor_grade]
+        Ase = AS.get(int(a.anchor_d), 0.78 * math.pi * a.anchor_d ** 2 / 4)
+        futa = min(fub, 1.9 * fyb, 860.0)
+        ps = g("aci318.phi_steel_tension")
+        treq_t = math.sqrt(2 * T * 1e3 / (pb * a.fy))        # M = T·x on b_eff = 2x (45° spread)
+        rows.append(row(f"anchor steel in tension (ACI 17.6.1, f_uta = {futa:.0f}) [kN/anchor]", T, ps * Ase * futa / 1e3,
+                        "ACI 318 / SBC 304"))
+        rows.append(row("plate bending from anchor tension (b_eff = 2x) [mm]", treq_t, a.tp, "DG1 §3.4"))
+    if a.V:
+        if a.Nc and not a.Nt:
+            mu = g("aisc.mu_grout")
+            rows.append(row(f"shear by friction μ = {mu} × compression (φ 0.75) [kN]", a.V, 0.75 * mu * a.Nc,
+                            "DG1 / ACI 349"))
+        else:
+            fyb, fub, _ = BOLT[a.anchor_grade]
+            Ase = AS.get(int(a.anchor_d), 0.78 * math.pi * a.anchor_d ** 2 / 4)
+            futa = min(fub, 1.9 * fyb, 860.0)
+            pv = g("aci318.phi_steel_shear")
+            rows.append(row("anchor steel in shear 0.6·A_se·f_uta (no friction with uplift) [kN]", a.V,
+                            a.anchors * pv * 0.6 * Ase * futa / 1e3, "ACI 17.7.1"))
+    return rows, info
+
+
 # ------------------------------------------------------------ EN 1992-4 anchors
 def _c(c):
     return INF if c is None else float(c)
@@ -650,6 +786,9 @@ def main(argv=None):
     w.add_argument("--grade", default="S355", choices=list(FU))
     w.add_argument("--fu", type=float, default=None, help="f_u of the weaker part [MPa] (default by grade)")
     w.add_argument("--sides", type=int, default=2)
+    w.add_argument("--code", choices=CF.CODES, default=None)
+    w.add_argument("--method", choices=["LRFD", "ASD"], default="LRFD")
+    w.add_argument("--FEXX", type=float, default=None, help="US/SA electrode strength [MPa] (default E70 = 482)")
 
     b = sp.add_parser("bolts", help="bolt group: shear, bearing, tension, punching, combined")
     b.add_argument("--n-rows", type=int, default=1)
@@ -670,6 +809,8 @@ def main(argv=None):
     b.add_argument("--e1", type=float, default=0.0, help="end distance along y (0 = no end) [mm]")
     b.add_argument("--e2", type=float, default=0.0, help="edge distance along x (0 = no edge) [mm]")
     b.add_argument("--shank", action="store_true", help="shear plane through unthreaded shank")
+    b.add_argument("--code", choices=CF.CODES, default=None)
+    b.add_argument("--method", choices=["LRFD", "ASD"], default="LRFD")
 
     gu = sp.add_parser("gusset", help="bolted gusset/corner plate: bolts, block tearing, Whitmore, buckling")
     gu.add_argument("--F", type=float, required=True, help="axial force [kN], + tension / - compression")
@@ -703,6 +844,7 @@ def main(argv=None):
     c.add_argument("--mode", choices=["shear", "tension"], default="shear")
     c.add_argument("--prying", type=float, default=1.3)
     c.add_argument("--peak", type=float, default=1.5, help="stress concentration factor at clamp line")
+    c.add_argument("--sensitivity", action="store_true", help="aluminium bearing over its [U] range")
     c.add_argument("--plate", choices=["steel", "alu6082"], default="steel",
                    help="bearing ply material (alu6082: EN 1999-1-1 Table 8.5, f_u and γM2 from the register)")
 
@@ -719,7 +861,8 @@ def main(argv=None):
     an.add_argument("--d", type=float, default=24.0)
     an.add_argument("--dh", type=float, default=None, help="head / washer plate diameter [mm] (default 1.9 d)")
     an.add_argument("--grade", default="8.8", choices=list(BOLT))
-    an.add_argument("--fck", type=float, default=30.0)
+    an.add_argument("--fck", type=float, default=30.0, help="EU f_ck / US-SA f'c (cylinder) [MPa]")
+    an.add_argument("--code", choices=CF.CODES, default=None)
     an.add_argument("--N", type=float, default=0.0, help="design tension on the group [kN]")
     an.add_argument("--uncracked", action="store_true")
     an.add_argument("--psi-re", type=float, default=1.0, help="shell spalling factor (0.5 + hef/200 ≤ 1 if dense reinforcement)")
@@ -772,10 +915,49 @@ def main(argv=None):
     p.add_argument("--Lb", type=float, default=None, help="anchor elongation length [mm] (default 8d+grout+tp+washer+0.4d)")
     p.add_argument("--grout", type=float, default=30.0, help="grout thickness for the default L_b [mm]")
     p.add_argument("--washer", type=float, default=5.0, help="washer thickness for the default L_b [mm]")
+    p.add_argument("--code", choices=CF.CODES, default=None, help="US/SA: AISC J8 + Design Guide 1, ACI 318 anchors")
+    p.add_argument("--method", choices=["LRFD", "ASD"], default="LRFD")
+    p.add_argument("--A2", type=float, default=None, help="US/SA: supporting concrete area A2 [mm²] (default A1)")
 
     a = ap.parse_args(argv)
     if a.factors:
         os.environ["TENSILE_FACTORS"] = a.factors
+    code = CF.code(getattr(a, "code", None)) if a.cmd in ("weld", "bolts", "anchor", "baseplate") else "EU"
+    if code == "SA" and getattr(a, "method", "LRFD") != "LRFD":
+        raise SystemExit("SBC 306 is LRFD only")
+    if code != "EU":
+        std = "SBC 306 / SBC 304 (AISC 360 / ACI 318 based; 2018 values [U])" if code == "SA" else "AISC 360-22 / ACI 318-19"
+        print(f"Code: {std}" + (f", {a.method}" if a.cmd != "anchor" else ""))
+        if a.cmd == "baseplate":
+            rows, info = baseplate_aisc(a, a.method)
+            print(f"Base plate {a.B:g}x{a.H:g}x{a.tp:g}, F_y = {a.fy:g} MPa on f'c = {a.fck:g} MPa; column {a.col}; "
+                  f"P_p = {info['Pp']:.0f} kN (AISC J8, φc {g('aisc.phi_bearing')} [C])")
+            print("Not included: moment (large-eccentricity) design, weld of column to plate, grout, pedestal reinforcement.")
+            if a.Nt:
+                print("Concrete breakout / pullout of the anchors: run `anchor --code US|SA` (ACI 318 Ch. 17).")
+            return report("", rows)
+        if a.cmd == "weld":
+            FEXX = a.FEXX or g("aisc.FEXX_E70")
+            rows, info = weld_aisc(a.F, a.angle, a.L, a.a, a.e, a.x, FEXX, a.sides, a.method)
+            print(f"Weld: {a.sides} x fillet throat {a.a:g} mm, L = {a.L:g} mm; N⊥ = {info['N_kN']:.1f} kN, "
+                  f"V∥ = {info['V_kN']:.1f} kN, M = {info['M_kNm']:.2f} kNm. Base metal (J4) separately.")
+            return report("", rows)
+        if a.cmd == "bolts":
+            coords = ([tuple(map(float, s_.split(":"))) for s_ in a.coords.split(";")] if a.coords
+                      else grid(a.n_rows, a.n_cols, a.p1, a.p2))
+            rows, R = bolts_aisc(coords, a.Vx, a.Vy, a.M, a.N, a.d, a.grade, a.t, a.fu_plate, a.e1, a.p1,
+                                 not a.shank, a.method)
+            print(f"{len(coords)} bolts d = {a.d:g} mm {a.grade}" + ("" if a.grade in ("A325", "A490") else
+                  " (EN grade: F_nt = 0.75F_u, F_nv = 0.45/0.563F_u rule)") + "; prying: design the plate separately")
+            return report("", rows)
+        dh = a.dh or 1.9 * a.d
+        rows, info = anchor_group_aci(a.n1, a.n2, a.s1, a.s2, a.c1, a.c2, a.hef, a.d, dh, a.grade, a.fck, a.N,
+                                      not a.uncracked)
+        print(f"{a.n1}x{a.n2} cast-in headed anchors d = {a.d:g} {a.grade}, h_ef = {a.hef:g} mm, f'c = {a.fck:g} MPa "
+              f"{'uncracked' if a.uncracked else 'cracked'}; k_c = {g('aci318.kc_cast')} SI [{CF.status('aci318.kc_cast')}]")
+        print("Not included: side-face blowout (c < 0.4h_ef), splitting, shear, seismic 0.75 factor, 3-edge h_ef "
+              "reduction; h_ef^(5/3) alternative for 280–635 mm (larger) not used.")
+        return report("", rows)
     print(f"Factors: {CF.tag('steel.gM0')}, {CF.tag('steel.gM2')}" + (f", {CF.tag('steel.gC')}" if a.cmd == "baseplate" else ""))
     if a.cmd == "weld":
         rows, info = weld(a.F, a.angle, a.L, a.a, a.e, a.x, a.grade, a.sides, a.fu)
@@ -816,6 +998,9 @@ def main(argv=None):
                 rows = [r for r in rows if not r[0].startswith("bearing")]
                 rows.append(row(f"bearing on aluminium 6082-T6 t={a.t:g} (f_u={fu_al}, γM2={gM2a}, k1={k1:.2f}, "
                                 f"αb={ab:.2f}) [kN]", F, FbA, f"EN 1999-1-1 T8.5 [{CF.status('aluminium.bearing_formula')}]"))
+                if a.sensitivity and CF.frange("aluminium.bearing_formula"):
+                    res = CF.sensitivity(lambda s_: F / (FbA * s_), "aluminium.bearing_formula")
+                    sens = CF.sens_line("aluminium bearing (scale on F_b,Rd)", res)
         else:
             rows, R = bolts([(0, 0)], 0, 0, 0, F, a.prying, a.d, a.grade, a.t, a.fu_plate, 3 * a.d, 1.5 * a.d, 0, 0, True)
         print(f"Clamp line: n={a.n} kN/m × peak {a.peak} × spacing {a.spacing:g} mm = {F:.2f} kN per bolt ({a.mode})")
@@ -824,7 +1009,11 @@ def main(argv=None):
         if a.spacing > 200:
             print("NOTE: TensiNet guidance: clamp bolt spacing hardly more than ~200 mm [V]")
         print("Aluminium clamp plate bending and keder pull-out: check to EN 1999-1-1 / by test separately.")
-        return report("", rows)
+        w = report("", rows)
+        if a.sensitivity:
+            print(locals().get("sens") or "  sensitivity: no uncertain factor in this check (EN 1999-1-1 Table 8.5 "
+                                          "bearing is a verified value)")
+        return w
     if a.cmd == "anchor":
         dh = a.dh or 1.9 * a.d
         rows, info = anchor_group(a.n1, a.n2, a.s1, a.s2, a.c1, a.c2, a.hef, a.d, dh, a.grade, a.fck, a.N,

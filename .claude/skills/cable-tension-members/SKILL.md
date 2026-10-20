@@ -28,6 +28,7 @@ python3 cable_calc.py rod    --d 36 --fy 460 --fu 610 --FEd 300 --d-shank 34 --A
 python3 cable_calc.py stress-turns --L 10 --EA 14000 --F1 5 --F2 20 --pitch 3.5 --w 0.02   # turnbuckle turns
 python3 cable_calc.py clamp  --dT 12 --nb 2 --bolt-d 16 [--Fp 60 --mu 0.15 --retained 0.6 --Fperp 5] --sensitivity
 python3 cable_calc.py saddle --T 400 --R 2.1 --d 40 --type FLC --delta 5 [--lined] --T2 380 --wrap 20 --Fr 100 --Fuk 1580
+python3 cable_calc.py resist --Fmin 367 --FEd 125 --T-asce 85 --code SA    # ASCE 19 governs (US, Saudi)
 python3 ../../tensile-connections/scripts/fatigue_check.py --cable spiral_socket --spectrum 60:2e6   # fatigue
 ```
 | Sub-command | Options | What it does |
@@ -66,6 +67,8 @@ product `gammaR_ETA`)), ASCE and SLS utilisation, slack check. `--envelope` take
 Product data: `reference/cable_products.json` — 112 entries (Ronstan, steelwirerope.com Galfan/stainless OSS and FLC,
 Teufelberger-Redaelli OSS/FLC/OSX/FLX, Pfeifer VVS 1, Carl Stahl I-SYS ETA, Macalloy 460), each with `source` URL and
 a `status` (V: read in the datasheet/ETA; U: computed/estimate). Replace with the supplier's ETA for design.
+`--code US|SA` marks ASCE 19 as the governing check; the default EU marks EN 1993-1-11. Both are always listed.
+Product data comes from `reference/cable_products.json` (tagged by source; replace it with the supplier's ETA).
 
 ## Key design rules
 **Resistance (EN 1993-1-11 6.2)** [V]: `F_Rd = min{F_uk/(1.5·γR); F_k/γR}`, `F_uk = F_min·k_e` (group B).

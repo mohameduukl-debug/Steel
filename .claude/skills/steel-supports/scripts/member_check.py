@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Steel member check to EN 1993-1-1 (default) or ANSI/AISC 360-16/360-22 (--code aisc)
-for CHS, RHS/SHS and I/H sections.
+"""Steel member check to EN 1993-1-1 (--code EU, default), ANSI/AISC 360-16/360-22 (--code US, LRFD or ASD) or
+SBC 306 (--code SA: AISC based, LRFD only, φc = 0.85 / φv = 0.90 per the 2018 AR text [U])
+for CHS, RHS/SHS and I/H sections. --code US runs check_aisc() in this file (validated against the AISC Design
+Examples); --code SA runs aisc_member.py with the SBC 306 factors. Legacy aliases: --code en = EU, aisc = US.
 
 For masts, struts, booms, arch segments (as straight members), edge beams and
 frames of tensile structures.
@@ -35,8 +37,9 @@ Examples
   python3 member_check.py --section SHS:150x8 --L 6 --N 300 --My 25 --Mz 10 --cold
   python3 member_check.py --section IPE300 --L 6 --N 50 --My 80 --Vz 60 --kLT 1.0 --psi-LT 0
   python3 member_check.py --section HEB200 --L 5 --N 600 --My 30 --ky 1 --kz 1
-  python3 member_check.py --code aisc --section I:359.7:369.9:12.3:19.8:15.2 --fy 345 --L 4.27 --N 1780 --My 339 --Mz 108
-  python3 member_check.py --code aisc --asd --section RHS:304.8x203.2x4.42:aisc --fy 345 --L 7.32 --ky 1 --kz 1 --N 300
+  python3 member_check.py --code US --section I:359.7:369.9:12.3:19.8:15.2 --fy 345 --L 4.27 --N 1780 --My 339 --Mz 108
+  python3 member_check.py --code US --method ASD --section RHS:304.8x203.2x4.42:aisc --fy 345 --L 7.32 --ky 1 --kz 1 --N 300
+  python3 member_check.py --section CHS:219.1x8 --L 7.5 --N 420 --My 12 --code SA --sensitivity   # SBC 306
   python3 member_check.py --list
 """
 from __future__ import annotations
@@ -955,17 +958,22 @@ def main(argv=None):
                     help="sway buckling mode about y (Cmy = 0.9); default auto if ky >= 2")
     ap.add_argument("--sway-z", dest="sway_z", action="store_true", default=None)
     ap.add_argument("--factors", default=None)
-    g = ap.add_argument_group("AISC 360-16/360-22 route (--code aisc)")
-    g.add_argument("--code", choices=["en", "aisc"], default="en", help="design code (default en = EN 1993-1-1)")
-    g.add_argument("--asd", action="store_true", help="ASD (Rn/Ω) instead of LRFD (φRn); forces = ASD combination")
+    g = ap.add_argument_group("code system: EU (EN 1993-1-1, default) | US (AISC 360-16/22) | SA (SBC 306)")
+    g.add_argument("--code", choices=list(CF.CODES) + ["en", "aisc"], default=None,
+                   help="EU | US | SA (default: TENSILE_CODE or EU); legacy: en = EU, aisc = US")
+    g.add_argument("--method", choices=["LRFD", "ASD"], default="LRFD", help="US: LRFD or ASD (SA: LRFD only)")
+    g.add_argument("--asd", action="store_true", help="same as --method ASD")
     g.add_argument("--fu", type=float, default=None, help="tensile strength Fu [MPa] for D2(b) rupture")
     g.add_argument("--An", type=float, default=None, help="net area An [mm²] for D2(b) (default Ag)")
     g.add_argument("--U", type=float, default=1.0, help="shear lag factor U (Table D3.1), Ae = U·An")
-    g.add_argument("--Cb", type=float, default=None, help="LTB modification factor Cb (default 1.0 or from --psi-LT)")
+    g.add_argument("--Lb", type=float, default=None, help="US/SA: unbraced length for LTB [m] (default kLT·L)")
+    g.add_argument("--Cb", type=float, default=None, help="US/SA: Cb (default 1.0, from --Cb-moments or --psi-LT)")
     g.add_argument("--Cb-moments", dest="Cb_moments", default=None,
                    help="Mmax,MA,MB,MC of the unbraced segment -> Cb from eq. (F1-1)")
     g.add_argument("--Lv", type=float, default=None, help="round HSS shear: distance max to zero shear [m] (G5)")
-    g.add_argument("--B1", action="store_true", help="amplify moments by App. 8 B1 (braced member, K1 = 1)")
+    g.add_argument("--B1", action="store_true", help="US: amplify moments by App. 8 B1 (braced member, K1 = 1)")
+    g.add_argument("--second-order", action="store_true", help="SA: moments are already second-order (B1 = 1)")
+    g.add_argument("--sensitivity", action="store_true", help="SA: re-check over the φc / φv ranges [U]")
     a = ap.parse_args(argv)
     if a.factors:
         os.environ["TENSILE_FACTORS"] = a.factors
@@ -983,8 +991,12 @@ def main(argv=None):
           f"Iy={sec.Iy / 1e4:.1f} Iz={sec.Iz / 1e4:.1f} cm⁴  Wpl,y={sec.Wpl_y / 1e3:.1f} Wpl,z={sec.Wpl_z / 1e3:.1f} cm³  "
           f"It={sec.It / 1e4:.2f} cm⁴" + (f"  Iw={sec.Iw / 1e6:.2f}e3 cm⁶" if sec.Iw else "") +
           f"  mass={sec.mass:.1f} kg/m")
-    if a.code == "aisc":
+    code = {"en": "EU", "aisc": "US"}.get(a.code, a.code)
+    code = CF.code(code)
+    if code == "US":
         return _main_aisc(a, sec)
+    if code == "SA":
+        return main_aisc(a, sec, code)
     print(f"Factors: {CF.tag('steel.gM0')}, {CF.tag('steel.gM1')}, {CF.tag('steel.E')}, {CF.tag('steel.G')};  "
           f"imperfection α [{CF.status('steel.imp_alpha')}], C1 table [{CF.status('steel.C1_end_moments')}];  "
           f"fy={a.fy:g} MPa, L={a.L} m")
@@ -1032,6 +1044,9 @@ def _main_aisc(a, sec):
     for i, psi in enumerate((a.psi_y, a.psi_z)):
         if cm[i] is None and psi is not None:
             cm[i] = _A("B1")["Cm"][0] + _A("B1")["Cm"][1] * psi        # (A-8-4), ψ = −M1/M2 sign convention
+    a.asd = a.asd or a.method == "ASD"
+    if a.Lb is not None:
+        a.kLT = a.Lb / a.L
     method = "ASD (Rn/Ω)" if a.asd else "LRFD (φRn)"
     print(f"Code: ANSI/AISC 360-16/360-22, {method}.  Factors: {CF.tag('aisc.E')}, {CF.tag('aisc.G')}; "
           f"φ/Ω [{CF.status('aisc.resistance')}], B4.1 limits [{CF.status('aisc.B4_1a')}/{CF.status('aisc.B4_1b')}], "
@@ -1051,6 +1066,30 @@ def _main_aisc(a, sec):
     ok = worst <= 1 and not bad
     print(f"Governing ratio {worst:.2f} -> {'OK' if ok else 'NOT OK'}")
     return worst, res
+def main_aisc(a, sec, code):
+    import aisc_member as AM
+    z = lambda v: 0.0 if v is None else v  # noqa: E731
+    kw = dict(Kx=a.ky, Ky=a.kz, Lb=a.Lb if a.Lb is not None else (a.kLT or a.kz) * a.L, Cb=a.Cb,
+              psi_x=z(a.psi_y), psi_y=z(a.psi_z), psi_LT=z(a.psi_LT), code=code, method=a.method, second_order=a.second_order)
+    # EN naming -> AISC: strong axis y -> x, weak z -> y; V_z (strong-axis shear) -> V_y
+    rows, info = AM.check(sec, a.fy, a.L, a.N, a.My, a.Mz, a.Vy, a.Vz, **kw)
+    f = info["factors"]
+    std = "SBC 306 (AISC 360 based; 2018 AR values)" if code == "SA" else "AISC 360-22"
+    print(f"{std} {f['label']}: φc/Ωc→{f['c']:.3f}, φb→{f['b']:.3f}, φv→{f['v']:.3f}; "
+          f"E = {CF.get('aisc.E'):g} MPa; Fy = {a.fy:g} MPa, L = {a.L} m")
+    w = AM.report(rows, "")
+    if code == "SA":
+        print("SBC 306-18: LRFD only; φc = 0.85, φv = 0.90 'in all cases' from the Arabic text [U] — confirm in the "
+              "English CR and the SBC 2024 edition.")
+    if code == "SA" and a.sensitivity:
+        gov = lambda **k: max(d / c for _, d, c, _ in AM.check(sec, a.fy, a.L, a.N, a.My, a.Mz, a.Vy, a.Vz,  # noqa
+                                                                **kw, **k)[0])
+        print(CF.sens_line("φc (SBC 306)", CF.sensitivity(lambda v: gov(phi_c=v), "sbc.phi_c_306")))
+        if a.Vy or a.Vz:
+            print(CF.sens_line("φv (SBC 306)", CF.sensitivity(lambda v: gov(phi_v=v), "sbc.phi_v_306")))
+    print("Notes: effective-length method with B1 (App. 8) unless --second-order; for the direct analysis method use "
+          "second-order moments with EI* = 0.8τbEI. Net-section rupture, connections and local effects separately.")
+    return w, info
 
 
 if __name__ == "__main__":

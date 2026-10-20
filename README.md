@@ -66,13 +66,22 @@ connection prompts and block `pin_connection.py`, `corner_plate.py`, `steel_join
 `steel_part_dxf.py` until a gate has passed in the last 24 h (`PRECEDENTS_SKIP=1` for re-checking an existing design).
 Worked example: `examples/precedents_corner_example.json` and
 `.claude/skills/connection-precedents/reference/worked-example-corner.md`.
+## Code systems: EU, US, Saudi
+Every tool that applies a code takes `--code EU|US|SA` (or `TENSILE_CODE`):
+- **EU:** Eurocodes and CEN/TS 19102.
+- **US:** ASCE 7-22, AISC 360-22 (LRFD/ASD), ASCE 55, ASCE 19 and ACI 318-19 Chapter 17.
+- **SA:** Saudi Building Code SBC 301/306/304/201. Values are from the 2018 edition; the 2024 edition is now
+  mandatory, so confirm them.
+
+`tensile-structures/scripts/loads.py` gives load combinations, wind reference pressure and factored cases for
+`run_cases.py`. See `.claude/skills/tensile-structures/reference/codes-eu-us-saudi.md`.
 
 ## Code factors
 Every code value (partial factors, stress factors, γR, k_e, SLS limits …) sits in one register,
 `.claude/skills/tensile-structures/reference/code_factors.json`, tagged V/C/U. Override it per project with
 `--factors project.json` or `TENSILE_FACTORS=project.json`. Run `factors.py report` to list unverified values.
 Each uncertain factor carries a `range`. The `--sensitivity` option (membrane_check, cable_calc, cable_schedule,
-fatigue_check) re-runs the check at both ends of the range and reports ROBUST (the decision does not depend on the
+fatigue_check, foundation_check, steel_joint_checks) re-runs the check at both ends of the range and reports ROBUST (the decision does not depend on the
 factor) or DEPENDS (confirm the value before issue).
 
 ## Using the skills in Claude Code
@@ -91,8 +100,13 @@ Claude loads `tensile-structures` first and then the specialist skills and tools
 * Catenary matches the parabola for small sag; T_B − T_A = w·h.
 * A flat (developable) panel flattens with zero strain and exact area.
 * Every generated DXF was opened with `ezdxf` recover/audit (0 errors) and rendered for visual checks.
+* frame2d reproduces exact classical buckling solutions: ring 4EI/R³ (dead) and 3EI/R³ (hydrostatic follower), and
+  two-hinged circular arches (π²/α² − 1)EI/R³, all within 0.1 %. For parabolic arches it differs by −0.5 … +8 %
+  from the Timoshenko & Gere table, so arch design uses the lower of the two α_cr values.
 * Cable force from frequencies recovers T and EI exactly. The Irvine correction recovers T when λ² ≈ 190 (the string
   model is 3.5× off) and reproduces Irvine's crossover ω̄ = 2π at λ² = 4π². ISO 898-1 stress areas match.
+* AISC 360 member checks reproduce AISC Manual values for a W14×90 (φcPn = 1000 kips at L_c = 15 ft; φbMn =
+  574 kip-ft). EN 1991-1-4 q_p matches c_e = 2.35 (terrain II, 10 m). ASCE 7 K_z matches the 7-22 and 7-16 tables.
 * The panel frequency reduces to the classical rectangular-membrane result when the added mass is zero.
 
 ## Important limitations

@@ -296,6 +296,15 @@ def cmd_resist(a):
                 "F_Ed is the ULS design force from a geometrically non-linear analysis; F_ser the characteristic force",
                 "ASCE 19 line: T = --T-asce, else F_Ed/1.4 as a rough unfactored force (give --T-asce)",
                 "group A tension rods are designed to EN 1993-1-1/1-8 (EN 1993-1-11 6.1): use the 'rod' sub-command")
+    code = F.code(getattr(a, "code", None))
+    if code == "EU":
+        gov = max(u for u in resist_utils(a) if u is not None)
+        print(f"  Code EU: EN 1993-1-11 governs -> util {gov:.2f} (ASCE 19 shown for information)")
+    else:
+        gov = a.asce * (a.T_asce or a.FEd / 1.4) / (a.Fmin * a.Nf)
+        print(f"  Code {code}: ASCE 19 governs (ASCE 55 §cables" + (", via SBC 201 §3102 — SBC has no cable chapter"
+              if code == "SA" else "") + f") -> util {gov:.2f}; give --T-asce = ASD-level tension "
+              "(else F_Ed/1.4 is assumed)")
     if getattr(a, "sensitivity", False):
         resist_sensitivity(a)
     return FRd_en
@@ -741,6 +750,7 @@ def main(argv=None):
     s.add_argument("--asce", type=float, default=None, help="ASCE 19 factor on T (register default 2.2)")
     s.add_argument("--T-asce", type=float, default=None, help="unfactored ASCE combination tension [kN]")
     s.add_argument("--Fmin-force", type=float, default=None, help="min. cable force in any combination [kN]")
+    s.add_argument("--code", choices=F.CODES, default=None, help="EU: EN 1993-1-11 governs; US/SA: ASCE 19")
 
     s = sp.add_parser("irvine")
     s.add_argument("--L", type=float, required=True)

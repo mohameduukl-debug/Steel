@@ -192,9 +192,16 @@ def main(argv=None):
                     help="with --aisc: eyebar body width w [mm] -> AISC D6 eyebar checks (b = --c-lug)")
     ap.add_argument("--eyebar-R", type=float, default=None, help="eyebar transition radius R [mm] (default d0 + 2b)")
     ap.add_argument("--factors", default=None, help="project code-factor file")
+    ap.add_argument("--code", choices=CF.CODES, default=None,
+                    help="US / SA: AISC 360 D5/J7 lug checks govern (SBC 306: LRFD only); EN pin checks kept")
     a = ap.parse_args(argv)
     if a.factors:
         os.environ["TENSILE_FACTORS"] = a.factors
+    code = CF.code(a.code)
+    if code != "EU":
+        a.aisc = True
+        if code == "SA" and a.method != "LRFD":
+            raise SystemExit("SBC 306 is LRFD only")
     Fser = a.Fser if a.Fser is not None else a.F / 1.4
     fork_t = a.fork_t if a.fork_t is not None else 0.6 * a.t
     if a.d0 < a.d:
@@ -214,12 +221,16 @@ def main(argv=None):
                      f"pin d={a.d} hole d0={a.d0} lug t={a.t} fork cheeks {fork_t:.1f} mm")
     if a.aisc:
         width = a.d0 + 2 * a.c_lug
-        report(aisc(a.F, a.d, a.d0, a.t, a.a_lug, width, a.fy, a.fu, a.method),
-               f"AISC 360 {a.method} lug checks (plate width at hole = {width:.0f} mm)")
+        wa = report(aisc(a.F, a.d, a.d0, a.t, a.a_lug, width, a.fy, a.fu, a.method),
+                    f"AISC 360 {a.method} lug checks (plate width at hole = {width:.0f} mm)"
+                    + (" — SBC 306 (AISC based)" if code == "SA" else ""))
         if a.eyebar_w:
             R = a.eyebar_R if a.eyebar_R else a.d0 + 2 * a.c_lug
             report(aisc_eyebar(a.F, a.d, a.d0, a.t, a.eyebar_w, a.c_lug, R, a.fy, a.method),
                    f"AISC 360 {a.method} eyebar D6 (body w = {a.eyebar_w:g} mm, b = {a.c_lug:g} mm, R = {R:g} mm)")
+        if code != "EU":
+            print(f"\nCode {code}: the AISC D5/J7 lug checks above govern the plate (util {wa:.2f}); the EN 1993-1-8 "
+                  "pin shear/bending/SLS rows are kept as the pin design method (AISC has no pin-bending rule).")
     print("\nNotes: fork (clevis) itself is a proprietary fitting — take its capacity from the "
           "manufacturer (matched to cable MBL). Check welds of the lug to the supporting member, "
           "out-of-plane eccentricity (lug must lie in the cable plane) and plate buckling of long "

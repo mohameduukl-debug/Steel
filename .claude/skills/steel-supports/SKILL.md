@@ -1,6 +1,6 @@
 ---
 name: steel-supports
-description: Structural steel supports of tensile fabric structures — masts (pinned, guyed, flying, tapered), struts, booms, arches, compression/tension rings, edge beams, frames, base hinges, base plates and foundations/ground anchors. Use to size and check steel members carrying membrane and cable forces (EN 1993-1-1 / AISC 360), run 2D/3D frame analysis with tension-only prestressed cables, α_cr and second-order effects with EN 1993-1-1 imperfections, choose base fixity, check gravity blocks and helical anchors, execution class (EN 1090-2) and pass reactions between membrane model and steel design.
+description: Structural steel supports of tensile fabric structures (EN 1993 / AISC 360 / SBC 306) — masts (pinned, guyed, flying, tapered), struts, booms, arches, compression/tension rings, edge beams, frames, base hinges, base plates and foundations/ground anchors. Use to size and check steel members carrying membrane and cable forces (EN 1993-1-1 / AISC 360 / SBC 306), run 2D/3D frame analysis with tension-only prestressed cables, α_cr and second-order effects with EN 1993-1-1 imperfections or the AISC direct analysis method, choose base fixity, check gravity blocks and helical anchors, execution class (EN 1090-2) and pass reactions between membrane model and steel design.
 ---
 
 # Steel supports for tensile structures
@@ -81,10 +81,41 @@ python3 member_check.py --code aisc --section I:450:190:9.4:14.6:21 --fy 345 --L
   E.10, F.1-1B/2B/3B (incl. C_b, L_p, L_r), F.6, F.7B, F.8A, F.9B, G.1B, G.4, G.5, G.6, H.1A and H.4. All are within
   0.6 %, except F.8B at +1.9 % (its hand calculation uses a simpler S_e; the tool matches the Manual-table value F.8A).
 
+## Code systems in `member_check.py`, `frame2d.py`, `foundation_check.py`: `--code EU|US|SA`
+`--code US` (alias `aisc`) runs the AISC 360-16/22 route of `member_check.py` (validated against 23 AISC Design
+Examples, see below and `reference/validation.md`). `--code SA` runs `scripts/aisc_member.py` with the SBC 306 factors.
+```bash
+python3 member_check.py --section CHS:219.1x8 --L 7.5 --N 420 --My 12 --code US                # LRFD
+python3 member_check.py --section CHS:219.1x8 --L 7.5 --N 420 --My 12 --code US --method ASD
+python3 member_check.py --section SHS:150x8 --L 6 --N 300 --My 25 --code SA --sensitivity       # SBC 306
+python3 member_check.py --section IPE300 --L 6 --N 50 --My 80 --Vz 60 --code US --Lb 3 --psi-LT 0
+```
+- E3 flexural buckling, E4 torsional buckling (I sections), E7 slender elements: round HSS A_e formula, and
+  effective widths for RHS walls and I flanges and webs.
+- F2/F3 (I: yielding, LTB with C_b, flange local buckling), F6 (minor axis), F7 (RHS flange/web local buckling,
+  LTB), F8 (round HSS).
+- G2.1/G4/G5/G6 shear.
+- H1-1 interaction with B1 = C_m/(1 − αP_r/P_e1) (Appendix 8) unless `--second-order`.
+- `aisc_member.py` (used for SA and by `frame2d --code US|SA`): AISC Manual W14×90, L_c = 15 ft: φcPn = 1000 kips
+  within 0.1 %; noncompact-flange φbMn = 574 kip-ft within 0.6 %.
+- **SBC 306-18 (Arabic text):** LRFD only, φc = 0.85 and φv = 0.90 "in all cases" [U]. `--sensitivity`
+  re-checks with the AISC values. Confirm against the English CR and the SBC 2024 edition.
+- **frame2d with `--code US|SA`** (arches, masts, frames). Two AISC methods are reported:
+  - (a) effective-length method: L_c from α_cr, first-order M with B1. Permitted only when α_cr ≥ 3
+    (Δ2nd/Δ1st ≤ 1.5, App. 7).
+  - (b) direct analysis method (C2/C3): second-order run with 0.8EI and a 1/500 mode-shaped imperfection,
+    K = 1 on the physical member length (the whole mast, the whole arch).
+  - Governing utilisation = lower of (a) and (b) when (a) is permitted, otherwise (b).
+  - For arches, (b) with K = 1 on the arc length is very conservative, so (a) normally governs.
+  - Example: `python3 frame2d.py arch --L 20 --f 4 --section CHS:219.1x8 --q 3.5 --check --Lz 5 --code SA`
+- Foundations: `foundation_check.py block --code US|SA` uses 0.9D + 1.0W (strength-level wind) and a sliding
+  φ = 0.8 [U]. `helical` is code-independent (manufacturer correlation plus a proof test).
+
 ## Tool: `scripts/frame2d.py` (planar: arches, tapered/guyed masts, frames: stability + second order)
 ```bash
 python3 frame2d.py arch --L 30 --f 6 --n 24 --section CHS:323.9x10 --q 12 --supports pinned --check --Lz 5
 python3 frame2d.py arch --L 30 --f 6 --shape circular --supports fixed --section CHS:273x10 --q 10 --check
+python3 frame2d.py arch --L 20 --f 4 --shape circular --section CHS:219.1x8 --p-normal 3.5     # follower pressure
 python3 frame2d.py mast --H 12 --D-base 219.1 --D-mid 323.9 --D-top 219.1 --t 8 --N 600 --Hlat 5 --check
 python3 frame2d.py mast --H 12 --N 400 --base pinned --guy 6:30000 --guy=-6:30000 --check      # guyed mast (two-way bars)
 python3 frame2d.py --input frame.json --check --out res                                        # any planar frame (reference §16)
@@ -97,6 +128,13 @@ python3 frame2d.py --input frame.json --check --out res                         
   (write `--guy=-6:...` for a negative offset), `--fy`, `--factors`.
 - Validated: Euler columns, beams, tan u/u, and Timoshenko & Gere arch γ (28.5, 45.4, 101) within 1.5–2.5 %
   (deep arches with f/L = 0.3: +5–6 %).
+
+- Loads: nodal and distributed loads are dead (they keep their direction). `--p-normal` (or `"pressure"` in the JSON) is a
+  follower pressure normal to the deforming member (membrane or wind pressure); its load stiffness enters the
+  buckling and second-order runs. Exact checks: ring 4EI/R³ (constant direction) and 3EI/R³ (hydrostatic),
+  two-hinged circular arches (π²/α² − 1)EI/R³, within 0.1 %.
+- Parabolic arches: frame2d lies −0.5 … +8 % from the Timoshenko & Gere (Dinnik) table; the `arch` command designs
+  with the lower of the FE and the classical α_cr and prints both.
 
 ## Tool: `scripts/mast_check.py` (quick CHS mast; same results as member_check for CHS)
 ```bash

@@ -1,6 +1,6 @@
 ---
 name: membrane-fabric
-description: Membrane fabric materials and membrane design for tensile structures — PVC-coated polyester (Types I–V), PTFE-coated glass, silicone-coated glass, ETFE foil, ePTFE (Tenara), mesh and shade cloth. Use to choose a fabric, get strength/stiffness/compensation data, set prestress, check membrane and seam stresses (stress-factor, FM DS 1-59, Japanese MLIT 666, German A-factors, CEN/TS 19102, French recommendations), corners, tear, panel frequency and ETFE foil, and handle load cases, ponding, wrinkling, fire and durability.
+description: Membrane fabric materials and membrane design for tensile structures — PVC-coated polyester (Types I–V), PTFE-coated glass, silicone-coated glass, ETFE foil, ePTFE (Tenara), mesh and shade cloth. Use to choose a fabric, get strength/stiffness/compensation data, set prestress, check membrane and seam stresses (stress-factor, FM DS 1-59, Japanese MLIT 666, German A-factors, CEN/TS 19102, French recommendations, ASCE 55 for US and Saudi SBC 201), corners, tear, panel frequency and ETFE foil, and handle load cases, ponding, wrinkling, fire and durability.
 ---
 
 # Membrane fabric design
@@ -38,6 +38,7 @@ temperature (short-term, warm).
 | `japan` | Fm/K | characteristic | MLIT 666: Fm/8 long-term, Fm/4 short-term, Fm/5 folded (`--folded`), Fm/10 and Fm/5 for narrow joints (`--japan-joint narrow`) [V, primary text]. Fm = designated standard strength. No extra seam efficiency (the joint class is in the divisor). |
 | `partial` | f_k/(γM·ΠA) | design (factored) | German A-factors by situation: long-term γM·A0·A1·A2·A3, wind γM·A0·A2, temperature γM·A0·A2·A3; γM 1.4 fabric, 1.5 seams. PES/PVC [V, JRC132615 Code Review 20]; glass/PTFE and other [U] |
 | `ts19102` | f_k/(γM·kbiax·kage·kdur·ktemp·ksize) | design (factored) | PES/PVC values from the JRC 2025 worked examples [V, quoted in the slides and in JRC report JRC144386; the TS Annex C.3 table itself not read]: γM0 1.4, γM2 1.5 (seams), kage 1.4, kdur P/L/M 1.8/1.7/1.2, ktemp,70 2.0 (the upper of two published sets). `--family alt_set_PES/PVC` = the lower set (kage 1.25, kdur 1.6/1.5/1.15, ktemp,70 1.5, γM 1.5); `--sensitivity` scales the k-product 0.6–1.0. `--ts-snow L` for snow above 1000 m. Other families: add the values with `--factors`. |
+| `asce55` (US; Saudi via SBC 201 §3102.1.1; default for `--code US\|SA`) | T_r = β·L_t·T_s per direction + biaxial 0.8·β·L_t·(T_sw + T_sf) ≥ T_fw + T_ff | ASD-level (unfactored combination): `loads.py make-cases --set membrane` | β 0.17 (P+D), 0.27 (P+D+S/Lr), 0.33 (P+D+W), 0.27 (P+D+T); L_t 0.75 permanent, ≤ 0.6 `--handled`; seams by `--seam-type heat\|adhesive\|sewn\|sewn-protected` (×1.0/0.5/0.6/0.9 of L_t, replaces `--seam-eff`) [ASCE 55-10; 55-16 not verified]. SBC also requires a noncombustible membrane or NFPA 701 |
 | `french` | kq·ke·Trm/γt | per the French combinations | γt 4 / 4.5 (`--pollution`), ke = (50/S)^(1/15) (`--area` or `--ke`), kq 1 / 0.8 (`--kq`) [V, JRC132615 Code Review 21] |
 
 Strength input:

@@ -22,6 +22,11 @@ Methods (--method)
   french   French recommendations (JRC132615 Code Review 21): TD = kq·ke·Trm/γt, γt 4 (medium) / 4.5 (heavy
            pollution), ke = (50/S)^(1/15) for S > 50 m², kq = 1 (0.8 without certified quality control);
            corner/attachment check TD = kq·neff·Trm/γtloc with γtloc = 5
+  asce55   ASCE 55 (US; Saudi via SBC 201 §3102.1.1): T_r = β·L_t·T_s ≥ T_f per direction and
+           0.8·β·L_t·(T_sw + T_sf) ≥ T_fw + T_ff; β = 0.17 (P+D), 0.27 (P+D+S/Lr), 0.33 (P+D+W),
+           0.27 (P+D+T) [ASCE 55-10 Table 4-2]; L_t = 0.75 permanent, 0.6 handled; seams by type
+           (heat-sealed 1.0, adhesive 0.5, sewn 0.6, sewn protected 0.9 of L_t; replaces --seam-eff). Stresses at
+           ASD load level (loads.py combos --set membrane). Default method for --code US and SA.
 
 Strength basis: factor/fm/french use the datasheet (mean / nominal) strip strength; partial/ts19102 need the
 characteristic 5 % value f_k: taken from the library (fk_w/fk_f) or from --vx (f_k = f·(1 − 1.64·Vx));
@@ -69,7 +74,7 @@ CASES = {"prestress": "long", "dead": "long", "snow": "long", "live": "long",
 # design situation used by the partial-factor formats (German A-factors, CEN/TS 19102, ETFE Outlook 44)
 SITUATION = {"prestress": "permanent", "dead": "permanent", "snow": "long", "live": "long",
              "wind": "short", "installation": "short", "temperature": "warm"}
-METHODS = ["factor", "fm", "japan", "partial", "ts19102", "french"]
+METHODS = ["factor", "fm", "japan", "partial", "ts19102", "french", "asce55"]
 
 sys.path.insert(0, os.path.join(HERE, "..", "..", "tensile-structures", "scripts"))
 import factors as F  # noqa: E402  central code-factor register (V/C/U tagged)
@@ -101,7 +106,7 @@ def factor_key(method, case, family=None):
         return f"membrane.partial.{fam}" if "range" in p else "membrane.partial"
     return {"factor": f"membrane.stress_factor_{dur}", "fm": None,
             "japan": f"membrane.japan_{dur}_divisor", "ts19102": "membrane.ts19102",
-            "french": "membrane.french_gamma_t"}[method]
+            "french": "membrane.french_gamma_t", "asce55": None}[method]
 
 
 def french_ke(area=None, ke=None):
@@ -114,7 +119,29 @@ def french_ke(area=None, ke=None):
     return 1.0 if area <= s0 else (s0 / area) ** (1.0 / 15.0)
 
 
-def allowable(f, method, case, family, sf_short=None, sf_long=None, fm_combo="P+D+W", override=None, opts=None):
+ASCE55_OPTS = {"handled": False, "seam": "heat"}     # set from the CLI (--handled, --seam-type)
+ASCE55_COMBO = {"prestress": "P+D", "dead": "P+D", "snow": "P+D+S", "live": "P+D+S", "wind": "P+D+W",
+                "temperature": "P+D+T", "installation": "P+D+W"}
+
+
+def asce55_factor(case, handled=False, seam=None, combo_type=None):
+    """β·L_t (× seam fraction) and its description for the ASCE 55 method."""
+    ct = combo_type or ASCE55_COMBO[case]
+    beta = F.get("asce55.beta")[ct]
+    Lt = F.get("asce55.Lt_handled" if handled else "asce55.Lt_permanent")
+    k = F.get("asce55.seam_Lt_factor")[seam] if seam else 1.0
+    return beta * Lt * k, (f"β {beta} ({ct}) × L_t {Lt}" + (f" × seam {seam} {k}" if seam else "")
+                           + f" = {beta * Lt * k:.3f} [{F.status('asce55.beta')}, ASCE 55-10]")
+
+
+def biaxial_util(nw, nf, fw, ff, case, combo_type=None):
+    """ASCE 55 biaxial rule: (T_fw + T_ff) / (0.8·β·L_t·(T_sw + T_sf))."""
+    k, _ = asce55_factor(case, ASCE55_OPTS["handled"], None, combo_type)
+    return (nw + nf) / (F.get("asce55.biaxial") * k * (fw + ff))
+
+
+def allowable(f, method, case, family, sf_short=None, sf_long=None, fm_combo="P+D+W", override=None, opts=None,
+              handled=None, seam=None, combo_type=None):
     """allowable membrane stress [kN/m] for strip strength f [kN/m]; factors not given come from the register.
 
     override = {register key: value} replaces a register value (used by --sensitivity; for tables such as
@@ -146,6 +173,11 @@ def allowable(f, method, case, family, sf_short=None, sf_long=None, fm_combo="P+
         k = ov.get(key, F.get(key))
         return f / k, (f"Fm/{k:g} ({dur}-term, joint {'narrow' if narrow else 'wide/none'}"
                        f"{', folded' if o.get('folded') and dur == 'short' else ''}) [{F.status(key)}]")
+    if method == "asce55":
+        hd = handled if handled is not None else o.get("handled", ASCE55_OPTS["handled"])
+        sm = seam if seam is not None else (ASCE55_OPTS["seam"] if o.get("joint") else None)
+        k, txt = asce55_factor(case, hd, sm, combo_type or o.get("combo_type"))
+        return f * k, txt
     if method == "partial":
         fam, p = _partial_table(family)
         sub = f"membrane.partial.{fam}"
@@ -200,8 +232,9 @@ def env_case(r):
 
 
 def _seam_eff(method, seam_eff):
-    """the Japanese table already sets the divisor by joint class -> no extra seam efficiency."""
-    return 1.0 if method == "japan" else seam_eff
+    """the Japanese table sets the divisor by joint class and ASCE 55 uses the seam-type L_t fraction
+    -> no extra seam efficiency for these two methods."""
+    return 1.0 if method in ("japan", "asce55") else seam_eff
 
 
 def envelope_utils(env, fw, ff, method, family, seam_eff, sf_short=None, sf_long=None, override=None, opts=None):
@@ -210,14 +243,20 @@ def envelope_utils(env, fw, ff, method, family, seam_eff, sf_short=None, sf_long
     se = _seam_eff(method, seam_eff)
     for r in env["summary"]:
         case, combo = env_case(r)
+        ct = r.get("combo_type") if method == "asce55" else None
         nw_, nf_ = r.get("warp_max") or 0.0, r.get("weft_max") or 0.0
-        aw, _ = allowable(fw, method, case, family, sf_short, sf_long, combo, override, opts)
-        af, _ = allowable(ff, method, case, family, sf_short, sf_long, combo, override, opts)
+        o2 = dict(opts or {}, combo_type=ct)
+        aw, _ = allowable(fw, method, case, family, sf_short, sf_long, combo, override, o2)
+        af, _ = allowable(ff, method, case, family, sf_short, sf_long, combo, override, o2)
         uf = max(nw_ / aw, nf_ / af)
-        js = dict(opts or {}, joint=True)
+        js = dict(o2, joint=True)
         aws, _ = allowable(fw * se, method, case, family, sf_short, sf_long, combo, override, js)
         afs, _ = allowable(ff * se, method, case, family, sf_short, sf_long, combo, override, js)
-        out.append((r, r.get("duration", "short"), nw_, nf_, uf, max(nw_ / aws, nf_ / afs)))
+        us = max(nw_ / aws, nf_ / afs)
+        if method == "asce55":
+            ub = biaxial_util(nw_, nf_, fw, ff, case, ct)
+            uf, us = max(uf, ub), max(us, ub)
+        out.append((r, r.get("duration", "short"), nw_, nf_, uf, us))
     return out
 
 
@@ -234,8 +273,12 @@ def point_utils(nw, nf, fw, ff, method, case, family, seam_eff, seam_dir="both",
         if seam_dir in (name, "both"):
             al_s, basis_s = allowable(f * se, method, case, family, sf_short, sf_long, fm_combo, override,
                                       dict(opts or {}, joint=True))
-            tag = "joint in divisor" if method == "japan" else f"eff {se:g}"
+            tag = {"japan": "joint in divisor", "asce55": f"seam type {ASCE55_OPTS['seam']}"}.get(method, f"eff {se:g}")
             rows.append((f"seam (stress {name}, {tag})", n, al_s, basis_s))
+    if method == "asce55" and nw is not None and nf is not None:
+        k, _ = asce55_factor(case, (opts or {}).get("handled", ASCE55_OPTS["handled"]))
+        rows.append(("biaxial 0.8·β·L_t·(T_sw+T_sf)", nw + nf, F.get("asce55.biaxial") * k * (fw + ff),
+                     f"ASCE 55-10 §4.6.1 [{F.status('asce55.biaxial')}]"))
     return rows
 
 
@@ -394,7 +437,12 @@ def main(argv=None):
     ap.add_argument("--nf", type=float, help="max weft stress from analysis [kN/m]")
     ap.add_argument("--nmin", type=float, default=None, help="min principal stress (slack check) [kN/m]")
     ap.add_argument("--case", choices=list(CASES), default="wind")
-    ap.add_argument("--method", choices=METHODS, default="factor")
+    ap.add_argument("--method", choices=METHODS, default=None,
+                    help="design basis (default: factor for --code EU, asce55 for US and SA)")
+    ap.add_argument("--code", choices=F.CODES, default=None, help="code system EU | US | SA (env TENSILE_CODE)")
+    ap.add_argument("--seam-type", choices=["heat", "adhesive", "sewn", "sewn-protected"], default="heat",
+                    help="ASCE 55 seam type (L_t fraction, Table 4-1)")
+    ap.add_argument("--handled", action="store_true", help="ASCE 55: repeatedly handled / demountable (L_t ≤ 0.6)")
     ap.add_argument("--sf-short", type=float, default=None, help="override short-term stress factor")
     ap.add_argument("--sf-long", type=float, default=None, help="override long-term stress factor")
     ap.add_argument("--factors", default=None, help="project code-factor file (overrides register)")
@@ -441,8 +489,17 @@ def main(argv=None):
         os.environ["TENSILE_FACTORS"] = a.factors
     if a.seam_eff is None:
         a.seam_eff = F.get("membrane.seam_efficiency")
+    a.code = F.code(a.code)
+    if a.method is None:
+        a.method = "factor" if a.code == "EU" else "asce55"
+    ASCE55_OPTS.update(handled=a.handled, seam=a.seam_type)
+    if a.code == "SA":
+        print("Code: SBC 201-18 §3102.1.1 -> ASCE 55; membrane noncombustible or NFPA 701 (§3102.3.1); "
+              "2018 values, confirm against SBC 2024 [U].")
+    elif a.code == "US":
+        print("Code: ASCE 55 (β·L_t method; values from ASCE 55-10 — 55-16 not verified).")
     opts = {"japan_joint": a.japan_joint, "folded": a.folded, "ts_snow": a.ts_snow, "area": a.area, "ke": a.ke,
-            "kq": a.kq, "pollution": a.pollution}
+            "kq": a.kq, "pollution": a.pollution, "handled": a.handled}
     notes = []
 
     lib = load_lib()
@@ -650,7 +707,9 @@ def _method_notes(a, notes):
                       "Diadema: 1.25, 1.6/1.5/1.15, 1.5 = --family alt_set_PES/PVC; --sensitivity covers the "
                       "spread) — confirm against the published TS Annex C.3 and the National Annex",
            "french": "French recommendations; TC = stress under the recommendation's combinations (the JRC 2025 "
-                     "example applies 1.5 to the characteristic stress); Trm = mean strength"}[a.method]
+                     "example applies 1.5 to the characteristic stress); Trm = mean strength",
+           "asce55": "ASCE 55-10 β·L_t on ASD-level (unfactored combination) stresses, with the biaxial 0.8 rule; "
+                     "seams by seam type (L_t fraction) instead of --seam-eff; ASCE 55-16 values not verified"}[a.method]
     notes.append(f"method: {txt}")
 
 
